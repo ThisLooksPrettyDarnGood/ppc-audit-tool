@@ -40,9 +40,13 @@ def build_client(creds):
         "login_customer_id": MCC_CID.replace("-", ""),
         "use_proto_plus": True,
     }
-    secret_data = json.loads(Path(CREDENTIALS_PATH).read_text())["installed"]
-    config["client_id"] = secret_data["client_id"]
-    config["client_secret"] = secret_data["client_secret"]
+    if os.path.exists(CREDENTIALS_PATH):
+        secret_data = json.loads(Path(CREDENTIALS_PATH).read_text())["installed"]
+        config["client_id"] = secret_data["client_id"]
+        config["client_secret"] = secret_data["client_secret"]
+    else:
+        config["client_id"] = os.environ.get("GOOGLE_CLIENT_ID", "")
+        config["client_secret"] = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     config["refresh_token"] = creds.refresh_token
     return GoogleAdsClient.load_from_dict(config, version="v21")
 
