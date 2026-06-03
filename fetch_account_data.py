@@ -371,13 +371,13 @@ def get_performance_summary(client, cid):
         t["sis"]  = round(t["sis_sum"] / t["sis_count"] * 100, 1) if t["sis_count"] > 0 else None
         return t
 
+    # Core metrics — no SIS (works for all campaign types including PMax)
     gaql_30d = """
         SELECT
             metrics.cost_micros,
             metrics.clicks,
             metrics.conversions,
-            metrics.impressions,
-            metrics.search_impression_share
+            metrics.impressions
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND segments.date DURING LAST_30_DAYS
@@ -387,10 +387,24 @@ def get_performance_summary(client, cid):
             metrics.cost_micros,
             metrics.clicks,
             metrics.conversions,
-            metrics.impressions,
-            metrics.search_impression_share
+            metrics.impressions
         FROM campaign
         WHERE campaign.status != 'REMOVED'
+          AND segments.date DURING LAST_12_MONTHS
+    """
+    # SIS — Search campaigns only (PMax doesn't support this metric)
+    gaql_sis_30d = """
+        SELECT metrics.search_impression_share
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND campaign.advertising_channel_type = 'SEARCH'
+          AND segments.date DURING LAST_30_DAYS
+    """
+    gaql_sis_12m = """
+        SELECT metrics.search_impression_share
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND campaign.advertising_channel_type = 'SEARCH'
           AND segments.date DURING LAST_12_MONTHS
     """
 
@@ -399,6 +413,23 @@ def get_performance_summary(client, cid):
 
     t30 = _totals(rows_30d)
     t12 = _totals(rows_12m)
+
+    # Overlay SIS separately — safe to fail
+    try:
+        for row in run_query(client, cid, gaql_sis_30d):
+            sis = row.metrics.search_impression_share
+            if sis and sis > 0:
+                t30["sis_sum"] += sis
+                t30["sis_count"] += 1
+        t30["sis"] = round(t30["sis_sum"] / t30["sis_count"] * 100, 1) if t30["sis_count"] > 0 else None
+        for row in run_query(client, cid, gaql_sis_12m):
+            sis = row.metrics.search_impression_share
+            if sis and sis > 0:
+                t12["sis_sum"] += sis
+                t12["sis_count"] += 1
+        t12["sis"] = round(t12["sis_sum"] / t12["sis_count"] * 100, 1) if t12["sis_count"] > 0 else None
+    except Exception as e:
+        print(f"  ⚠ SIS query failed (non-fatal): {e}")
 
     return {
         "spend_30d":  f"£{t30['spend']:,.2f}",

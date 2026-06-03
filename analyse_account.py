@@ -36,6 +36,7 @@ def analyse_account(data):
         "bidding_strategy":    score_bidding_strategy(data),
         "summary_stats":       build_summary_stats(data),
         "account_type":        account_type,
+        "performance_summary": data.get("performance_summary", {}),
     }
     return findings
 
