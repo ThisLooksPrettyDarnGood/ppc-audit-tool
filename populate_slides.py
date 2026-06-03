@@ -5,12 +5,15 @@ Reads narrative_output.json and populates the PPC Team Google Slides
 template with the generated audit content.
 """
 
+import io
 import os
 import json
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+from fetch_logo import fetch_logo_bytes
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
 
@@ -88,6 +91,60 @@ def pick_dial(issues: list) -> str:
         key = "dial_dark_green"
     return _DIAL_CONFIG.get(key, {}).get("url", "")
 
+# Object ID of the logo placeholder image on slide 1 (white box, bottom-right)
+LOGO_IMAGE_OBJECT_ID = "g3d59bf3fc16_0_9"
+
+
+def _insert_logo(slides_service, drive_service, presentation_id: str,
+                 img_bytes: bytes, content_type: str) -> bool:
+    """
+    Upload logo bytes to Drive, make public, then use replaceImage to swap
+    the logo placeholder on slide 1. Cleans up the temp Drive file afterwards.
+    """
+    drive_file_id = None
+    try:
+        ext = "png" if "png" in content_type else ("ico" if "ico" in content_type else "jpg")
+        media = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=content_type, resumable=False)
+        uploaded = drive_service.files().create(
+            body={"name": f"_ppc_audit_logo_tmp.{ext}"},
+            media_body=media,
+            fields="id",
+        ).execute()
+        drive_file_id = uploaded["id"]
+
+        drive_service.permissions().create(
+            fileId=drive_file_id,
+            body={"role": "reader", "type": "anyone"},
+        ).execute()
+
+        logo_url = f"https://drive.google.com/uc?id={drive_file_id}&export=download"
+        print(f"  Logo uploaded to Drive (id={drive_file_id})")
+
+        slides_service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={"requests": [{
+                "replaceImage": {
+                    "imageObjectId":      LOGO_IMAGE_OBJECT_ID,
+                    "imageReplaceMethod": "CENTER_INSIDE",
+                    "url":                logo_url,
+                },
+            }]},
+        ).execute()
+        print("  Logo placeholder replaced.")
+        return True
+
+    except Exception as e:
+        print(f"  ⚠ Logo insertion failed: {e}")
+        return False
+
+    finally:
+        if drive_file_id:
+            try:
+                drive_service.files().delete(fileId=drive_file_id).execute()
+            except Exception:
+                pass
+
+
 SECTION_NAMES = [
     "Conversion Tracking",
     "Account Structure",
@@ -130,6 +187,7 @@ def main():
     objectives    = data.get("objectives", {})
     takeaways     = data.get("takeaways", [])
     opportunities = data.get("key_opportunities", "")
+    website_url   = data.get("website_url", "")
 
     print(f"Loaded narrative for: {client_name} (CID: {account_cid})")
     print(f"Issues found: {len(issues)}")
@@ -239,6 +297,18 @@ def main():
             print(f"  ⚠ Could not swap dial image: {e}")
     else:
         print("  ⚠ No dial config found — skipping image swap.")
+
+    # ── Insert client logo on slide 1 ─────────────────────────────────────────
+    if website_url:
+        print(f"Fetching client logo from: {website_url}")
+        img_bytes, content_type = fetch_logo_bytes(website_url)
+        if img_bytes:
+            print(f"  Logo downloaded ({len(img_bytes)} bytes, {content_type})")
+            _insert_logo(slides_service, drive_service, new_id, img_bytes, content_type)
+        else:
+            print("  ⚠ Could not download a logo — skipping.")
+    else:
+        print("  ⚠ No website URL in narrative — skipping logo.")
 
     replaced = sum(
         r.get("replaceAllTextResponse", {}).get("occurrencesChanged", 0)

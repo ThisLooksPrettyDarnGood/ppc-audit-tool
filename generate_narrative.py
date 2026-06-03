@@ -423,6 +423,7 @@ Rules:
 - objectives_text: List their main objectives as a short, readable sentence or comma-separated list. Start with "To ". E.g. "To increase lead volume, improve lead quality, and reduce cost per acquisition."
 - success_metric: One punchy sentence on what success looks like to them. E.g. "3 good appointments a day at a sustainable CPA."
 - pain_points_text: Summarise their challenges in 1–2 short sentences. Be empathetic but factual. E.g. "Campaign performance has dropped recently and the team lacks the time and expertise to diagnose why."
+- website_url: Extract the client's website URL exactly as written. Include the full URL with protocol if present. If not found, leave blank.
 - Use British English spelling.
 - Keep it concise — this is slide copy, not a report.
 
@@ -430,6 +431,7 @@ Respond in EXACTLY this format (no extra text, no markdown):
 OBJECTIVES: <objectives text>
 SUCCESS_METRIC: <success metric text>
 PAIN_POINTS: <pain points text>
+WEBSITE_URL: <full website URL or blank>
 """.strip()
 
     system = (
@@ -449,6 +451,7 @@ PAIN_POINTS: <pain points text>
         "objectives_text":  lines.get("OBJECTIVES", ""),
         "success_metric":   lines.get("SUCCESS_METRIC", ""),
         "pain_points_text": lines.get("PAIN_POINTS", ""),
+        "website_url":      lines.get("WEBSITE_URL", ""),
     }
 
 
@@ -579,16 +582,17 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         perf_commentary = ""
 
     return {
-        "client_name": client_name,
-        "account_cid": findings.get("account_cid", ""),
-        "overall_rag": overall_rag,
-        "issues": issues,
+        "client_name":       client_name,
+        "account_cid":       findings.get("account_cid", ""),
+        "overall_rag":       overall_rag,
+        "issues":            issues,
         "executive_summary": exec_sum,
-        "objectives": objectives,
+        "objectives":        objectives,
         "key_opportunities": opps,
-        "takeaways": takeaways,
+        "takeaways":         takeaways,
         "performance_summary": perf,
-        "perf_commentary": perf_commentary,
+        "perf_commentary":   perf_commentary,
+        "website_url":       objectives.get("website_url", ""),
     }
 
 
