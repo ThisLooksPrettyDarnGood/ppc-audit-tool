@@ -82,14 +82,42 @@ def prepare_credentials():
 st.title("📊 PPC Team — Audit Generator")
 st.markdown("Fill in the details below and click **Run Audit** to generate the Google Slides deck.")
 
+# ── Dashboard stats ───────────────────────────────────────────────────────────
+try:
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request as _Request
+    import audit_log as _al
+
+    _sheet_id = os.environ.get("AUDIT_LOG_SHEET_ID", "")
+    if _sheet_id:
+        _token_path = os.path.join(TOOL_DIR, "token.json")
+        if os.path.exists(_token_path):
+            _scopes = [
+                "https://www.googleapis.com/auth/presentations",
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/spreadsheets",
+            ]
+            _creds = Credentials.from_authorized_user_file(_token_path, _scopes)
+            if _creds.expired and _creds.refresh_token:
+                _creds.refresh(_Request())
+            _stats = _al.get_stats(_creds)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Audits today",        _stats["audits_today"])
+            col2.metric("Total audits",         _stats["total_audits"])
+            col3.metric("Hours saved this month", f"{_stats['hours_saved_month']}h")
+            col4.metric("Hours saved total",    f"{_stats['hours_saved_total']}h")
+            st.markdown("---")
+except Exception:
+    pass
+
 with st.form("audit_form"):
     client_name = st.text_input(
         "Client Name",
-        placeholder="e.g. KPCB Ltd",
+        placeholder="e.g. Kents Premier Coins & Bullion",
     )
     client_cid = st.text_input(
         "Client CID",
-        placeholder="e.g. 981-476-6301",
+        placeholder="e.g. 539-263-1535",
     )
 
     st.markdown("---")
@@ -129,6 +157,9 @@ if submitted:
         progress_bar.progress(pct)
 
     try:
+        import time as _time
+        _audit_start = _time.time()
+
         # ── Step 0: credentials ───────────────────────────────────────────
         update("Preparing credentials…", 5)
         prepare_credentials()
@@ -178,6 +209,28 @@ if submitted:
         ps_module.NARRATIVE_FILE   = narrative_path
 
         slides_url = ps_module.main()
+
+        # ── Log the completed audit ───────────────────────────────────────
+        try:
+            import audit_log as _al
+            _duration = _time.time() - _audit_start
+            _tokens   = narrative.get("_tokens_used", 0)
+            _log_scopes = [
+                "https://www.googleapis.com/auth/presentations",
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/spreadsheets",
+            ]
+            from google.oauth2.credentials import Credentials as _Creds
+            from google.auth.transport.requests import Request as _Req
+            _lc = _Creds.from_authorized_user_file(
+                os.path.join(TOOL_DIR, "token.json"), _log_scopes
+            )
+            if _lc.expired and _lc.refresh_token:
+                _lc.refresh(_Req())
+            _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
+                          _duration, slides_url, _tokens)
+        except Exception as _le:
+            print(f"Audit log error: {_le}")
 
         # ── Done ──────────────────────────────────────────────────────────
         progress_bar.progress(100)

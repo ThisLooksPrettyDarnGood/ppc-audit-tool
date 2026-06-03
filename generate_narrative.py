@@ -17,7 +17,11 @@ from openai import OpenAI
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+_total_tokens = 0  # module-level token counter, reset per generate_narrative() call
+
+
 def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
+    global _total_tokens
     response = client.chat.completions.create(
         model="gpt-5.5",
         messages=[
@@ -26,6 +30,8 @@ def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
         ],
         max_completion_tokens=2000,
     )
+    if response.usage:
+        _total_tokens += response.usage.total_tokens
     text = response.choices[0].message.content.strip()
     # Remove em dashes — a common LLM tell — and replace with a regular hyphen
     text = text.replace("—", " - ").replace("–", " - ")
@@ -524,6 +530,8 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     Returns:
         Full narrative dict ready to be saved as narrative_output.json
     """
+    global _total_tokens
+    _total_tokens = 0  # reset for this run
     client = OpenAI(api_key=openai_api_key)
 
     print("  → Generating Conversion Tracking narrative...")
@@ -585,6 +593,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "client_name":       client_name,
         "account_cid":       findings.get("account_cid", ""),
         "overall_rag":       overall_rag,
+        "_tokens_used":      _total_tokens,
         "issues":            issues,
         "executive_summary": exec_sum,
         "objectives":        objectives,
