@@ -12,7 +12,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "client_secret.json")
+CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json")
 TOKEN_PATH = "token_ads.json"
 MCC_CID = "539-263-1535"
 
