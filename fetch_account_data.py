@@ -368,6 +368,7 @@ def get_performance_summary(client, cid):
         t["spend"]       = round(t["spend"], 2)
         t["conversions"] = round(t["conversions"], 2)
         t["cpa"]  = round(t["spend"] / t["conversions"], 2) if t["conversions"] > 0 else None
+        t["cvr"]  = round(t["conversions"] / t["clicks"] * 100, 2) if t["clicks"] > 0 else None
         t["sis"]  = round(t["sis_sum"] / t["sis_count"] * 100, 1) if t["sis_count"] > 0 else None
         return t
 
@@ -432,14 +433,20 @@ def get_performance_summary(client, cid):
         print(f"  ⚠ SIS query failed (non-fatal): {e}")
 
     return {
+        # 30 days
         "spend_30d":  f"£{t30['spend']:,.2f}",
+        "impr_30d":   f"{t30['impressions']:,}",
         "clicks_30d": f"{t30['clicks']:,}",
         "convs_30d":  f"{t30['conversions']:,.1f}",
+        "cvr_30d":    f"{t30['cvr']}%" if t30["cvr"] is not None else "N/A",
         "cpa_30d":    f"£{t30['cpa']:,.2f}" if t30["cpa"] else "N/A",
         "sis_30d":    f"{t30['sis']}%" if t30["sis"] else "N/A",
+        # 12 months
         "spend_12m":  f"£{t12['spend']:,.2f}",
+        "impr_12m":   f"{t12['impressions']:,}",
         "clicks_12m": f"{t12['clicks']:,}",
         "convs_12m":  f"{t12['conversions']:,.1f}",
+        "cvr_12m":    f"{t12['cvr']}%" if t12["cvr"] is not None else "N/A",
         "cpa_12m":    f"£{t12['cpa']:,.2f}" if t12["cpa"] else "N/A",
         "sis_12m":    f"{t12['sis']}%" if t12["sis"] else "N/A",
         # Raw numbers for GPT commentary
