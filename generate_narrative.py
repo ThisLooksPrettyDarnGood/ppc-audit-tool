@@ -24,7 +24,7 @@ def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
         ],
-        max_completion_tokens=700,
+        max_completion_tokens=2000,
     )
     return response.choices[0].message.content.strip()
 
@@ -305,7 +305,7 @@ Rules:
 Respond with just the 4 opportunities, one per line, no bullet points or numbering.
 """.strip()
 
-    return _call_openai(client, SYSTEM_PROMPT, prompt)
+    return _call_openai(client, "You are a concise copywriter. Follow the user's instructions exactly.", prompt)
 
 
 def _narrative_takeaways(client: OpenAI, findings: dict, issues: list) -> list:
