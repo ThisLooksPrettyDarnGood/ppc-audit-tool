@@ -259,7 +259,13 @@ BULLET_3: <specific key finding 3 with real details>
 COMMERCIAL_IMPACT: <specific commercial impact — 1–2 sentences>
 """.strip()
 
-    raw = _call_openai(client, SYSTEM_PROMPT, prompt)
+    exec_system_prompt = (
+        "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
+        "Your tone is professional, direct, and consultative — not salesy. "
+        "Always use British English spelling. "
+        "Respond ONLY in the exact key: value format requested. No extra text, no markdown."
+    )
+    raw = _call_openai(client, exec_system_prompt, prompt)
 
     lines = {}
     for line in raw.splitlines():
@@ -363,7 +369,12 @@ TK3_CHANGES: <changes needed>
 TK3_FUTURE: <future state>
 """.strip()
 
-    raw = _call_openai(client, SYSTEM_PROMPT, prompt)
+    takeaways_system_prompt = (
+        "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
+        "Always use British English spelling. "
+        "Respond ONLY in the exact key: value format requested. No extra text, no markdown."
+    )
+    raw = _call_openai(client, takeaways_system_prompt, prompt)
 
     lines = {}
     for line in raw.splitlines():
@@ -392,7 +403,112 @@ TK3_FUTURE: <future state>
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "") -> dict:
+def _narrative_objectives(client: OpenAI, raw_questionnaire: str) -> dict:
+    """
+    Takes raw pasted questionnaire text and returns clean slide-3 copy:
+      objectives_text  — what they want to achieve
+      success_metric   — how they measure success
+      pain_points_text — what's frustrating them right now
+    """
+    prompt = f"""
+A PPC agency has received the following client questionnaire. Extract the key information and rewrite it as clean, client-facing copy for a slide in a Google Ads audit presentation.
+
+RAW QUESTIONNAIRE:
+{raw_questionnaire}
+
+Rules:
+- objectives_text: List their main objectives as a short, readable sentence or comma-separated list. Start with "To ". E.g. "To increase lead volume, improve lead quality, and reduce cost per acquisition."
+- success_metric: One punchy sentence on what success looks like to them. E.g. "3 good appointments a day at a sustainable CPA."
+- pain_points_text: Summarise their challenges in 1–2 short sentences. Be empathetic but factual. E.g. "Campaign performance has dropped recently and the team lacks the time and expertise to diagnose why."
+- Use British English spelling.
+- Keep it concise — this is slide copy, not a report.
+
+Respond in EXACTLY this format (no extra text, no markdown):
+OBJECTIVES: <objectives text>
+SUCCESS_METRIC: <success metric text>
+PAIN_POINTS: <pain points text>
+""".strip()
+
+    system = (
+        "You are a senior PPC strategist extracting key facts from a client questionnaire "
+        "and rewriting them as polished, client-facing slide copy. "
+        "Always use British English. Respond only in the exact format requested."
+    )
+    raw = _call_openai(client, system, prompt)
+
+    lines = {}
+    for line in raw.splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            lines[key.strip().upper()] = val.strip()
+
+    return {
+        "objectives_text":  lines.get("OBJECTIVES", ""),
+        "success_metric":   lines.get("SUCCESS_METRIC", ""),
+        "pain_points_text": lines.get("PAIN_POINTS", ""),
+    }
+
+
+def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: str = "") -> str:
+    """
+    Write 2–3 sentences interpreting the 30-day vs 12-month performance numbers.
+    Flags whether trend is positive, negative, or mixed.
+    """
+    raw = perf.get("_raw", {})
+    t30 = raw.get("t30", {})
+    t12 = raw.get("t12", {})
+
+    context = f"""
+Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d','?')} | Conversions {perf.get('convs_30d','?')} | CPA {perf.get('cpa_30d','?')} | SIS {perf.get('sis_30d','?')}
+Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}
+""".strip()
+
+    client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
+
+    prompt = f"""
+You are writing 2–3 sentences for a Google Ads audit slide called "Performance Summary".
+The slide shows last 30 days vs last 12 months metrics side by side.
+Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
+Be specific — reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).
+Use British English. Be direct, not alarmist.
+{client_context}
+
+Performance data:
+{context}
+
+Write only the 2–3 sentence commentary. No labels, no bullet points.
+""".strip()
+
+    system = (
+        "You are a senior Google Ads analyst writing plain-English commentary on account performance trends. "
+        "Be specific, use the actual numbers, and keep it to 2–3 sentences."
+    )
+    return _call_openai(client, system, prompt).strip()
+
+
+def _retry(fn, label: str, max_attempts: int = 3):
+    """Call fn() up to max_attempts times, returning the first non-empty result."""
+    for attempt in range(1, max_attempts + 1):
+        result = fn()
+        # Determine if result has real content
+        if isinstance(result, dict):
+            has_content = any(v for v in result.values() if isinstance(v, str) and v.strip())
+        elif isinstance(result, list):
+            has_content = any(
+                any(v for v in row.values() if isinstance(v, str) and v.strip())
+                for row in result if isinstance(row, dict)
+            )
+        else:
+            has_content = bool(str(result).strip())
+
+        if has_content:
+            return result
+        print(f"  ⚠ {label}: empty result on attempt {attempt}, retrying...")
+    print(f"  ✗ {label}: still empty after {max_attempts} attempts — check GPT output format.")
+    return result
+
+
+def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "", raw_questionnaire: str = "") -> dict:
     """
     Args:
         findings:       the dict returned by analyse_account.py's run_analysis()
@@ -405,19 +521,19 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     client = OpenAI(api_key=openai_api_key)
 
     print("  → Generating Conversion Tracking narrative...")
-    conv  = _narrative_conversion_tracking(client, findings)
+    conv  = _retry(lambda: _narrative_conversion_tracking(client, findings), "Conversion Tracking")
     conv["rag"] = findings.get("conversion_tracking", {}).get("rag", "AMBER")
 
     print("  → Generating Account Structure narrative...")
-    struc = _narrative_account_structure(client, findings)
+    struc = _retry(lambda: _narrative_account_structure(client, findings), "Account Structure")
     struc["rag"] = findings.get("account_structure", {}).get("rag", "AMBER")
 
     print("  → Generating Targeting & Keywords narrative...")
-    targ  = _narrative_targeting_keywords(client, findings)
+    targ  = _retry(lambda: _narrative_targeting_keywords(client, findings), "Targeting & Keywords")
     targ["rag"] = findings.get("targeting_keywords", {}).get("rag", "AMBER")
 
     print("  → Generating Bidding Strategy narrative...")
-    bid   = _narrative_bidding_strategy(client, findings)
+    bid   = _retry(lambda: _narrative_bidding_strategy(client, findings), "Bidding Strategy")
     bid["rag"] = findings.get("bidding_strategy", {}).get("rag", "AMBER")
 
     issues = [conv, struc, targ, bid]
@@ -430,13 +546,34 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     )
 
     print("  → Generating Executive Summary...")
-    exec_sum = _narrative_executive_summary(client, findings, issues)
+    exec_sum = _retry(lambda: _narrative_executive_summary(client, findings, issues), "Executive Summary")
 
     print("  → Generating Key Opportunities...")
-    opps = _narrative_key_opportunities(client, findings, issues)
+    opps = _retry(lambda: _narrative_key_opportunities(client, findings, issues), "Key Opportunities")
 
     print("  → Generating Key Takeaways...")
-    takeaways = _narrative_takeaways(client, findings, issues)
+    takeaways = _retry(lambda: _narrative_takeaways(client, findings, issues), "Key Takeaways")
+
+    # ── Slide 3: Objectives — from raw questionnaire or left blank ───────────
+    if raw_questionnaire.strip():
+        print("  → Extracting client objectives from questionnaire...")
+        objectives = _retry(
+            lambda: _narrative_objectives(client, raw_questionnaire),
+            "Objectives"
+        )
+    else:
+        objectives = {"objectives_text": "", "success_metric": "", "pain_points_text": ""}
+
+    # ── Performance summary commentary ──────────────────────────────────────────
+    perf = findings.get("performance_summary", {})
+    if perf:
+        print("  → Writing performance commentary...")
+        perf_commentary = _retry(
+            lambda: _narrative_perf_commentary(client, perf, raw_questionnaire),
+            "Performance Commentary"
+        )
+    else:
+        perf_commentary = ""
 
     return {
         "client_name": client_name,
@@ -444,13 +581,11 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "overall_rag": overall_rag,
         "issues": issues,
         "executive_summary": exec_sum,
-        "objectives": {
-            "objectives_text":  "",   # filled in manually before the meeting
-            "success_metric":   "",
-            "pain_points_text": "",
-        },
+        "objectives": objectives,
         "key_opportunities": opps,
         "takeaways": takeaways,
+        "performance_summary": perf,
+        "perf_commentary": perf_commentary,
     }
 
 

@@ -349,6 +349,73 @@ def get_account_summary(client, cid):
     return total
 
 
+def get_performance_summary(client, cid):
+    """Fetch account-level metrics for last 30 days and last 12 months, including SIS."""
+
+    def _totals(rows):
+        t = {"spend": 0, "clicks": 0, "conversions": 0, "impressions": 0,
+             "sis_sum": 0.0, "sis_count": 0}
+        for row in rows:
+            m = row.metrics
+            t["spend"]       += m.cost_micros / 1_000_000
+            t["clicks"]      += m.clicks
+            t["conversions"] += m.conversions
+            t["impressions"] += m.impressions
+            sis = m.search_impression_share
+            if sis and sis > 0:
+                t["sis_sum"]   += sis
+                t["sis_count"] += 1
+        t["spend"]       = round(t["spend"], 2)
+        t["conversions"] = round(t["conversions"], 2)
+        t["cpa"]  = round(t["spend"] / t["conversions"], 2) if t["conversions"] > 0 else None
+        t["sis"]  = round(t["sis_sum"] / t["sis_count"] * 100, 1) if t["sis_count"] > 0 else None
+        return t
+
+    gaql_30d = """
+        SELECT
+            metrics.cost_micros,
+            metrics.clicks,
+            metrics.conversions,
+            metrics.impressions,
+            metrics.search_impression_share
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND segments.date DURING LAST_30_DAYS
+    """
+    gaql_12m = """
+        SELECT
+            metrics.cost_micros,
+            metrics.clicks,
+            metrics.conversions,
+            metrics.impressions,
+            metrics.search_impression_share
+        FROM campaign
+        WHERE campaign.status != 'REMOVED'
+          AND segments.date DURING LAST_12_MONTHS
+    """
+
+    rows_30d = run_query(client, cid, gaql_30d)
+    rows_12m = run_query(client, cid, gaql_12m)
+
+    t30 = _totals(rows_30d)
+    t12 = _totals(rows_12m)
+
+    return {
+        "spend_30d":  f"£{t30['spend']:,.2f}",
+        "clicks_30d": f"{t30['clicks']:,}",
+        "convs_30d":  f"{t30['conversions']:,.1f}",
+        "cpa_30d":    f"£{t30['cpa']:,.2f}" if t30["cpa"] else "N/A",
+        "sis_30d":    f"{t30['sis']}%" if t30["sis"] else "N/A",
+        "spend_12m":  f"£{t12['spend']:,.2f}",
+        "clicks_12m": f"{t12['clicks']:,}",
+        "convs_12m":  f"{t12['conversions']:,.1f}",
+        "cpa_12m":    f"£{t12['cpa']:,.2f}" if t12["cpa"] else "N/A",
+        "sis_12m":    f"{t12['sis']}%" if t12["sis"] else "N/A",
+        # Raw numbers for GPT commentary
+        "_raw": {"t30": t30, "t12": t12},
+    }
+
+
 def fetch_account_data(client_cid: str) -> dict:
     print(f"\n🔐 Authenticating...")
     creds = get_credentials()
@@ -431,6 +498,9 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → 30-day account summary...")
     account_summary = get_account_summary(client, cid)
 
+    print("  → Performance summary (30d vs 12M)...")
+    performance_summary = get_performance_summary(client, cid)
+
     campaign_types = list({c["type"] for c in campaigns if c["status"] == "ENABLED"})
 
     data = {
@@ -447,6 +517,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "quality_scores": quality_scores,
         "negative_keyword_count": neg_kw_total,
         "auto_apply_recommendations": auto_apply_enabled,
+        "performance_summary": performance_summary,
     }
 
     print(f"\n✅ Data pull complete. {len(campaigns)} campaigns, {len(ad_groups)} ad groups, "

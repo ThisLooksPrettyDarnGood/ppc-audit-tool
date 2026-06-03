@@ -57,6 +57,37 @@ RAG_DOT = {
     "GREEN": "🟢",
 }
 
+# ── Dial image config ─────────────────────────────────────────────────────────
+DIAL_IMAGE_OBJECT_ID = "g3979d9de3ed_0_228"   # the speedometer on slide 4
+
+_DIAL_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dial_config.json")
+try:
+    with open(_DIAL_CONFIG_PATH) as _f:
+        _DIAL_CONFIG = json.load(_f)
+except FileNotFoundError:
+    _DIAL_CONFIG = {}
+
+def pick_dial(issues: list) -> str:
+    """
+    Score each section: RED=0, AMBER=1, GREEN=2.
+    Total 0–8 → one of 5 dial images.
+    Returns a Google Drive URL or empty string if config missing.
+    """
+    score_map = {"RED": 0, "AMBER": 1, "GREEN": 2}
+    total = sum(score_map.get(i.get("rag", "AMBER").upper(), 1) for i in issues)
+    # 0-1 → red, 2-3 → orange, 4 → amber, 5-6 → light_green, 7-8 → dark_green
+    if total <= 1:
+        key = "dial_red"
+    elif total <= 3:
+        key = "dial_orange"
+    elif total == 4:
+        key = "dial_amber"
+    elif total <= 6:
+        key = "dial_light_green"
+    else:
+        key = "dial_dark_green"
+    return _DIAL_CONFIG.get(key, {}).get("url", "")
+
 SECTION_NAMES = [
     "Conversion Tracking",
     "Account Structure",
@@ -94,6 +125,8 @@ def main():
     account_cid   = data.get("account_cid", "")
     issues        = data.get("issues", [])
     exec_sum      = data.get("executive_summary", {})
+    perf          = data.get("performance_summary", {})
+    perf_commentary = data.get("perf_commentary", "")
     objectives    = data.get("objectives", {})
     takeaways     = data.get("takeaways", [])
     opportunities = data.get("key_opportunities", "")
@@ -138,6 +171,19 @@ def main():
     requests.append(replace("{{EXEC_BULLET_3}}",     exec_sum.get("bullet_3", "")))
     requests.append(replace("{{COMMERCIAL_IMPACT}}", exec_sum.get("commercial_impact", "")))
 
+    # ── Performance Summary slide ──
+    requests.append(replace("{{PERF_SPEND_30D}}",  perf.get("spend_30d",  "N/A")))
+    requests.append(replace("{{PERF_CLICKS_30D}}", perf.get("clicks_30d", "N/A")))
+    requests.append(replace("{{PERF_CONVS_30D}}",  perf.get("convs_30d",  "N/A")))
+    requests.append(replace("{{PERF_CPA_30D}}",    perf.get("cpa_30d",    "N/A")))
+    requests.append(replace("{{PERF_SIS_30D}}",    perf.get("sis_30d",    "N/A")))
+    requests.append(replace("{{PERF_SPEND_12M}}",  perf.get("spend_12m",  "N/A")))
+    requests.append(replace("{{PERF_CLICKS_12M}}", perf.get("clicks_12m", "N/A")))
+    requests.append(replace("{{PERF_CONVS_12M}}",  perf.get("convs_12m",  "N/A")))
+    requests.append(replace("{{PERF_CPA_12M}}",    perf.get("cpa_12m",    "N/A")))
+    requests.append(replace("{{PERF_SIS_12M}}",    perf.get("sis_12m",    "N/A")))
+    requests.append(replace("{{PERF_COMMENTARY}}", perf_commentary))
+
     # ── Issue slides (up to 4) ──
     for i in range(1, 5):
         issue        = issues[i - 1] if i <= len(issues) else {}
@@ -169,11 +215,52 @@ def main():
         body={"requests": requests},
     ).execute()
 
+    # ── Swap the dial image based on RAG score ────────────────────────────────
+    dial_url = pick_dial(issues)
+    if dial_url:
+        print(f"Swapping dial image…")
+        try:
+            slides_service.presentations().batchUpdate(
+                presentationId=new_id,
+                body={"requests": [{
+                    "replaceImage": {
+                        "imageObjectId":    DIAL_IMAGE_OBJECT_ID,
+                        "imageReplaceMethod": "CENTER_INSIDE",
+                        "url": dial_url,
+                    }
+                }]},
+            ).execute()
+            print("  Dial image updated.")
+        except Exception as e:
+            print(f"  ⚠ Could not swap dial image: {e}")
+    else:
+        print("  ⚠ No dial config found — skipping image swap.")
+
     replaced = sum(
         r.get("replaceAllTextResponse", {}).get("occurrencesChanged", 0)
         for r in result.get("replies", [])
     )
     print(f"Done. {replaced} placeholder(s) replaced.")
+
+    # ── Validation: check for any unfilled placeholders ──
+    print("Validating deck for unfilled placeholders...")
+    deck = slides_service.presentations().get(presentationId=new_id).execute()
+    import re
+    unfilled = []
+    for slide in deck.get("slides", []):
+        slide_num = deck["slides"].index(slide) + 1
+        for el in slide.get("pageElements", []):
+            for te in el.get("shape", {}).get("text", {}).get("textElements", []):
+                text = te.get("textRun", {}).get("content", "")
+                matches = re.findall(r"\{\{[A-Z0-9_]+\}\}", text)
+                for m in matches:
+                    unfilled.append((slide_num, m))
+    if unfilled:
+        print(f"\n⚠️  WARNING: {len(unfilled)} unfilled placeholder(s) found:")
+        for slide_num, ph in unfilled:
+            print(f"   Slide {slide_num}: {ph}")
+    else:
+        print("✅ All placeholders filled successfully.")
 
     url = f"https://docs.google.com/presentation/d/{new_id}/edit"
     print(f"\n✅ Deck is ready:\n   {url}\n")

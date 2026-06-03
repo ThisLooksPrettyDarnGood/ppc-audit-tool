@@ -94,20 +94,12 @@ with st.form("audit_form"):
 
     st.markdown("---")
     st.markdown("**Slide 3 — Client context**")
+    st.caption("Paste the completed market analysis questionnaire below. The AI will extract the key details automatically.")
 
-    objectives = st.text_area(
-        "Objectives",
-        placeholder="e.g. Generate high-quality leads for their solar panel installation service.",
-        height=100,
-    )
-    success_metric = st.text_input(
-        "Success Metric",
-        placeholder="e.g. 3 good appointments a day at £120 CPA or under",
-    )
-    pain_points = st.text_area(
-        "Pain Points",
-        placeholder="e.g. Cost per lead has risen 40% in the last 3 months.",
-        height=100,
+    raw_questionnaire = st.text_area(
+        "Market Analysis Questionnaire",
+        placeholder="Paste the full questionnaire response here — objectives, spend, success metric, pain points, etc.",
+        height=220,
     )
 
     submitted = st.form_submit_button("🚀 Run Audit", use_container_width=True)
@@ -168,12 +160,8 @@ if submitted:
             findings,
             get_secret("OPENAI_API_KEY"),
             client_name.strip(),
+            raw_questionnaire=raw_questionnaire.strip(),
         )
-
-        # Inject slide-3 form values into the objectives dict
-        narrative["objectives"]["objectives_text"]  = objectives.strip()     or "To be confirmed."
-        narrative["objectives"]["success_metric"]   = success_metric.strip() or "To be confirmed."
-        narrative["objectives"]["pain_points_text"] = pain_points.strip()    or "To be confirmed."
 
         # Save narrative (populate_slides reads this file)
         narrative_path = os.path.join(TOOL_DIR, "narrative_output.json")
