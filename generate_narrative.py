@@ -26,7 +26,10 @@ def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
         ],
         max_completion_tokens=2000,
     )
-    return response.choices[0].message.content.strip()
+    text = response.choices[0].message.content.strip()
+    # Remove em dashes — a common LLM tell — and replace with a regular hyphen
+    text = text.replace("—", " - ").replace("–", " - ")
+    return text
 
 
 def _parse_response(raw: str) -> dict:
