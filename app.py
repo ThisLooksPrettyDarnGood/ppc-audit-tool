@@ -154,7 +154,7 @@ if submitted:
         findings["account_cid"] = cid_clean
 
         # ── Step 3: generate narrative ────────────────────────────────────
-        update("Writing audit narrative with GPT-4o…", 55)
+        update("Writing audit narrative with GPT-5.5…", 55)
         from generate_narrative import generate_narrative
         narrative = generate_narrative(
             findings,

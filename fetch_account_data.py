@@ -351,6 +351,11 @@ def get_account_summary(client, cid):
 
 def get_performance_summary(client, cid):
     """Fetch account-level metrics for last 30 days and last 12 months, including SIS."""
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    date_30d_start  = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    date_12m_start  = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    date_today      = today.strftime("%Y-%m-%d")
 
     def _totals(rows):
         t = {"spend": 0, "clicks": 0, "conversions": 0, "impressions": 0,
@@ -373,7 +378,7 @@ def get_performance_summary(client, cid):
         return t
 
     # Core metrics — no SIS (works for all campaign types including PMax)
-    gaql_30d = """
+    gaql_30d = f"""
         SELECT
             metrics.cost_micros,
             metrics.clicks,
@@ -381,9 +386,9 @@ def get_performance_summary(client, cid):
             metrics.impressions
         FROM campaign
         WHERE campaign.status != 'REMOVED'
-          AND segments.date DURING LAST_30_DAYS
+          AND segments.date BETWEEN '{date_30d_start}' AND '{date_today}'
     """
-    gaql_12m = """
+    gaql_12m = f"""
         SELECT
             metrics.cost_micros,
             metrics.clicks,
@@ -391,22 +396,22 @@ def get_performance_summary(client, cid):
             metrics.impressions
         FROM campaign
         WHERE campaign.status != 'REMOVED'
-          AND segments.date DURING LAST_12_MONTHS
+          AND segments.date BETWEEN '{date_12m_start}' AND '{date_today}'
     """
     # SIS — Search campaigns only (PMax doesn't support this metric)
-    gaql_sis_30d = """
+    gaql_sis_30d = f"""
         SELECT metrics.search_impression_share
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND campaign.advertising_channel_type = 'SEARCH'
-          AND segments.date DURING LAST_30_DAYS
+          AND segments.date BETWEEN '{date_30d_start}' AND '{date_today}'
     """
-    gaql_sis_12m = """
+    gaql_sis_12m = f"""
         SELECT metrics.search_impression_share
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND campaign.advertising_channel_type = 'SEARCH'
-          AND segments.date DURING LAST_12_MONTHS
+          AND segments.date BETWEEN '{date_12m_start}' AND '{date_today}'
     """
 
     rows_30d = run_query(client, cid, gaql_30d)
