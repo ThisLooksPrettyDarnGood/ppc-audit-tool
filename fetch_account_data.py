@@ -1,3 +1,4 @@
+import os
 """
 fetch_account_data.py
 Step 3 — PPC Team Audit Tool
