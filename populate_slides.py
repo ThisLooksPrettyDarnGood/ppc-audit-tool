@@ -172,11 +172,11 @@ def main():
     requests.append(replace("{{COMMERCIAL_IMPACT}}", exec_sum.get("commercial_impact", "")))
 
     # ── Performance Summary slide ──
-    requests.append(replace("{{PERF_SPEND_30D}}",  perf.get("spend_30d",  "N/A")))
-    requests.append(replace("{{PERF_CLICKS_30D}}", perf.get("clicks_30d", "N/A")))
-    requests.append(replace("{{PERF_CONVS_30D}}",  perf.get("convs_30d",  "N/A")))
-    requests.append(replace("{{PERF_CPA_30D}}",    perf.get("cpa_30d",    "N/A")))
-    requests.append(replace("{{PERF_SIS_30D}}",    perf.get("sis_30d",    "N/A")))
+    requests.append(replace("{{PERF_SPEND_30D}}",  f"Spend             {perf.get('spend_30d',  'N/A')}"))
+    requests.append(replace("{{PERF_CLICKS_30D}}", f"Clicks            {perf.get('clicks_30d', 'N/A')}"))
+    requests.append(replace("{{PERF_CONVS_30D}}",  f"Conversions    {perf.get('convs_30d',  'N/A')}"))
+    requests.append(replace("{{PERF_CPA_30D}}",    f"CPA                {perf.get('cpa_30d',    'N/A')}"))
+    requests.append(replace("{{PERF_SIS_30D}}",    f"Imp. Share      {perf.get('sis_30d',    'N/A')}"))
     requests.append(replace("{{PERF_SPEND_12M}}",  perf.get("spend_12m",  "N/A")))
     requests.append(replace("{{PERF_CLICKS_12M}}", perf.get("clicks_12m", "N/A")))
     requests.append(replace("{{PERF_CONVS_12M}}",  perf.get("convs_12m",  "N/A")))
