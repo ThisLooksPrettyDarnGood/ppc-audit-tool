@@ -305,7 +305,20 @@ Rules:
 Respond with just the 4 opportunities, one per line, no bullet points or numbering.
 """.strip()
 
-    return _call_openai(client, "You are a concise copywriter. Follow the user's instructions exactly.", prompt)
+    raw = _call_openai(client, "You are a concise copywriter. Follow the user's instructions exactly.", prompt)
+    # Strip any label prefixes GPT adds (e.g. "OPP1:", "HEADLINE:", "REC1:" etc.)
+    import re
+    lines = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Remove common label prefixes
+        line = re.sub(r'^(OPP\d+|HEADLINE|WHATS_HAPPENING_\d+|WHY_IT_MATTERS_\d+|REC\d+)\s*:\s*', '', line, flags=re.IGNORECASE)
+        if line:
+            lines.append(line)
+    # Return only the last 4 lines (recommendations are most useful)
+    return "\n".join(lines[-4:])
 
 
 def _narrative_takeaways(client: OpenAI, findings: dict, issues: list) -> list:
