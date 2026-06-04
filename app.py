@@ -158,7 +158,15 @@ if submitted:
         status_box.info(f"**{msg}**")
         progress_bar.progress(pct)
 
-    try:
+    def _is_transient(err: Exception) -> bool:
+        """True for temporary Google-side failures worth retrying."""
+        msg = str(err).lower()
+        return any(x in msg for x in ["500", "503", "internalservererror",
+                                       "internal error", "unavailable",
+                                       "deadline exceeded", "try again"])
+
+    def _run_pipeline():
+        """Full audit pipeline. Raises on failure."""
         import time as _time
         _audit_start = _time.time()
 
@@ -251,8 +259,42 @@ if submitted:
         )
         st.caption(f"Client: {client_name.strip()} · CID: {client_cid.strip()}")
 
+    # ── Retry logic ───────────────────────────────────────────────────────────
+    try:
+        _run_pipeline()
     except Exception as e:
-        progress_bar.empty()
-        status_box.error("❌ Something went wrong — details below.")
-        st.exception(e)
-        st.stop()
+        if _is_transient(e):
+            # Friendly countdown, then one automatic retry
+            progress_bar.empty()
+            countdown_box = st.empty()
+            for secs_left in range(30, 0, -1):
+                countdown_box.warning(
+                    f"⏳ Google's API returned a temporary error. "
+                    f"Retrying automatically in **{secs_left}s**…"
+                )
+                import time as _t; _t.sleep(1)
+            countdown_box.info("🔄 Retrying now…")
+            try:
+                _run_pipeline()
+                countdown_box.empty()
+            except Exception as e2:
+                countdown_box.empty()
+                progress_bar.empty()
+                status_box.empty()
+                st.error(
+                    "⚠️ Google's servers are having a moment. "
+                    "Please wait a minute and click **Run Audit** again. "
+                    "If it keeps happening, let Dan know."
+                )
+                st.stop()
+        else:
+            # Non-transient — something we should actually fix
+            progress_bar.empty()
+            status_box.empty()
+            st.error(
+                "❌ Something went wrong. Please check the details below "
+                "and contact your system administrator if this keeps happening."
+            )
+            with st.expander("Technical details (for support)"):
+                st.exception(e)
+            st.stop()
