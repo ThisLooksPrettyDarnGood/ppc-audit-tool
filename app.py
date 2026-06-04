@@ -80,8 +80,68 @@ def prepare_credentials():
             json.dump(data, f)
 
 
+# ── Guardrails: config + helpers ──────────────────────────────────────────────
+DAILY_LIMIT = 10  # max audits per day across the whole team
+
+
+def _log_creds():
+    """Spreadsheets-scope credentials for reading the audit log (count, stats)."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    c = Credentials(
+        token=None,
+        refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=get_secret("GOOGLE_CLIENT_ID"),
+        client_secret=get_secret("GOOGLE_CLIENT_SECRET"),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    c.refresh(Request())
+    return c
+
+
+def _audits_today() -> int:
+    """How many audits have run today (whole team). Returns 0 if unreadable."""
+    try:
+        import audit_log as _al
+        _sid = st.secrets.get("AUDIT_LOG_SHEET_ID", "") or os.environ.get("AUDIT_LOG_SHEET_ID", "")
+        if not _sid:
+            return 0
+        os.environ["AUDIT_LOG_SHEET_ID"] = _sid
+        return _al.get_stats(_log_creds()).get("audits_today", 0)
+    except Exception:
+        return 0
+
+
+def _password_gate():
+    """
+    Require a shared team password before the tool can be used.
+    Only active if APP_PASSWORD is set in secrets — so the app is never
+    bricked if the password hasn't been configured yet.
+    """
+    try:
+        expected = get_secret("APP_PASSWORD")
+    except KeyError:
+        return  # no password configured → gate off
+
+    if st.session_state.get("_authed"):
+        return
+
+    st.markdown("#### 🔒 Team access")
+    st.caption("Enter the team password to use the audit tool.")
+    pw = st.text_input("Password", type="password", key="_pw_input")
+    if st.button("Unlock"):
+        if pw == expected:
+            st.session_state["_authed"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Ask Dan if you need it.")
+    st.stop()
+
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.title("📊 PPC Team — Audit Generator")
+_password_gate()
 st.markdown("Fill in the details below and click **Run Audit** to generate the Google Slides deck.")
 
 # ── Dashboard stats ───────────────────────────────────────────────────────────
@@ -122,6 +182,11 @@ with st.form("audit_form"):
         "Client CID",
         placeholder="e.g. 539-263-1535",
     )
+    runner_email = st.text_input(
+        "Your email",
+        placeholder="e.g. you@ppcgeeks.co.uk",
+        help="We'll send the completed audit summary to you (and to Dan).",
+    )
 
     st.markdown("---")
     st.markdown("**Slide 3 — Client context**")
@@ -146,6 +211,16 @@ if submitted:
         missing.append("Client CID")
     if missing:
         st.error(f"Please fill in: {', '.join(missing)}")
+        st.stop()
+
+    # ── Guardrail: daily cap (whole team) ─────────────────────────────────────
+    _today_count = _audits_today()
+    if _today_count >= DAILY_LIMIT:
+        st.error(
+            f"🛑 Daily limit reached — the team has run {_today_count} audits today "
+            f"(cap is {DAILY_LIMIT}). This protects our OpenAI credit. "
+            f"Please try again tomorrow, or ask Dan if you need the cap raised."
+        )
         st.stop()
 
     # Normalise CID — strip hyphens for the API
@@ -252,7 +327,8 @@ if submitted:
             _log_err = _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
                                      _duration, slides_url, _tokens)
             _email_err = _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
-                                                _duration, slides_url, _tokens)
+                                                _duration, slides_url, _tokens,
+                                                recipient=runner_email.strip())
 
             # Surface results so we are never flying blind again
             if _log_err:

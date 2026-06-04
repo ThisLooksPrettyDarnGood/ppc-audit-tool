@@ -24,7 +24,11 @@ def send_audit_summary(creds, client_name: str, cid: str,
     (so the caller can surface it instead of failing silently).
     Never raises — will not block the audit pipeline.
     """
-    to_addr = recipient.strip() if recipient and recipient.strip() else RECIPIENT
+    # Always notify Dan; also notify the runner if they gave an email.
+    recipients = [RECIPIENT]
+    if recipient and recipient.strip() and recipient.strip().lower() != RECIPIENT.lower():
+        recipients.append(recipient.strip())
+    to_addr = ", ".join(recipients)
     try:
         service = build("gmail", "v1", credentials=creds)
 
