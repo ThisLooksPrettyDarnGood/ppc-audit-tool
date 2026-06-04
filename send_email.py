@@ -25,8 +25,9 @@ def send_audit_summary(creds, client_name: str, cid: str,
     try:
         service = build("gmail", "v1", credentials=creds)
 
-        now        = datetime.now(timezone.utc)
-        time_str   = now.strftime("%d %b %Y at %H:%M UTC")
+        from audit_log import _uk_now
+        now        = _uk_now()
+        time_str   = now.strftime("%d %b %Y at %H:%M UK time")
         mins       = int(duration_secs // 60)
         secs       = int(duration_secs % 60)
         duration_str = f"{mins}m {secs}s"

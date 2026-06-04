@@ -7,8 +7,30 @@ Sheet columns: Timestamp | Client Name | CID | Duration (mins) | Slides URL | To
 """
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from googleapiclient.discovery import build
+
+# UK time: GMT in winter, BST (UTC+1) in summer
+def _uk_now() -> datetime:
+    import time
+    # Use UTC offset: BST is last Sun Mar → last Sun Oct
+    utc_now = datetime.now(timezone.utc)
+    # Simple DST check: last Sunday of March to last Sunday of October
+    month = utc_now.month
+    if month < 3 or month > 10:
+        offset = 0
+    elif month > 3 and month < 10:
+        offset = 1
+    else:
+        # March or October — check if past last Sunday
+        day = utc_now.day
+        dow = utc_now.weekday()  # 0=Mon, 6=Sun
+        last_sun = day - ((dow + 1) % 7)
+        if month == 3:
+            offset = 1 if day >= last_sun and last_sun > 0 else 0
+        else:  # October
+            offset = 0 if day >= last_sun and last_sun > 0 else 1
+    return utc_now + timedelta(hours=offset)
 
 # Google Sheet ID — create a blank sheet and paste its ID here
 # The sheet must be shared with the Google service account or accessible via OAuth
@@ -32,7 +54,7 @@ def log_audit(creds, client_name: str, cid: str, duration_secs: float,
 
     try:
         service = _get_sheets_service(creds)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        now = _uk_now().strftime("%Y-%m-%d %H:%M UK")
         duration_mins = round(duration_secs / 60, 1)
         row = [[now, client_name, cid, duration_mins, slides_url, tokens_used]]
 

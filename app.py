@@ -86,29 +86,30 @@ st.markdown("Fill in the details below and click **Run Audit** to generate the G
 
 # ── Dashboard stats ───────────────────────────────────────────────────────────
 try:
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request as _Request
+    from google.oauth2.credentials import Credentials as _StatsCreds
+    from google.auth.transport.requests import Request as _StatsRequest
     import audit_log as _al
 
-    _sheet_id = os.environ.get("AUDIT_LOG_SHEET_ID", "")
+    _sheet_id = st.secrets.get("AUDIT_LOG_SHEET_ID", "") or os.environ.get("AUDIT_LOG_SHEET_ID", "")
     if _sheet_id:
-        _token_path = os.path.join(TOOL_DIR, "token.json")
-        if os.path.exists(_token_path):
-            _scopes = [
-                "https://www.googleapis.com/auth/presentations",
-                "https://www.googleapis.com/auth/drive",
-                "https://www.googleapis.com/auth/spreadsheets",
-            ]
-            _creds = Credentials.from_authorized_user_file(_token_path, _scopes)
-            if _creds.expired and _creds.refresh_token:
-                _creds.refresh(_Request())
-            _stats = _al.get_stats(_creds)
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Audits today",        _stats["audits_today"])
-            col2.metric("Total audits",         _stats["total_audits"])
-            col3.metric("Hours saved this month", f"{_stats['hours_saved_month']}h")
-            col4.metric("Hours saved total",    f"{_stats['hours_saved_total']}h")
-            st.markdown("---")
+        os.environ["AUDIT_LOG_SHEET_ID"] = _sheet_id
+        # Build creds directly from secrets — works before any audit has run
+        _stats_creds = _StatsCreds(
+            token=None,
+            refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=get_secret("GOOGLE_CLIENT_ID"),
+            client_secret=get_secret("GOOGLE_CLIENT_SECRET"),
+            scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        )
+        _stats_creds.refresh(_StatsRequest())
+        _stats = _al.get_stats(_stats_creds)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Audits today",           _stats["audits_today"])
+        col2.metric("Total audits",           _stats["total_audits"])
+        col3.metric("Hours saved this month", f"{_stats['hours_saved_month']}h")
+        col4.metric("Hours saved total",      f"{_stats['hours_saved_total']}h")
+        st.markdown("---")
 except Exception:
     pass
 
