@@ -14,6 +14,10 @@ Saves output to: ~/Desktop/ppc-audit-tool/narrative_output.json
 import os
 import json
 from openai import OpenAI
+from audit_style_examples import (
+    STYLE_NOTES, EXAMPLES, example_block,
+    EXEC_SUMMARY_EXAMPLE, TAKEAWAYS_EXAMPLE, OPPORTUNITIES_EXAMPLE,
+)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -108,6 +112,9 @@ REC2: <second recommendation>
 REC3: <third recommendation>
 """.strip()
 
+# Fold the team's distilled house style into the shared system prompt.
+SYSTEM_PROMPT = SYSTEM_PROMPT + "\n\n" + STYLE_NOTES
+
 
 # ── Section generators ────────────────────────────────────────────────────────
 
@@ -136,6 +143,7 @@ Key rules for this section:
 - The WHY_IT_MATTERS bullets must explain what the missing data means for the bidding algorithm, not just say "data is missing".
 """.strip()
 
+    prompt += "\n\n" + example_block(EXAMPLES["conversion_tracking"])
     raw = _call_openai(client, SYSTEM_PROMPT, prompt)
     return _parse_response(raw)
 
@@ -165,6 +173,7 @@ Key rules for this section:
 - The WHY_IT_MATTERS bullets must be about money and growth, not technical structure.
 """.strip()
 
+    prompt += "\n\n" + example_block(EXAMPLES["account_structure"])
     raw = _call_openai(client, SYSTEM_PROMPT, prompt)
     return _parse_response(raw)
 
@@ -198,6 +207,7 @@ Key rules for this section:
 - The WHY_IT_MATTERS bullets must explain the financial consequence: wasted spend on irrelevant clicks, missed qualified leads, inflated CPCs.
 """.strip()
 
+    prompt += "\n\n" + example_block(EXAMPLES["targeting_keywords"])
     raw = _call_openai(client, SYSTEM_PROMPT, prompt)
     return _parse_response(raw)
 
@@ -232,6 +242,7 @@ Key rules for this section:
 - The WHY_IT_MATTERS bullets must explain what the wrong or under-powered bidding strategy is costing them in missed conversions or revenue — be specific about the learning state problem if conversion volume is low.
 """.strip()
 
+    prompt += "\n\n" + example_block(EXAMPLES["bidding_strategy"])
     raw = _call_openai(client, SYSTEM_PROMPT, prompt)
     return _parse_response(raw)
 
@@ -268,6 +279,7 @@ BULLET_3: <specific key finding 3 with real details>
 COMMERCIAL_IMPACT: <specific commercial impact — 1–2 sentences>
 """.strip()
 
+    prompt += "\n\n" + EXEC_SUMMARY_EXAMPLE
     exec_system_prompt = (
         "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
         "Your tone is professional, direct, and consultative — not salesy. "
@@ -320,6 +332,7 @@ Rules:
 Respond with just the 4 opportunities, one per line, no bullet points or numbering.
 """.strip()
 
+    prompt += "\n\n" + OPPORTUNITIES_EXAMPLE
     raw = _call_openai(client, "You are a concise copywriter. Follow the user's instructions exactly.", prompt)
     # Strip any label prefixes GPT adds (e.g. "OPP1:", "HEADLINE:", "REC1:" etc.)
     import re
@@ -378,6 +391,7 @@ TK3_CHANGES: <changes needed>
 TK3_FUTURE: <future state>
 """.strip()
 
+    prompt += "\n\n" + TAKEAWAYS_EXAMPLE
     takeaways_system_prompt = (
         "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
         "Always use British English spelling. "
