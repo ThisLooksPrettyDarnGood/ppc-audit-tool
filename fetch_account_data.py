@@ -510,21 +510,29 @@ def fetch_account_data(client_cid: str) -> dict:
 
     print("  → Auto-apply recommendations...")
     auto_apply_enabled = False
+    auto_apply_types = []
     try:
         ga_service = client.get_service("GoogleAdsService")
         aar_response = ga_service.search(
             customer_id=cid,
             query="""
-                SELECT recommendation_subscription.status
+                SELECT recommendation_subscription.type,
+                       recommendation_subscription.status
                 FROM recommendation_subscription
                 WHERE recommendation_subscription.status = 'ENABLED'
             """
         )
         rows = list(aar_response)
         auto_apply_enabled = len(rows) > 0
+        # Capture WHICH recommendation types are auto-applied (enum names) so the
+        # analyser can flag only types outside the team's approved set.
+        auto_apply_types = sorted({r.recommendation_subscription.type.name for r in rows})
+        if auto_apply_types:
+            print(f"    auto-apply types enabled: {auto_apply_types}")
     except Exception as e:
         print(f"    (auto-apply query failed: {e})")
         auto_apply_enabled = None
+        auto_apply_types = []
 
     print("  → Top search terms...")
     top_search_terms = get_top_search_terms(client, cid)
@@ -560,6 +568,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "quality_scores": quality_scores,
         "negative_keyword_count": neg_kw_total,
         "auto_apply_recommendations": auto_apply_enabled,
+        "auto_apply_types": auto_apply_types,
         "performance_summary": performance_summary,
     }
 

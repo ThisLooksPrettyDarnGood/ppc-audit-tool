@@ -1,6 +1,36 @@
 # analyse_account.py
 # Step 4: Analysis & Scoring Engine
 
+# ── Auto-Apply Recommendation types the team is HAPPY to leave ON ─────────────
+# Source: Max's Auto-Apply screen (the red-boxed items the team approves of).
+# These are Google Ads API RecommendationType enum NAMES.
+# ⚠️ CALIBRATION NEEDED: the UI labels don't map 1:1 to enum names, so the exact
+# strings must be confirmed from ONE real run (printed as data["auto_apply_types"]).
+# Anything enabled that is NOT in this set gets flagged for review.
+APPROVED_AAR_TYPES = {
+    "OPTIMIZE_AD_ROTATION",                 # "Use optimised ad rotation" (confident)
+    # TODO — confirm exact enum names from a live run, then add:
+    #   "Remove conflicting negative keywords"
+    #   "Upgrade your conversion tracking"
+}
+
+# Friendly labels for the client-facing slide (prettify unknowns automatically).
+AAR_LABELS = {
+    "OPTIMIZE_AD_ROTATION":         "Optimise ad rotation",
+    "RESPONSIVE_SEARCH_AD":         "Improve responsive search ads",
+    "USE_BROAD_MATCH_KEYWORD":      "Add broad match keywords",
+    "DISPLAY_EXPANSION_OPT_IN":     "Use Display Expansion",
+    "MAXIMIZE_CONVERSIONS_OPT_IN":  "Switch to Maximise Conversions",
+    "TARGET_CPA_OPT_IN":            "Switch to Target CPA",
+    "USE_OPTIMIZED_TARGETING":      "Use optimised targeting",
+    "SEARCH_PARTNERS_OPT_IN":       "Opt in to Search Partners",
+}
+
+
+def _aar_label(t: str) -> str:
+    return AAR_LABELS.get(t, t.replace("_", " ").title())
+
+
 def detect_account_type(data):
     """
     Infer whether this is a lead gen or eCommerce account from conversion action categories.
@@ -300,16 +330,32 @@ def score_account_structure(data):
             "and tests what works — no need to add complexity yet."
         )
 
-    # Auto-apply recommendations — important flag but doesn't override structure RAG on its own
+    # Auto-apply recommendations — now TYPE-AWARE. The team is happy with a known set
+    # of low-risk AAR types; flag only types enabled OUTSIDE that approved set.
     auto_apply = data.get("auto_apply_recommendations", None)
-    if auto_apply:
+    auto_apply_types = data.get("auto_apply_types") or []
+    if auto_apply_types:
+        non_approved = [t for t in auto_apply_types if t not in APPROVED_AAR_TYPES]
+        if non_approved:
+            pretty = ", ".join(_aar_label(t) for t in non_approved)
+            issues.append(
+                f"Auto-Apply is switched on for recommendation types outside the set you normally "
+                f"allow: {pretty}. These can change how the account runs without review — worth "
+                "confirming each one is intentional."
+            )
+            if rag == "green":
+                rag = "amber"
+        else:
+            issues.append(
+                "Auto-Apply is enabled, but only for low-risk recommendation types you're "
+                "comfortable with — no action needed here."
+            )
+    elif auto_apply:
+        # Fallback: AAR is on but we couldn't read the specific types this run.
         issues.append(
-            "Auto-Apply Recommendations are enabled. The impact depends on which recommendation "
-            "types are switched on — many are low-risk (e.g. removing conflicting negatives). "
-            "Worth a quick check that only types you're comfortable with are active."
+            "Auto-Apply Recommendations are enabled. Worth a quick check that only recommendation "
+            "types you're comfortable with are active."
         )
-        # Do NOT escalate RAG on this alone — the tool can't see which types are enabled, and
-        # many accounts run benign auto-apply types quite happily (practitioner feedback).
 
     # CTR check
     impressions = summary.get("impressions", 0)
