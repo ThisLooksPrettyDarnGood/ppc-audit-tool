@@ -247,7 +247,7 @@ if submitted:
             _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
                                    _duration, slides_url, _tokens)
         except Exception as _le:
-            print(f"Post-audit log/email error: {_le}")
+            st.caption(f"⚠️ Log/email error: {_le}")
 
         # ── Done ──────────────────────────────────────────────────────────
         progress_bar.progress(100)
