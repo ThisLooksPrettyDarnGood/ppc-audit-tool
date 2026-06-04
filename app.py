@@ -230,17 +230,20 @@ if submitted:
 
             _duration = _time.time() - _audit_start
             _tokens   = narrative.get("_tokens_used", 0)
-            _post_scopes = [
-                "https://www.googleapis.com/auth/presentations",
-                "https://www.googleapis.com/auth/drive",
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/gmail.send",
-            ]
-            _lc = _Creds.from_authorized_user_file(
-                os.path.join(TOOL_DIR, "token.json"), _post_scopes
+
+            # Build credentials directly from secrets — reliable on cloud
+            _lc = _Creds(
+                token=None,
+                refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=get_secret("GOOGLE_CLIENT_ID"),
+                client_secret=get_secret("GOOGLE_CLIENT_SECRET"),
+                scopes=[
+                    "https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/gmail.send",
+                ],
             )
-            if _lc.expired and _lc.refresh_token:
-                _lc.refresh(_Req())
+            _lc.refresh(_Req())
 
             _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
                           _duration, slides_url, _tokens)
