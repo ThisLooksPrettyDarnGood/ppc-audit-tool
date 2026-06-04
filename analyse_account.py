@@ -74,9 +74,11 @@ def score_conversion_tracking(data):
                     if rag == "green":
                         rag = "amber"
 
-        # Count only PRIMARY actions (the ones bidding actually optimises towards) —
-        # not every action that exists in the account, many of which are inactive/unused.
-        primary_actions = [ca for ca in conversion_actions if ca.get("include_in_conversions")]
+        # Only ACTIVE conversion actions matter — inactive/hidden ones aren't being
+        # used by the account, so don't flag them at all (practitioner feedback).
+        active_actions = [ca for ca in conversion_actions if ca.get("status") == "ENABLED"]
+        # Count only PRIMARY actions (the ones bidding actually optimises towards).
+        primary_actions = [ca for ca in active_actions if ca.get("include_in_conversions")]
         if len(primary_actions) > 10:
             issues.append(
                 f"{len(primary_actions)} conversion actions are set as primary 'Conversions' that "
@@ -93,7 +95,7 @@ def score_conversion_tracking(data):
             "PHONE_CALL_LEAD", "IMPORTED_LEAD", "DEFAULT", "OTHER"
         }
         ga4_imported = [
-            ca.get("name", "Unknown") for ca in conversion_actions
+            ca.get("name", "Unknown") for ca in active_actions
             if ca.get("include_in_conversions")
             and not ca.get("has_tag_snippet", True)   # default True = don't flag if data missing
             and ca.get("category", "") in web_categories
@@ -111,7 +113,7 @@ def score_conversion_tracking(data):
         # Spammable/low-value categories set as primary optimisation goal
         spammable_categories = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD"}
         primary_spammable = [
-            ca.get("name", "Unknown") for ca in conversion_actions
+            ca.get("name", "Unknown") for ca in active_actions
             if ca.get("include_in_conversions")
             and ca.get("category", "") in spammable_categories
         ]
@@ -133,16 +135,17 @@ def score_conversion_tracking(data):
             "SIGNUP", "LEAD", "PHONE_CALL_LEAD", "IMPORTED_LEAD", "DEFAULT", "OTHER"
         }
         many_per_click_leads = [
-            ca.get("name", "Unknown") for ca in conversion_actions
+            ca.get("name", "Unknown") for ca in active_actions
             if ca.get("include_in_conversions")
             and ca.get("counting_type") == "MANY_PER_CLICK"
             and ca.get("category", "") in lead_categories
+            and ca.get("category", "") != "PHONE_CALL_LEAD"   # calls counting 'every' is normal
         ]
         if many_per_click_leads:
             issues.append(
-                "Lead conversion(s) set to count 'Every' instead of 'Once': "
-                + ", ".join(many_per_click_leads) + ". "
-                "This inflates conversion numbers and confuses smart bidding — switch to 'One per click'."
+                "Some lead conversions are set to count 'Every' rather than 'Once'. "
+                "For most lead actions 'Once' is more accurate (calls can be a fair exception) — "
+                "worth confirming these are counting the way you intend."
             )
             if rag == "green":
                 rag = "amber"
@@ -301,13 +304,12 @@ def score_account_structure(data):
     auto_apply = data.get("auto_apply_recommendations", None)
     if auto_apply:
         issues.append(
-            "Auto-Apply Recommendations are enabled on this account. "
-            "It's worth reviewing which recommendation types are set to auto-apply — some are "
-            "low-risk, but others can change keywords, bids or ad copy without review."
+            "Auto-Apply Recommendations are enabled. The impact depends on which recommendation "
+            "types are switched on — many are low-risk (e.g. removing conflicting negatives). "
+            "Worth a quick check that only types you're comfortable with are active."
         )
-        # Only escalate to amber if structure is currently green (don't override other issues)
-        if rag == "green":
-            rag = "amber"
+        # Do NOT escalate RAG on this alone — the tool can't see which types are enabled, and
+        # many accounts run benign auto-apply types quite happily (practitioner feedback).
 
     # CTR check
     impressions = summary.get("impressions", 0)
@@ -454,8 +456,9 @@ def score_targeting_keywords(data):
         and (t.get("spend", 0) or 0) >= 10
         and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
     ]
+    sqr_issues = []
     if converting_not_added:
-        issues.append(
+        sqr_issues.append(
             f"{len(converting_not_added)} of your highest-traffic search terms are generating "
             "conversions but have not been added as keywords. Promoting proven converting queries "
             "into keywords gives more control over bids, ad copy and landing pages."
@@ -464,12 +467,15 @@ def score_targeting_keywords(data):
             rag = "amber"
     if wasted_terms:
         wasted_spend = round(sum((t.get("spend", 0) or 0) for t in wasted_terms), 2)
-        issues.append(
+        sqr_issues.append(
             f"{len(wasted_terms)} high-traffic search terms have spent about £{wasted_spend:.2f} "
             "without converting. Reviewing these for negative keywords would cut wasted spend."
         )
         if rag == "green":
             rag = "amber"
+    # Lead the section with the search-query story — for many accounts the SQR IS the
+    # real issue, more than match-type distribution (practitioner feedback).
+    issues[:0] = sqr_issues
 
     # CTR check as proxy for relevance
     ctr_pct = summary.get("ctr_pct", 0)
