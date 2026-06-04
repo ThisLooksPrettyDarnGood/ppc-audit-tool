@@ -344,23 +344,23 @@ def score_account_structure(data):
     auto_apply = data.get("auto_apply_recommendations", None)
     auto_apply_types = data.get("auto_apply_types") or []
     if auto_apply_types:
+        labelled = ", ".join(_aar_label(t) for t in auto_apply_types)
         non_approved = [t for t in auto_apply_types if t not in APPROVED_AAR_TYPES]
         if non_approved:
-            pretty = ", ".join(_aar_label(t) for t in non_approved)
+            # Name exactly what's enabled (self-documents on the deck) and invite review.
+            # INFORMATIONAL ONLY — we do NOT escalate the RAG here: whether a given
+            # auto-apply type is acceptable is a human judgement we can't make from here,
+            # so flagging it as a "problem" risks a false positive. List it, let a human decide.
             issues.append(
-                f"Auto-Apply is switched on for recommendation types outside the set you normally "
-                f"allow: {pretty}. These can change how the account runs without review — worth "
-                "confirming each one is intentional."
+                f"Auto-Apply is enabled for: {labelled}. Worth confirming each of these is a type "
+                "you're happy to let Google change automatically — some can affect keywords, "
+                "bidding, or where your ads show."
             )
-            if rag == "green":
-                rag = "amber"
         else:
             issues.append(
-                "Auto-Apply is enabled, but only for low-risk recommendation types you're "
-                "comfortable with — no action needed here."
+                f"Auto-Apply is enabled, but only for low-risk types ({labelled}) — no action needed."
             )
     elif auto_apply:
-        # Fallback: AAR is on but we couldn't read the specific types this run.
         issues.append(
             "Auto-Apply Recommendations are enabled. Worth a quick check that only recommendation "
             "types you're comfortable with are active."
