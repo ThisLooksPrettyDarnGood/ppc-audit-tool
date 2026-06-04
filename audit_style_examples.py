@@ -47,6 +47,11 @@ FACTUAL ACCURACY — do NOT state these as facts, they are wrong:
   cleanest signal, and it's worth confirming Enhanced Conversions is active.
 - Never state a hard "30-50 conversions per month" minimum for smart bidding. More
   good-quality data helps, but there is no fixed requirement to hit before using it.
+- Never claim Ad Strength is an auction or Ad Rank factor, or that a Poor/Average rating
+  directly "reduces impression share" or "increases CPCs". Google states Ad Strength is
+  guidance only. The real lever is ad relevance and variety - more distinct, keyword-relevant
+  headlines and descriptions improve CTR and Quality Score - so attribute any efficiency gain
+  to that, not to the Ad Strength score itself.
 """.strip()
 
 

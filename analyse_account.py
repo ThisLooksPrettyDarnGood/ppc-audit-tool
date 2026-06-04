@@ -553,7 +553,8 @@ def score_targeting_keywords(data):
             issues.append(
                 f"{rsa_low} of {rsa_total} live responsive search ads are rated Poor or Average "
                 f"ad strength, carrying about £{rsa_low_spend:.2f} of spend.{eg} "
-                "Stronger ad strength typically lifts impression share and lowers CPCs."
+                "Ad strength reflects how distinct and relevant the headlines and descriptions are - "
+                "improving it tends to lift CTR and Quality Score."
             )
             if rag == "green":
                 rag = "amber"

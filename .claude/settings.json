@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(python3 -m py_compile *)"
+    ]
+  }
+}
