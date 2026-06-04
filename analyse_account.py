@@ -74,10 +74,14 @@ def score_conversion_tracking(data):
                     if rag == "green":
                         rag = "amber"
 
-        if len(conversion_actions) > 10:
+        # Count only PRIMARY actions (the ones bidding actually optimises towards) —
+        # not every action that exists in the account, many of which are inactive/unused.
+        primary_actions = [ca for ca in conversion_actions if ca.get("include_in_conversions")]
+        if len(primary_actions) > 10:
             issues.append(
-                f"{len(conversion_actions)} conversion actions detected. "
-                "Too many actions can dilute reporting — review for duplicates or test tags."
+                f"{len(primary_actions)} conversion actions are set as primary 'Conversions' that "
+                "bidding optimises towards. Too many primary actions can dilute reporting and confuse "
+                "bidding — review for duplicates, test tags or low-value actions."
             )
             if rag == "green":
                 rag = "amber"
@@ -96,10 +100,10 @@ def score_conversion_tracking(data):
         ]
         if ga4_imported:
             issues.append(
-                "Primary conversion(s) appear to be imported from GA4 rather than tracked "
-                "via a native Google Ads tag: " + ", ".join(ga4_imported) + ". "
-                "GA4 imports prevent Enhanced Conversions from working and may under-report "
-                "conversions for users who declined cookie consent."
+                "Some primary conversions appear to be imported from GA4 rather than tracked via a "
+                "native Google Ads tag. Native Google Ads tags give the cleanest, most complete signal "
+                "for bidding — it's worth confirming Enhanced Conversions is active and that tracking "
+                "is firing correctly."
             )
             if rag == "green":
                 rag = "amber"
@@ -143,15 +147,20 @@ def score_conversion_tracking(data):
             if rag == "green":
                 rag = "amber"
 
-    # Campaigns spending with zero conversions
+    # Campaigns spending with zero conversions. Skip awareness-style campaigns —
+    # Display / Video / Demand Gen are often run for reach, so zero conversions is
+    # expected and must NOT be flagged as wasted spend (per practitioner feedback).
+    AWARENESS_TYPES = {"DISPLAY", "VIDEO", "DEMAND_GEN", "MULTI_CHANNEL"}
     for c in campaigns:
         c_conv = c.get("conversions_30d", 0)
         c_cost = c.get("spend_30d", 0)
         c_name = c.get("name", "Unknown campaign")
         c_status = c.get("status", "")
-        if c_status == "ENABLED" and c_cost > 50 and c_conv == 0:
+        c_type = c.get("type", "")
+        if c_status == "ENABLED" and c_cost > 50 and c_conv == 0 and c_type not in AWARENESS_TYPES:
             issues.append(
-                f"Campaign '{c_name}' spent £{c_cost:.2f} with 0 conversions recorded."
+                f"Campaign '{c_name}' spent £{c_cost:.2f} with 0 conversions recorded — "
+                "worth confirming it isn't an awareness or brand campaign before treating this as wasted spend."
             )
             if rag == "green":
                 rag = "amber"
@@ -293,8 +302,8 @@ def score_account_structure(data):
     if auto_apply:
         issues.append(
             "Auto-Apply Recommendations are enabled on this account. "
-            "These can make changes to keywords, bids, and ad copy without human review — "
-            "we strongly recommend switching them off."
+            "It's worth reviewing which recommendation types are set to auto-apply — some are "
+            "low-risk, but others can change keywords, bids or ad copy without review."
         )
         # Only escalate to amber if structure is currently green (don't override other issues)
         if rag == "green":
@@ -551,7 +560,9 @@ def score_bidding_strategy(data):
         "TARGET_CPA", "TARGET_ROAS", "MAXIMIZE_CONVERSIONS",
         "MAXIMIZE_CONVERSION_VALUE", "TARGET_IMPRESSION_SHARE"
     }
-    manual_strategies = {"MANUAL_CPC", "MANUAL_CPM", "MANUAL_CPV", "MAXIMIZE_CLICKS"}
+    # Note: in the Google Ads API, "Maximise Clicks" is reported as TARGET_SPEND —
+    # NOT "MAXIMIZE_CLICKS". Missing this made Max Clicks campaigns invisible to the tool.
+    manual_strategies = {"MANUAL_CPC", "MANUAL_CPM", "MANUAL_CPV", "MAXIMIZE_CLICKS", "TARGET_SPEND"}
 
     smart_campaigns = []
     manual_campaigns = []
@@ -568,8 +579,8 @@ def score_bidding_strategy(data):
             manual_campaigns.append((name, strategy))
 
     # Max Clicks / Manual CPC check
-    max_clicks = [n for n, s in manual_campaigns if s == "MAXIMIZE_CLICKS"]
-    true_manual = [n for n, s in manual_campaigns if s != "MAXIMIZE_CLICKS"]
+    max_clicks = [n for n, s in manual_campaigns if s in ("MAXIMIZE_CLICKS", "TARGET_SPEND")]
+    true_manual = [n for n, s in manual_campaigns if s not in ("MAXIMIZE_CLICKS", "TARGET_SPEND")]
 
     if max_clicks:
         issues.append(
@@ -606,12 +617,15 @@ def score_bidding_strategy(data):
         if rag == "green":
             rag = "amber"
 
-    # Smart bidding with too few conversions
+    # Smart bidding with low conversion volume.
+    # NOTE: there is NO hard 30-50/month minimum — modern smart bidding works at
+    # lower volumes; more good-quality data simply helps. (Per practitioner feedback.)
     if smart_campaigns and total_conversions < 15:
         issues.append(
-            f"{len(smart_campaigns)} campaign(s) on smart bidding but only "
-            f"{total_conversions:.0f} conversions this month. "
-            "Smart bidding needs 30–50 conversions/month to learn effectively — it may be in a learning state."
+            f"{len(smart_campaigns)} campaign(s) on smart bidding recorded only "
+            f"{total_conversions:.0f} conversions in the last 30 days. "
+            "Smart bidding optimises better with more conversion data, so improving tracking quality "
+            "and conversion volume will help — there's no hard minimum, more good data just helps."
         )
         if rag == "green":
             rag = "amber"
