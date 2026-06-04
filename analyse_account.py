@@ -3,27 +3,36 @@
 
 # ── Auto-Apply Recommendation types the team is HAPPY to leave ON ─────────────
 # Source: Max's Auto-Apply screen (the red-boxed items the team approves of).
-# These are Google Ads API RecommendationType enum NAMES.
-# ⚠️ CALIBRATION NEEDED: the UI labels don't map 1:1 to enum names, so the exact
-# strings must be confirmed from ONE real run (printed as data["auto_apply_types"]).
-# Anything enabled that is NOT in this set gets flagged for review.
+# Verified against the official Google Ads API RecommendationType enum (v24).
+# KEY FINDING: the team's approved "maintenance" toggles — Remove conflicting/
+# redundant/non-serving keywords and Upgrade conversion tracking — are NOT in the
+# RecommendationType enum, so recommendation_subscription won't return them. They
+# therefore CAN'T be false-flagged. The only approved option the API surfaces is
+# ad rotation, so it's the sole entry here. Everything else the API returns
+# (broad match, display expansion, bidding/Search-Partners opt-ins, RSA changes)
+# is materially impactful and worth flagging.
 APPROVED_AAR_TYPES = {
-    "OPTIMIZE_AD_ROTATION",                 # "Use optimised ad rotation" (confident)
-    # TODO — confirm exact enum names from a live run, then add:
-    #   "Remove conflicting negative keywords"
-    #   "Upgrade your conversion tracking"
+    "OPTIMIZE_AD_ROTATION",                 # "Use optimised ad rotation"
 }
 
 # Friendly labels for the client-facing slide (prettify unknowns automatically).
+# Enum names confirmed from the official RecommendationType reference.
 AAR_LABELS = {
-    "OPTIMIZE_AD_ROTATION":         "Optimise ad rotation",
-    "RESPONSIVE_SEARCH_AD":         "Improve responsive search ads",
-    "USE_BROAD_MATCH_KEYWORD":      "Add broad match keywords",
-    "DISPLAY_EXPANSION_OPT_IN":     "Use Display Expansion",
-    "MAXIMIZE_CONVERSIONS_OPT_IN":  "Switch to Maximise Conversions",
-    "TARGET_CPA_OPT_IN":            "Switch to Target CPA",
-    "USE_OPTIMIZED_TARGETING":      "Use optimised targeting",
-    "SEARCH_PARTNERS_OPT_IN":       "Opt in to Search Partners",
+    "OPTIMIZE_AD_ROTATION":                  "Optimise ad rotation",
+    "RESPONSIVE_SEARCH_AD":                  "Add responsive search ads",
+    "RESPONSIVE_SEARCH_AD_IMPROVE_AD_STRENGTH": "Improve responsive search ads",
+    "RESPONSIVE_SEARCH_AD_ASSET":            "Add responsive search ad assets",
+    "USE_BROAD_MATCH_KEYWORD":               "Add broad match keywords",
+    "DISPLAY_EXPANSION_OPT_IN":              "Use Display Expansion",
+    "MAXIMIZE_CLICKS_OPT_IN":                "Switch to Maximise Clicks",
+    "MAXIMIZE_CONVERSIONS_OPT_IN":           "Switch to Maximise Conversions",
+    "MAXIMIZE_CONVERSION_VALUE_OPT_IN":      "Switch to Maximise Conversion Value",
+    "TARGET_CPA_OPT_IN":                     "Switch to Target CPA",
+    "TARGET_ROAS_OPT_IN":                    "Switch to Target ROAS",
+    "ENHANCED_CPC_OPT_IN":                   "Enable Enhanced CPC",
+    "SEARCH_PARTNERS_OPT_IN":                "Opt in to Search Partners",
+    "PERFORMANCE_MAX_OPT_IN":                "Opt in to Performance Max",
+    "KEYWORD_MATCH_TYPE":                    "Change keyword match types",
 }
 
 
