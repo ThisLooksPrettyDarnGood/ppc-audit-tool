@@ -60,6 +60,8 @@ def prepare_credentials():
             "scopes": [
                 "https://www.googleapis.com/auth/presentations",
                 "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/gmail.send",
             ],
         }
         with open(token_path, "w") as f:
@@ -210,27 +212,33 @@ if submitted:
 
         slides_url = ps_module.main()
 
-        # ── Log the completed audit ───────────────────────────────────────
+        # ── Log + email the completed audit ──────────────────────────────
         try:
             import audit_log as _al
+            import send_email as _se
+            from google.oauth2.credentials import Credentials as _Creds
+            from google.auth.transport.requests import Request as _Req
+
             _duration = _time.time() - _audit_start
             _tokens   = narrative.get("_tokens_used", 0)
-            _log_scopes = [
+            _post_scopes = [
                 "https://www.googleapis.com/auth/presentations",
                 "https://www.googleapis.com/auth/drive",
                 "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/gmail.send",
             ]
-            from google.oauth2.credentials import Credentials as _Creds
-            from google.auth.transport.requests import Request as _Req
             _lc = _Creds.from_authorized_user_file(
-                os.path.join(TOOL_DIR, "token.json"), _log_scopes
+                os.path.join(TOOL_DIR, "token.json"), _post_scopes
             )
             if _lc.expired and _lc.refresh_token:
                 _lc.refresh(_Req())
+
             _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
                           _duration, slides_url, _tokens)
+            _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
+                                   _duration, slides_url, _tokens)
         except Exception as _le:
-            print(f"Audit log error: {_le}")
+            print(f"Post-audit log/email error: {_le}")
 
         # ── Done ──────────────────────────────────────────────────────────
         progress_bar.progress(100)
