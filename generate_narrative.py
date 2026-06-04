@@ -172,6 +172,7 @@ Key rules for this section:
 - If the account has a shared budget across campaigns, flag that this restricts individual campaign growth.
 - If GREEN, write encouraging copy that validates their structure and gives 1–2 tips to maintain it.
 - The WHY_IT_MATTERS bullets must be about money and growth, not technical structure.
+- IMPORTANT: if the findings include a description of the actual structure (e.g. a lean, appropriate setup), LEAD with that real structure. Treat Auto-Apply Recommendations as a secondary point, not the whole slide — unless it is genuinely the only finding.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["account_structure"])
