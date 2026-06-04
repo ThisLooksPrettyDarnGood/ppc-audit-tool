@@ -209,6 +209,7 @@ Key rules for this section:
 - If PMax campaigns are running with few negative keywords, escalate the concern — PMax runs broadly by default.
 - The WHY_IT_MATTERS bullets must explain the financial consequence: wasted spend on irrelevant clicks, missed qualified leads, inflated CPCs.
 - If the findings mention search terms that are converting but not yet added as keywords, or high-traffic terms spending without converting, treat these as high-value, specific points worth including — they reflect a proper search-query-report review.
+- If the findings mention responsive search ads rated Poor or Average ad strength, include this as a clear, specific point (use the real counts/spend). Frame it as an efficiency opportunity, not a crisis: weak ad strength means ads win less impression share and pay higher CPCs. Recommend adding distinct headlines and descriptions and using more keyword-relevant copy. Lead with the search-term/match-type story first if both are present.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["targeting_keywords"])

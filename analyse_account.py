@@ -532,6 +532,32 @@ def score_targeting_keywords(data):
     # real issue, more than match-type distribution (practitioner feedback).
     issues[:0] = sqr_issues
 
+    # ── RSA Ad Strength (Max's #2) ────────────────────────────────────────────
+    # Ad Strength is Google's rating of how well an RSA is built. Poor/Average ads
+    # win less impression share and pay higher CPCs, so weak strength is a real
+    # efficiency leak — but it's a "worth improving" point, not an account emergency.
+    # Stay humble: only flag when a MEANINGFUL share of live RSAs are weak, or weak
+    # ads are carrying real spend. Never escalate past amber on ad strength alone.
+    rsa = data.get("rsa_ad_strength") or {}
+    rsa_total = rsa.get("total_rsas", 0)
+    rsa_low = rsa.get("low_strength_count", 0)
+    rsa_low_spend = rsa.get("low_strength_spend", 0)
+    if rsa_total > 0 and rsa_low > 0:
+        low_share = rsa_low / rsa_total
+        if low_share >= 0.5 or rsa_low_spend >= 20:
+            examples = rsa.get("low_strength_examples", [])
+            eg = ""
+            if examples:
+                names = ", ".join(f"'{e['ad_group']}' ({e['strength']})" for e in examples[:2])
+                eg = f" For example {names}."
+            issues.append(
+                f"{rsa_low} of {rsa_total} live responsive search ads are rated Poor or Average "
+                f"ad strength, carrying about £{rsa_low_spend:.2f} of spend.{eg} "
+                "Stronger ad strength typically lifts impression share and lowers CPCs."
+            )
+            if rag == "green":
+                rag = "amber"
+
     # CTR check as proxy for relevance
     ctr_pct = summary.get("ctr_pct", 0)
     if ctr_pct > 0 and ctr_pct < 1.5 and has_search:
@@ -592,6 +618,9 @@ def score_targeting_keywords(data):
             "negative_keyword_count": neg_kw_count,
             "search_terms_converting_not_added": len(converting_not_added),
             "search_terms_wasted_count": len(wasted_terms),
+            "rsa_total": rsa_total,
+            "rsa_low_strength_count": rsa_low,
+            "rsa_low_strength_spend_gbp": rsa_low_spend,
         },
     }
 

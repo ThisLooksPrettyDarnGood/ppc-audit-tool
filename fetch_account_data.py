@@ -321,6 +321,62 @@ def get_quality_scores(client, cid):
     return qs_list
 
 
+def get_rsa_ad_strength(client, cid):
+    """
+    Responsive Search Ad strength across the account (last 30 days).
+    Ad Strength is Google's rating of how well-built an RSA is (headline/description
+    variety + relevance). POOR/AVERAGE ads tend to win less impression share and pay
+    higher CPCs, so weak ad strength is a genuine efficiency leak worth surfacing.
+
+    Returns a summary dict. Only ENABLED RSAs count toward the quality picture
+    (paused ads aren't serving). Wrapped by the caller in try/except — if the query
+    fails for any reason it must not break the pipeline.
+    """
+    gaql = """
+        SELECT
+            ad_group.name,
+            ad_group_ad.ad.id,
+            ad_group_ad.status,
+            ad_group_ad.ad_strength,
+            metrics.cost_micros
+        FROM ad_group_ad
+        WHERE ad_group_ad.status = 'ENABLED'
+          AND ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+          AND segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+
+    by_strength = {}
+    low_examples = []   # POOR / AVERAGE ads with their ad group + 30d spend
+    low_spend = 0.0
+    total = 0
+
+    for row in rows:
+        total += 1
+        strength = row.ad_group_ad.ad_strength.name  # e.g. POOR / AVERAGE / GOOD / EXCELLENT
+        by_strength[strength] = by_strength.get(strength, 0) + 1
+        spend = round(row.metrics.cost_micros / 1_000_000, 2)
+        if strength in ("POOR", "AVERAGE"):
+            low_spend += spend
+            low_examples.append({
+                "ad_group": row.ad_group.name,
+                "strength": strength.title(),   # "Poor" / "Average" for client-facing copy
+                "spend": spend,
+            })
+
+    # Surface the highest-spend weak ads first (most commercially relevant)
+    low_examples.sort(key=lambda e: e["spend"], reverse=True)
+    low_count = by_strength.get("POOR", 0) + by_strength.get("AVERAGE", 0)
+
+    return {
+        "total_rsas": total,
+        "by_strength": by_strength,
+        "low_strength_count": low_count,
+        "low_strength_spend": round(low_spend, 2),
+        "low_strength_examples": low_examples[:5],
+    }
+
+
 def get_account_summary(client, cid):
     gaql = """
         SELECT
@@ -546,6 +602,16 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → Quality scores...")
     quality_scores = get_quality_scores(client, cid)
 
+    print("  → RSA ad strength...")
+    try:
+        rsa_ad_strength = get_rsa_ad_strength(client, cid)
+        if rsa_ad_strength.get("total_rsas"):
+            print(f"    {rsa_ad_strength['total_rsas']} RSAs; "
+                  f"{rsa_ad_strength['low_strength_count']} Poor/Average")
+    except Exception as e:
+        print(f"    (RSA ad strength query failed: {e})")
+        rsa_ad_strength = None
+
     print("  → 30-day account summary...")
     account_summary = get_account_summary(client, cid)
 
@@ -566,6 +632,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "location_targeting": location_targeting,
         "audience_signals": audience_signals,
         "quality_scores": quality_scores,
+        "rsa_ad_strength": rsa_ad_strength,
         "negative_keyword_count": neg_kw_total,
         "auto_apply_recommendations": auto_apply_enabled,
         "auto_apply_types": auto_apply_types,
