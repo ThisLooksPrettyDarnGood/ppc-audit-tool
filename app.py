@@ -81,7 +81,18 @@ def prepare_credentials():
 
 
 # ── Guardrails: config + helpers ──────────────────────────────────────────────
-DAILY_LIMIT = 10  # max audits per day across the whole team
+def _daily_limit() -> int:
+    """
+    Max audits per day across the whole team.
+    0 (or unset) = NO LIMIT. To re-enable, add a line to Streamlit secrets, e.g.
+        DAILY_AUDIT_LIMIT = "10"
+    No code change needed to turn the cap on or off.
+    """
+    try:
+        raw = st.secrets.get("DAILY_AUDIT_LIMIT", os.environ.get("DAILY_AUDIT_LIMIT", "0"))
+        return int(raw)
+    except (ValueError, TypeError):
+        return 0
 
 
 def _log_creds():
@@ -213,15 +224,17 @@ if submitted:
         st.error(f"Please fill in: {', '.join(missing)}")
         st.stop()
 
-    # ── Guardrail: daily cap (whole team) ─────────────────────────────────────
-    _today_count = _audits_today()
-    if _today_count >= DAILY_LIMIT:
-        st.error(
-            f"🛑 Daily limit reached — the team has run {_today_count} audits today "
-            f"(cap is {DAILY_LIMIT}). This protects our OpenAI credit. "
-            f"Please try again tomorrow, or ask Dan if you need the cap raised."
-        )
-        st.stop()
+    # ── Guardrail: daily cap (whole team) — only enforced when a limit is set ──
+    _limit = _daily_limit()
+    if _limit > 0:
+        _today_count = _audits_today()
+        if _today_count >= _limit:
+            st.error(
+                f"🛑 Daily limit reached — the team has run {_today_count} audits today "
+                f"(cap is {_limit}). This protects our OpenAI credit. "
+                f"Please try again tomorrow, or ask Dan if you need the cap raised."
+            )
+            st.stop()
 
     # Normalise CID — strip hyphens for the API
     cid_clean = client_cid.strip().replace("-", "")
