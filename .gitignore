@@ -19,5 +19,10 @@ __pycache__/
 # ─── macOS ────────────────────────────────────────────────────────
 .DS_Store
 
-# ─── Local big files we don't need in the repo ────────────────────
+# ─── Client data & big files — keep LOCAL only, never commit ──────
 *.pdf
+*.pptx
+*.ppt
+*.key
+*.docx
+sample_audits/
