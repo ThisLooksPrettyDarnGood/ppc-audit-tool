@@ -430,6 +430,38 @@ def score_targeting_keywords(data):
         )
         rag = "red"
 
+    # ── Search term hygiene (uses the ALREADY-FETCHED top_search_terms) ───────
+    # Mirrors the human SQR review: (a) converting queries not yet added as
+    # keywords, and (b) spend on terms that aren't converting (negative candidates).
+    search_terms = data.get("top_search_terms", []) or []
+    converting_not_added = [
+        t for t in search_terms
+        if (t.get("conversions", 0) or 0) >= 1
+        and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
+    ]
+    wasted_terms = [
+        t for t in search_terms
+        if (t.get("conversions", 0) or 0) == 0
+        and (t.get("spend", 0) or 0) >= 10
+        and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
+    ]
+    if converting_not_added:
+        issues.append(
+            f"{len(converting_not_added)} of your highest-traffic search terms are generating "
+            "conversions but have not been added as keywords. Promoting proven converting queries "
+            "into keywords gives more control over bids, ad copy and landing pages."
+        )
+        if rag == "green":
+            rag = "amber"
+    if wasted_terms:
+        wasted_spend = round(sum((t.get("spend", 0) or 0) for t in wasted_terms), 2)
+        issues.append(
+            f"{len(wasted_terms)} high-traffic search terms have spent about £{wasted_spend:.2f} "
+            "without converting. Reviewing these for negative keywords would cut wasted spend."
+        )
+        if rag == "green":
+            rag = "amber"
+
     # CTR check as proxy for relevance
     ctr_pct = summary.get("ctr_pct", 0)
     if ctr_pct > 0 and ctr_pct < 1.5 and has_search:
@@ -488,6 +520,8 @@ def score_targeting_keywords(data):
             "broad_spend_gbp": broad.get("spend", 0),
             "exact_spend_gbp": exact.get("spend", 0),
             "negative_keyword_count": neg_kw_count,
+            "search_terms_converting_not_added": len(converting_not_added),
+            "search_terms_wasted_count": len(wasted_terms),
         },
     }
 

@@ -142,6 +142,7 @@ Key rules for this section:
 - Always recommend checking that Enhanced Conversions is correctly configured.
 - If there is a phone number on the website, recommend reviewing call tracking.
 - The WHY_IT_MATTERS bullets must explain what the missing data means for the bidding algorithm, not just say "data is missing".
+- Conversion action names like "generate_lead", "purchase" or "submit_lead_form" are Google's system names — refer to them in plain English (e.g. "your lead action", "your purchase conversion"). Never print the raw system name on a client slide.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["conversion_tracking"])
@@ -207,6 +208,7 @@ Key rules for this section:
 - If the account uses only exact match, explain the risk of limiting reach and missing relevant search variations.
 - If PMax campaigns are running with few negative keywords, escalate the concern — PMax runs broadly by default.
 - The WHY_IT_MATTERS bullets must explain the financial consequence: wasted spend on irrelevant clicks, missed qualified leads, inflated CPCs.
+- If the findings mention search terms that are converting but not yet added as keywords, or high-traffic terms spending without converting, treat these as high-value, specific points worth including — they reflect a proper search-query-report review.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["targeting_keywords"])
