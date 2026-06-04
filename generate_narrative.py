@@ -273,6 +273,7 @@ Rules:
 - The headline must be a single punchy sentence — maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
 - The 3 bullets must each reference a specific finding from above — use real details (numbers, named issues, specific tools like Enhanced Conversions or Auto-Apply). No generic statements.
 - COMMERCIAL_IMPACT: 1–2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions).
+- FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs — say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - Use British English spelling.
 
 Respond in EXACTLY this format (no extra text, no markdown):

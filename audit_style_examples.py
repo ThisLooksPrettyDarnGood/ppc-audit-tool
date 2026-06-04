@@ -40,6 +40,13 @@ BE CONCISE — this is the biggest thing that separates us from generic AI copy:
   line where it lands naturally, the way a person would say it out loud:
   e.g. "You're paying for people who already know you" or
   "Right now the account is optimising for spam, not sales."
+
+FACTUAL ACCURACY — do NOT state these as facts, they are wrong:
+- Never say importing conversions from GA4 "blocks" or "prevents" Enhanced Conversions.
+  GA4 has its own Enhanced Conversions. Say instead: native Google Ads tags give the
+  cleanest signal, and it's worth confirming Enhanced Conversions is active.
+- Never state a hard "30-50 conversions per month" minimum for smart bidding. More
+  good-quality data helps, but there is no fixed requirement to hit before using it.
 """.strip()
 
 
