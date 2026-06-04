@@ -45,8 +45,37 @@ def _sheet_id() -> str:
     return os.environ.get("AUDIT_LOG_SHEET_ID", "")
 
 
+HEADER_ROW = ["Timestamp", "Client Name", "CID", "Duration (mins)",
+              "Slides URL", "Tokens Used"]
+
+
 def _get_sheets_service(creds):
     return build("sheets", "v4", credentials=creds)
+
+
+def _ensure_tab(service, sheet_id: str):
+    """
+    Make sure a tab named SHEET_NAME exists. If it's missing, create it and
+    write the header row. This self-heals the 'Unable to parse range' error
+    that happens when the spreadsheet only has a default 'Sheet1' tab.
+    """
+    meta = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
+    if SHEET_NAME in titles:
+        return
+
+    # Create the tab
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=sheet_id,
+        body={"requests": [{"addSheet": {"properties": {"title": SHEET_NAME}}}]},
+    ).execute()
+    # Write the header row
+    service.spreadsheets().values().update(
+        spreadsheetId=sheet_id,
+        range=f"{SHEET_NAME}!A1",
+        valueInputOption="RAW",
+        body={"values": [HEADER_ROW]},
+    ).execute()
 
 
 def log_audit(creds, client_name: str, cid: str, duration_secs: float,
@@ -62,6 +91,7 @@ def log_audit(creds, client_name: str, cid: str, duration_secs: float,
 
     try:
         service = _get_sheets_service(creds)
+        _ensure_tab(service, sheet_id)
         now = _uk_now().strftime("%Y-%m-%d %H:%M UK")
         duration_mins = round(duration_secs / 60, 1)
         row = [[now, client_name, cid, duration_mins, slides_url, tokens_used]]
