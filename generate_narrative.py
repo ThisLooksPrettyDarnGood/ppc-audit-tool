@@ -568,8 +568,8 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
 
     issues = [conv, struc, targ, bid]
 
-    # Overall RAG = worst of the four
-    rag_order = {"RED": 0, "AMBER": 1, "GREEN": 2}
+    # Overall RAG = worst of the four ("amber_red" sits on the cusp between them)
+    rag_order = {"RED": 0, "AMBER_RED": 0.5, "AMBER": 1, "GREEN": 2}
     overall_rag = min(
         [conv["rag"], struc["rag"], targ["rag"], bid["rag"]],
         key=lambda r: rag_order.get(r.upper(), 1)

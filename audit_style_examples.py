@@ -25,6 +25,8 @@ HOUSE STYLE — how our audit team actually writes. Match this voice closely:
 - Plain English. Always explain the "so what" — never just state a setting.
 - Vary tone by traffic light: RED is urgent and direct; AMBER is "good start, but…";
   GREEN validates what they do well and may simply say "no change is needed".
+  AMBER_RED (on the cusp): acknowledge what IS working ("you do have tracking in place"),
+  then be clear it's a serious, red-leaning problem that needs fixing soon.
 - Never alarmist, never salesy in the analysis. Confident and consultative.
 - British English spelling throughout (optimise, behaviour, prioritise).
 

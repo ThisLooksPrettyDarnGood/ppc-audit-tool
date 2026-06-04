@@ -55,9 +55,17 @@ def replace(old, new):
     }
 
 RAG_DOT = {
-    "RED":   "🔴",
-    "AMBER": "🟠",
-    "GREEN": "🟢",
+    "RED":       "🔴",
+    "AMBER_RED": "🟠🔴",   # "on the cusp" — tracking exists but a serious, red-leaning issue
+    "AMBER":     "🟠",
+    "GREEN":     "🟢",
+}
+
+RAG_LABEL = {
+    "RED":       "Red",
+    "AMBER_RED": "Amber/Red",
+    "AMBER":     "Amber",
+    "GREEN":     "Green",
 }
 
 # ── Dial image config ─────────────────────────────────────────────────────────
@@ -76,7 +84,7 @@ def pick_dial(issues: list) -> str:
     Total 0–8 → one of 5 dial images.
     Returns a Google Drive URL or empty string if config missing.
     """
-    score_map = {"RED": 0, "AMBER": 1, "GREEN": 2}
+    score_map = {"RED": 0, "AMBER_RED": 0, "AMBER": 1, "GREEN": 2}
     total = sum(score_map.get(i.get("rag", "AMBER").upper(), 1) for i in issues)
     # 0-1 → red, 2-3 → orange, 4 → amber, 5-6 → light_green, 7-8 → dark_green
     if total <= 1:
@@ -220,7 +228,7 @@ def main():
     exec_headline = exec_sum.get("headline", "")
     overall_rag   = data.get("overall_rag", "RED")
     dot           = rag_dot(overall_rag)
-    rag_label     = overall_rag.capitalize()
+    rag_label     = RAG_LABEL.get(str(overall_rag).upper(), str(overall_rag).capitalize())
     exec_headline_formatted = f"Account Performance: {exec_headline} ({dot} {rag_label})"
 
     requests.append(replace("{{EXEC_HEADLINE}}",     exec_headline_formatted))

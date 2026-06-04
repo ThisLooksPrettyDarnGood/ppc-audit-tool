@@ -117,8 +117,11 @@ def score_conversion_tracking(data):
                 + ", ".join(primary_spammable) + ". "
                 "Campaigns may be optimising towards clicks or page views rather than real leads or sales."
             )
+            # Tracking exists but a low-value action (e.g. page views) is a primary
+            # conversion — serious, but not a total failure. Mark it "on the cusp"
+            # (amber/red) rather than full red, unless tracking is already broken.
             if rag != "red":
-                rag = "red"
+                rag = "amber_red"
 
         # Conversion count type — MANY_PER_CLICK on lead gen actions inflates numbers
         lead_categories = {
