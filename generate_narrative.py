@@ -96,10 +96,11 @@ Each section of the audit follows this exact 3-part structure used by the audit 
 2. Why it matters commercially — 2 short bullet points on the real business impact. What is this costing them? What are they missing out on? Keep it grounded in pounds, performance, and growth.
 3. Our recommendation — 2 to 3 specific, actionable steps starting with a verb.
 
-Keep the headline under 12 words.
-Each WHATS_HAPPENING bullet must be under 25 words — factual and plain.
-Each WHY_IT_MATTERS bullet must be under 30 words — commercial, urgent but not alarmist.
-Each recommendation must be a single actionable sentence starting with a verb.
+Keep the headline under 10 words.
+Each WHATS_HAPPENING bullet: aim 12-18 words, hard max 22 — one fact, plainly stated.
+Each WHY_IT_MATTERS bullet: aim 12-18 words, hard max 24 — one commercial consequence.
+Each recommendation must be a single actionable sentence starting with a verb (under 18 words).
+Do not pack two ideas into one bullet. Shorter and sharper beats longer and complete.
 
 Respond in EXACTLY this format (no extra text, no markdown):
 HEADLINE: <headline>

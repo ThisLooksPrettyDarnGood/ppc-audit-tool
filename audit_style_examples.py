@@ -27,6 +27,17 @@ HOUSE STYLE — how our audit team actually writes. Match this voice closely:
   GREEN validates what they do well and may simply say "no change is needed".
 - Never alarmist, never salesy in the analysis. Confident and consultative.
 - British English spelling throughout (optimise, behaviour, prioritise).
+
+BE CONCISE — this is the biggest thing that separates us from generic AI copy:
+- ONE idea per bullet. Aim for 12-18 words; never pad a bullet to fit two thoughts.
+- Cut hedging words (currently, likely, may, can, potentially) unless they genuinely
+  carry meaning. Say "Broad match wastes budget on irrelevant searches", not
+  "Broad match may potentially be wasting some of your budget on searches that could
+  be irrelevant".
+- It's fine — encouraged, even — to occasionally drop a plain, slightly conversational
+  line where it lands naturally, the way a person would say it out loud:
+  e.g. "You're paying for people who already know you" or
+  "Right now the account is optimising for spam, not sales."
 """.strip()
 
 

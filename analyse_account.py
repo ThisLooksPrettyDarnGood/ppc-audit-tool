@@ -208,6 +208,8 @@ def score_account_structure(data):
         return {"rag": "red", "headline": "No active campaigns found", "issues": issues, "data_points": {}}
 
     enabled_campaigns = [c for c in campaigns if c.get("status") == "ENABLED"]
+    search_count = sum(1 for c in enabled_campaigns if c.get("type") == "SEARCH")
+    pmax_count   = sum(1 for c in enabled_campaigns if c.get("type") == "PERFORMANCE_MAX")
 
     # Ad groups per campaign ratio
     if num_ad_groups > 0 and num_campaigns > 0:
@@ -266,6 +268,22 @@ def score_account_structure(data):
                 )
                 if rag == "green":
                     rag = "amber"
+
+    # If no genuine structural problems surfaced, describe the structure positively
+    # FIRST — so the slide validates a lean-but-appropriate setup the way our team does,
+    # rather than letting the Auto-Apply note become the whole slide.
+    if not issues:
+        parts = []
+        if search_count:
+            parts.append(f"{search_count} Search")
+        if pmax_count:
+            parts.append(f"{pmax_count} Performance Max")
+        desc = " and ".join(parts) if parts else f"{num_campaigns} campaign(s)"
+        issues.append(
+            f"Structure is lean and focused: {desc}. "
+            "A simple structure like this is appropriate while the account gathers data "
+            "and tests what works — no need to add complexity yet."
+        )
 
     # Auto-apply recommendations — important flag but doesn't override structure RAG on its own
     auto_apply = data.get("auto_apply_recommendations", None)
@@ -342,6 +360,8 @@ def score_targeting_keywords(data):
     has_search = "SEARCH" in campaign_types_active
     has_pmax = "PERFORMANCE_MAX" in campaign_types_active
 
+    broad_pct = 0.0  # share of keyword CLICKS on broad match (set below if data present)
+
     if has_search and total_kw_clicks == 0:
         issues.append(
             "No keyword click data found despite Search campaigns being active. "
@@ -397,6 +417,15 @@ def score_targeting_keywords(data):
         )
         if rag == "green":
             rag = "amber"
+
+    # Escalation: heavy broad match AND weak negatives together is a RED combination —
+    # the budget is wide open with little to filter waste (matches team judgement).
+    if broad_pct > 0.8 and neg_kw_count is not None and neg_kw_count < 50:
+        issues.append(
+            "Most keyword spend is on broad match with very few negatives in place. "
+            "Together these leave the budget wide open to irrelevant searches — this should be treated as urgent."
+        )
+        rag = "red"
 
     # CTR check as proxy for relevance
     ctr_pct = summary.get("ctr_pct", 0)
