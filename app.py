@@ -178,6 +178,10 @@ if submitted:
         # Expose secrets as env vars so existing modules can read them
         os.environ["OPENAI_API_KEY"]              = get_secret("OPENAI_API_KEY")
         os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"]  = get_secret("GOOGLE_ADS_DEVELOPER_TOKEN")
+        # Audit log sheet ID — set here so the end-of-run log write can find it
+        _log_sheet_id = st.secrets.get("AUDIT_LOG_SHEET_ID", "") or os.environ.get("AUDIT_LOG_SHEET_ID", "")
+        if _log_sheet_id:
+            os.environ["AUDIT_LOG_SHEET_ID"] = _log_sheet_id
 
         # ── Step 1: fetch Google Ads data ─────────────────────────────────
         update("Fetching Google Ads data…", 15)
@@ -245,12 +249,22 @@ if submitted:
             )
             _lc.refresh(_Req())
 
-            _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
-                          _duration, slides_url, _tokens)
-            _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
-                                   _duration, slides_url, _tokens)
+            _log_err = _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
+                                     _duration, slides_url, _tokens)
+            _email_err = _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
+                                                _duration, slides_url, _tokens)
+
+            # Surface results so we are never flying blind again
+            if _log_err:
+                st.warning(f"📋 Audit log: {_log_err}")
+            else:
+                st.caption("📋 Audit logged to Google Sheet ✓")
+            if _email_err:
+                st.warning(f"✉️ Email: {_email_err}")
+            else:
+                st.caption("✉️ Notification email sent ✓")
         except Exception as _le:
-            st.caption(f"⚠️ Log/email error: {_le}")
+            st.warning(f"⚠️ Log/email setup error (credentials): {_le}")
 
         # ── Done ──────────────────────────────────────────────────────────
         progress_bar.progress(100)

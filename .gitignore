@@ -1,0 +1,23 @@
+# ─── Secrets & credentials — NEVER commit these ───────────────────
+.streamlit/secrets.toml
+secrets.toml
+token.json
+token_ads.json
+credentials.json
+client_secret.json
+*sk-proj-*          # stray OpenAI key files
+*.pem
+*.key
+
+# ─── Generated / runtime output ───────────────────────────────────
+narrative_output.json
+
+# ─── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+
+# ─── macOS ────────────────────────────────────────────────────────
+.DS_Store
+
+# ─── Local big files we don't need in the repo ────────────────────
+*.pdf

@@ -32,11 +32,17 @@ def _uk_now() -> datetime:
             offset = 0 if day >= last_sun and last_sun > 0 else 1
     return utc_now + timedelta(hours=offset)
 
-# Google Sheet ID — create a blank sheet and paste its ID here
-# The sheet must be shared with the Google service account or accessible via OAuth
-AUDIT_LOG_SHEET_ID = os.environ.get("AUDIT_LOG_SHEET_ID", "")
+# Google Sheet ID is read at CALL TIME (not import time) via _sheet_id().
+# Reading it at import time was a bug: app.py sets the env var a moment AFTER
+# importing this module, so the old module-level constant was always blank,
+# which made every log write and stats read silently skip.
 SHEET_NAME = "Audit Log"
 MINUTES_PER_AUDIT_SAVED = 60  # assumed time saved vs manual audit
+
+
+def _sheet_id() -> str:
+    """Read the audit log sheet ID fresh each call (never cached at import)."""
+    return os.environ.get("AUDIT_LOG_SHEET_ID", "")
 
 
 def _get_sheets_service(creds):
@@ -44,13 +50,15 @@ def _get_sheets_service(creds):
 
 
 def log_audit(creds, client_name: str, cid: str, duration_secs: float,
-              slides_url: str = "", tokens_used: int = 0):
+              slides_url: str = "", tokens_used: int = 0) -> str:
     """
     Append one row to the audit log sheet.
-    Silently skips if AUDIT_LOG_SHEET_ID is not configured.
+    Returns "" on success, or a human-readable error string on failure
+    (so the caller can surface it instead of failing silently).
     """
-    if not AUDIT_LOG_SHEET_ID:
-        return
+    sheet_id = _sheet_id()
+    if not sheet_id:
+        return "AUDIT_LOG_SHEET_ID is not set — log skipped."
 
     try:
         service = _get_sheets_service(creds)
@@ -59,14 +67,16 @@ def log_audit(creds, client_name: str, cid: str, duration_secs: float,
         row = [[now, client_name, cid, duration_mins, slides_url, tokens_used]]
 
         service.spreadsheets().values().append(
-            spreadsheetId=AUDIT_LOG_SHEET_ID,
+            spreadsheetId=sheet_id,
             range=f"{SHEET_NAME}!A:F",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": row},
         ).execute()
+        return ""
     except Exception as e:
         print(f"  ⚠ Audit log write failed: {e}")
+        return f"Audit log write failed: {e}"
 
 
 def get_stats(creds) -> dict:
@@ -80,13 +90,14 @@ def get_stats(creds) -> dict:
         "hours_saved_total": 0,
         "hours_saved_month": 0,
     }
-    if not AUDIT_LOG_SHEET_ID:
+    sheet_id = _sheet_id()
+    if not sheet_id:
         return empty
 
     try:
         service = _get_sheets_service(creds)
         result = service.spreadsheets().values().get(
-            spreadsheetId=AUDIT_LOG_SHEET_ID,
+            spreadsheetId=sheet_id,
             range=f"{SHEET_NAME}!A:F",
         ).execute()
         rows = result.get("values", [])

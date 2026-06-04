@@ -17,11 +17,14 @@ SENDER    = "dan@ppcgeeks.co.uk"
 
 def send_audit_summary(creds, client_name: str, cid: str,
                        duration_secs: float, slides_url: str = "",
-                       tokens_used: int = 0):
+                       tokens_used: int = 0, recipient: str = "") -> str:
     """
     Send a brief audit completion email.
-    Silently skips if anything fails — never blocks the audit pipeline.
+    Returns "" on success, or a human-readable error string on failure
+    (so the caller can surface it instead of failing silently).
+    Never raises — will not block the audit pipeline.
     """
+    to_addr = recipient.strip() if recipient and recipient.strip() else RECIPIENT
     try:
         service = build("gmail", "v1", credentials=creds)
 
@@ -44,7 +47,7 @@ Duration:  {duration_str}{token_line}{deck_line}
 """
 
         msg = MIMEText(body)
-        msg["To"]      = RECIPIENT
+        msg["To"]      = to_addr
         msg["From"]    = SENDER
         msg["Subject"] = f"Audit complete — {client_name}"
 
@@ -54,6 +57,8 @@ Duration:  {duration_str}{token_line}{deck_line}
             body={"raw": raw},
         ).execute()
 
-        print(f"  Email sent to {RECIPIENT}.")
+        print(f"  Email sent to {to_addr}.")
+        return ""
     except Exception as e:
         print(f"  ⚠ Email send failed: {e}")
+        return f"Email send failed: {e}"
