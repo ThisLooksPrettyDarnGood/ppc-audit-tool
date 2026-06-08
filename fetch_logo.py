@@ -31,23 +31,37 @@ def _parse_root(website_url: str) -> str | None:
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
 
 
+# Google Slides' replaceImage only accepts PNG / JPEG / GIF. SVG and ICO are fetched
+# fine but FAIL silently at insertion — so we must reject them here.
+_SLIDES_OK = ("image/png", "image/jpeg", "image/jpg", "image/gif")
+
+
 def _download(url: str) -> tuple[bytes, str] | tuple[None, None]:
-    """Download image if it looks like an image and is under the size cap."""
+    """Download an image only if Google Slides can actually use it (PNG/JPEG/GIF)
+    and it's under the size cap. HEAD is best-effort — some servers block it."""
     try:
-        # HEAD first to check size before pulling the full file
-        head = requests.head(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=True)
-        ct = head.headers.get("Content-Type", "")
-        size = int(head.headers.get("Content-Length", 0))
-        if head.status_code not in (200, 302, 301):
-            return None, None
-        if size and size > MAX_LOGO_BYTES:
-            return None, None
+        # Best-effort HEAD to skip oversized files; never bail just because HEAD fails.
+        try:
+            head = requests.head(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=True)
+            size = int(head.headers.get("Content-Length", 0) or 0)
+            if size and size > MAX_LOGO_BYTES:
+                return None, None
+        except Exception:
+            pass
 
         r = requests.get(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=True)
-        ct = r.headers.get("Content-Type", "")
-        if r.status_code == 200 and ("image" in ct or url.lower().endswith(".ico")):
-            if len(r.content) <= MAX_LOGO_BYTES:
-                return r.content, ct.split(";")[0].strip()
+        if r.status_code != 200:
+            return None, None
+        ct = r.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        path = url.lower().split("?")[0]
+        # Reject anything Slides can't render (SVG, ICO, etc.)
+        if "svg" in ct or path.endswith((".svg", ".ico")):
+            return None, None
+        is_raster = ct in _SLIDES_OK
+        if not ct and path.endswith((".png", ".jpg", ".jpeg", ".gif")):
+            is_raster, ct = True, "image/png"
+        if is_raster and 100 < len(r.content) <= MAX_LOGO_BYTES:
+            return r.content, ct or "image/png"
     except Exception:
         pass
     return None, None
@@ -140,15 +154,23 @@ def fetch_logo_bytes(website_url: str) -> tuple[bytes, str] | tuple[None, None]:
         if m:
             candidates.append(m.group(1))
 
-    # 7. /favicon.ico
-    candidates.append(f"{root}/favicon.ico")
-
     seen: set[str] = set()
     for url in candidates:
         if url in seen:
             continue
         seen.add(url)
         data, ct = _download(url)
+        if data:
+            return data, ct
+
+    # 7. Reliable raster fallbacks — these ALWAYS return a Slides-compatible PNG, so a
+    #    site with only an SVG logo (or one that hides its logo behind JS) still gets one.
+    domain = urlparse(root).netloc
+    for fallback in (
+        f"https://logo.clearbit.com/{domain}?size=200&format=png",   # real brand logo
+        f"https://www.google.com/s2/favicons?domain={domain}&sz=128",  # always works
+    ):
+        data, ct = _download(fallback)
         if data:
             return data, ct
 
