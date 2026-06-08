@@ -93,6 +93,26 @@ def get_conversion_actions(client, cid):
     return actions
 
 
+def get_conversion_action_volume(client, cid):
+    """
+    Conversions recorded PER conversion action over the last 30 days. Lets the analyser
+    tell whether a low-value primary action (e.g. a page-view) is actually firing and
+    skewing bidding, versus merely being misconfigured but recording nothing - so we
+    don't over-claim. Caller wraps in try/except.
+    """
+    gaql = """
+        SELECT segments.conversion_action_name, metrics.all_conversions
+        FROM customer
+        WHERE segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    vol = {}
+    for row in rows:
+        name = row.segments.conversion_action_name
+        vol[name] = vol.get(name, 0) + row.metrics.all_conversions
+    return vol
+
+
 def get_campaigns(client, cid):
     gaql = """
         SELECT
@@ -544,15 +564,20 @@ def get_performance_summary(client, cid):
           AND segments.date BETWEEN '{date_12m_start}' AND '{date_today}'
     """
     # SIS — Search campaigns only (PMax doesn't support this metric)
+    # Impression share trio: overall SIS, absolute-top (very first ad), and top-of-page.
+    # A falling absolute-top / top share signals losing visibility on your best terms.
+    _sis_cols = ("metrics.search_impression_share, "
+                 "metrics.search_absolute_top_impression_share, "
+                 "metrics.search_top_impression_share")
     gaql_sis_30d = f"""
-        SELECT metrics.search_impression_share
+        SELECT {_sis_cols}
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND campaign.advertising_channel_type = 'SEARCH'
           AND segments.date BETWEEN '{date_30d_start}' AND '{date_today}'
     """
     gaql_sis_12m = f"""
-        SELECT metrics.search_impression_share
+        SELECT {_sis_cols}
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND campaign.advertising_channel_type = 'SEARCH'
@@ -565,22 +590,26 @@ def get_performance_summary(client, cid):
     t30 = _totals(rows_30d)
     t12 = _totals(rows_12m)
 
-    # Overlay SIS separately — safe to fail
+    def _avg_share(t, rows):
+        sis_s = sis_n = abt_s = abt_n = top_s = top_n = 0
+        for row in rows:
+            m = row.metrics
+            if m.search_impression_share and m.search_impression_share > 0:
+                sis_s += m.search_impression_share; sis_n += 1
+            if m.search_absolute_top_impression_share and m.search_absolute_top_impression_share > 0:
+                abt_s += m.search_absolute_top_impression_share; abt_n += 1
+            if m.search_top_impression_share and m.search_top_impression_share > 0:
+                top_s += m.search_top_impression_share; top_n += 1
+        t["sis"]     = round(sis_s / sis_n * 100, 1) if sis_n else None
+        t["abs_top"] = round(abt_s / abt_n * 100, 1) if abt_n else None
+        t["top"]     = round(top_s / top_n * 100, 1) if top_n else None
+
+    # Overlay impression-share metrics separately — safe to fail
     try:
-        for row in run_query(client, cid, gaql_sis_30d):
-            sis = row.metrics.search_impression_share
-            if sis and sis > 0:
-                t30["sis_sum"] += sis
-                t30["sis_count"] += 1
-        t30["sis"] = round(t30["sis_sum"] / t30["sis_count"] * 100, 1) if t30["sis_count"] > 0 else None
-        for row in run_query(client, cid, gaql_sis_12m):
-            sis = row.metrics.search_impression_share
-            if sis and sis > 0:
-                t12["sis_sum"] += sis
-                t12["sis_count"] += 1
-        t12["sis"] = round(t12["sis_sum"] / t12["sis_count"] * 100, 1) if t12["sis_count"] > 0 else None
+        _avg_share(t30, run_query(client, cid, gaql_sis_30d))
+        _avg_share(t12, run_query(client, cid, gaql_sis_12m))
     except Exception as e:
-        print(f"  ⚠ SIS query failed (non-fatal): {e}")
+        print(f"  ⚠ Impression-share query failed (non-fatal): {e}")
 
     return {
         # 30 days  (money shown in whole pounds, no pence)
@@ -613,6 +642,17 @@ def fetch_account_data(client_cid: str) -> dict:
 
     print("  → Conversion actions...")
     conversion_actions = get_conversion_actions(client, cid)
+
+    print("  → Conversion volume per action (30d)...")
+    try:
+        _ca_vol = get_conversion_action_volume(client, cid)
+        for ca in conversion_actions:
+            ca["conversions_30d"] = round(_ca_vol.get(ca["name"], 0), 2)
+        _firing = [ca["name"] for ca in conversion_actions if ca.get("conversions_30d", 0) > 0]
+        print(f"    {len(_firing)} action(s) recording conversions")
+    except Exception as e:
+        print(f"    (per-action volume query failed: {e})")
+        # leave conversions_30d unset → analyser treats volume as unknown (cautious wording)
 
     print("  → Campaigns...")
     campaigns = get_campaigns(client, cid)

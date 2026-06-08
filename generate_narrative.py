@@ -420,7 +420,7 @@ Here are the full findings from the audit:
 Rules:
 - The headline must be a single punchy sentence — maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
 - The 3 bullets must each reference a specific finding from above — use real details (numbers, named issues, specific tools like Enhanced Conversions or Auto-Apply). No generic statements.
-- COMMERCIAL_IMPACT: 1–2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions).
+- COMMERCIAL_IMPACT: 1–2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). Use measured language - prefer "risks"/"could" over a flat "will" for future consequences, and say "genuine lead demand" rather than just "demand".
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs — say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - Use British English spelling.
 
@@ -632,9 +632,17 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
     t30 = raw.get("t30", {})
     t12 = raw.get("t12", {})
 
+    def _share_line(t):
+        parts = []
+        for label, key in (("abs-top", "abs_top"), ("top-of-page", "top")):
+            v = t.get(key)
+            if v is not None:
+                parts.append(f"{label} {v}%")
+        return (" | " + " | ".join(parts)) if parts else ""
+
     context = f"""
-Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d','?')} | Conversions {perf.get('convs_30d','?')} | CPA {perf.get('cpa_30d','?')} | SIS {perf.get('sis_30d','?')}
-Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}
+Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d','?')} | Conversions {perf.get('convs_30d','?')} | CPA {perf.get('cpa_30d','?')} | SIS {perf.get('sis_30d','?')}{_share_line(t30)}
+Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}{_share_line(t12)}
 """.strip()
 
     client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
@@ -644,6 +652,7 @@ You are writing 2–3 sentences for a Google Ads audit slide called "Performance
 The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
 Be specific — reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).
+If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
 Use British English. Be direct, not alarmist.
 {client_context}
 

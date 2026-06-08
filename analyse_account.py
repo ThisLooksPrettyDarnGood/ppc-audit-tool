@@ -99,6 +99,7 @@ _ISSUE_SIGNATURES = [
     ("spent with 0 conversions",                 116, "red",       "Bidding Strategy"),
     ("should be treated as urgent",              112, "red",       "Targeting & Keywords"),  # broad + weak negatives combo
     # On the cusp
+    ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
     # Bidding
     ("on Maximise Clicks",                         78, "amber",     "Bidding Strategy"),
@@ -315,24 +316,48 @@ def score_conversion_tracking(data):
         _lowval_plain = {"PAGE_VIEW": "a page-view action", "ENGAGEMENT": "an engagement action",
                          "DOWNLOAD": "a download action"}
         primary_spammable = [
-            (ca.get("name", "Unknown"), ca.get("category", "")) for ca in active_actions
+            (ca.get("name", "Unknown"), ca.get("category", ""), ca.get("conversions_30d"))
+            for ca in active_actions
             if ca.get("include_in_conversions")
             and ca.get("category", "") in spammable_categories
         ]
         if primary_spammable:
-            plain = ", ".join(_lowval_plain.get(c, "a low-value action") for _, c in primary_spammable)
-            issues.append(
-                f"Low-value conversion action set as a primary 'Conversions' goal that bidding optimises "
-                f"towards: {plain}. In plain terms, Google may be counting low-value website activity - "
-                "someone simply viewing a page, not making an enquiry - as a 'lead' (worth confirming on "
-                "the account, in case it has already been changed). Budget is then steered towards activity "
-                "rather than the genuine enquiries that create revenue."
-            )
-            # Tracking exists but a low-value action (e.g. page views) is a primary
-            # conversion — serious, but not a total failure. Mark it "on the cusp"
-            # (amber/red) rather than full red, unless tracking is already broken.
-            if rag != "red":
-                rag = "amber_red"
+            plain = ", ".join(_lowval_plain.get(c, "a low-value action") for _, c, _v in primary_spammable)
+            vols = [v for _, _, v in primary_spammable]
+            recording = any((v is not None and v > 0) for v in vols)
+            all_known_zero = bool(vols) and all((v is not None and v == 0) for v in vols)
+            if recording:
+                # It's primary AND actually firing → it genuinely is skewing bidding.
+                issues.append(
+                    f"Low-value conversion action set as a primary 'Conversions' goal that bidding optimises "
+                    f"towards, and it is actively recording conversions: {plain}. In plain terms, Google is "
+                    "counting low-value website activity - someone simply viewing a page, not making an "
+                    "enquiry - as a 'lead', so budget is steered towards activity rather than the genuine "
+                    "enquiries that create revenue."
+                )
+                if rag != "red":
+                    rag = "amber_red"
+            elif all_known_zero:
+                # Primary but recording nothing → a latent misconfiguration, not active harm.
+                # Don't over-claim that Google "is" optimising towards it.
+                issues.append(
+                    f"A low-value action is set as a primary conversion but is recording no conversions in the "
+                    f"last 30 days: {plain}. It isn't skewing bidding right now, but it should be moved to "
+                    "secondary so it never can - and a low-value action sitting in the primary 'Conversions' "
+                    "column is a sign the conversion setup needs a tidy-up."
+                )
+                if rag == "green":
+                    rag = "amber"
+            else:
+                # Volume unknown (per-action query unavailable) → stay cautious, don't over-claim.
+                issues.append(
+                    f"Low-value conversion action set as a primary 'Conversions' goal: {plain}. It's worth "
+                    "confirming whether it is currently recording conversions: if it is, Google optimises "
+                    "towards low-value website activity (a page view, not an enquiry) rather than genuine "
+                    "leads. Either way, a low-value action shouldn't sit in the primary 'Conversions' column."
+                )
+                if rag != "red":
+                    rag = "amber_red"
 
         # Conversion count type — MANY_PER_CLICK on lead gen actions inflates numbers
         lead_categories = {
@@ -870,7 +895,10 @@ def score_bidding_strategy(data):
     if max_clicks:
         issues.append(
             f"{len(max_clicks)} campaign(s) on Maximise Clicks — this optimises for traffic, not conversions. "
-            "Switch to Maximise Conversions to align spend with business goals."
+            "Two things worth checking: whether it's a newer or low-data campaign that hasn't moved on yet, "
+            "and - importantly - whether a maximum CPC bid limit is set. Without a sensible CPC ceiling, "
+            "Maximise Clicks can pay far more per click than needed. Once there is enough conversion data, "
+            "move it to Maximise Conversions so spend is aligned with leads, not visits."
         )
         rag = "amber"
 
