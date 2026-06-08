@@ -78,27 +78,19 @@ try:
 except FileNotFoundError:
     _DIAL_CONFIG = {}
 
-def pick_dial(section_rags: list) -> str:
+def pick_dial(overall_rag: str) -> str:
     """
-    Score the 4 audit sections: RED/AMBER_RED=0, AMBER=1, GREEN=2 → total 0–8 → one of
-    5 dial images. Driven by the holistic section RAGs (incl. healthy sections), NOT the
-    issue-led slide list — the dial must reflect OVERALL health, not just the problems shown.
-    Accepts a list of RAG strings.
+    Drive the dial straight from the headline overall RAG so it always matches the exec
+    summary the client reads. A struggling account must never show a green dial - the old
+    'sum the sections' approach let one healthy section pull an amber account into the green.
     Returns a Google Drive URL or empty string if config missing.
     """
-    score_map = {"RED": 0, "AMBER_RED": 0, "AMBER": 1, "GREEN": 2}
-    total = sum(score_map.get(str(r).upper(), 1) for r in section_rags)
-    # 0-1 → red, 2-3 → orange, 4 → amber, 5-6 → light_green, 7-8 → dark_green
-    if total <= 1:
-        key = "dial_red"
-    elif total <= 3:
-        key = "dial_orange"
-    elif total == 4:
-        key = "dial_amber"
-    elif total <= 6:
-        key = "dial_light_green"
-    else:
-        key = "dial_dark_green"
+    key = {
+        "red":       "dial_red",
+        "amber_red": "dial_orange",
+        "amber":     "dial_amber",
+        "green":     "dial_dark_green",
+    }.get(str(overall_rag).lower(), "dial_amber")
     return _DIAL_CONFIG.get(key, {}).get("url", "")
 
 # Object ID of the logo placeholder image on slide 1 (white box, bottom-right)
@@ -331,11 +323,8 @@ def main():
     # ── Delete any unused issue slides (issue-led: found fewer than the template holds) ──
     _delete_unused_issue_slides(slides_service, new_id)
 
-    # ── Swap the dial image based on RAG score ────────────────────────────────
-    # Use holistic section RAGs (incl. healthy sections) so the dial reflects overall
-    # health; fall back to the issue list's RAGs for older narrative files.
-    section_rags = data.get("section_rags") or [iss.get("rag", "AMBER") for iss in issues]
-    dial_url = pick_dial(section_rags)
+    # ── Swap the dial image based on the headline RAG ─────────────────────────
+    dial_url = pick_dial(data.get("overall_rag", "amber"))
     if dial_url:
         print(f"Swapping dial image…")
         try:

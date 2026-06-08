@@ -286,6 +286,9 @@ CATEGORY_RULES = {
         "or a percentage of spend, INCLUDE those exact details (in brackets where it reads naturally). "
         "Specifics like \"'fibreglass pool installation' (6 leads at ~£47 each)\" or \"the 'Pools "
         "Generic' ad group\" are exactly what make this land on a sales call - never strip them out.\n"
+        "- If the finding contrasts time windows (e.g. 'last 90 days' vs 'last 30 days'), KEEP both "
+        "window labels explicit - that 30-vs-90-day contrast is the insight, and shows the depth of "
+        "analysis. Never merge them into one vague timeframe.\n"
         "- For weak responsive search ad strength: Ad Strength is NOT an auction or Ad Rank factor - "
         "do NOT say it 'reduces impression share' or 'raises CPCs'. The lever is distinct, relevant "
         "headlines and descriptions improving CTR and Quality Score.\n"
@@ -728,6 +731,18 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         issues.append(narrated)
 
     overall_rag = overall_rag_from_issues(selected)
+
+    # Holistic severity escalation: individual issues can each read "amber", but if the
+    # account's efficiency has collapsed (30-day CPA has at least doubled vs the 12-month
+    # average) AND there are several issues, the WHOLE is worse than the parts. A human
+    # auditor calls that Red. Don't let a struggling account look merely amber.
+    _perf_raw = (findings.get("performance_summary", {}) or {}).get("_raw", {})
+    _cpa30 = (_perf_raw.get("t30", {}) or {}).get("cpa")
+    _cpa12 = (_perf_raw.get("t12", {}) or {}).get("cpa")
+    if (_cpa30 and _cpa12 and _cpa30 >= 2 * _cpa12 and len(selected) >= 4
+            and overall_rag in ("amber", "amber_red")):
+        overall_rag = "red"
+        print(f"  ↑ Overall escalated to RED (30d CPA £{_cpa30:.0f} ≥ 2× 12m CPA £{_cpa12:.0f}, {len(selected)} issues)")
 
     print("  → Generating Executive Summary...")
     exec_sum = _retry(lambda: _narrative_executive_summary(client, findings, issues), "Executive Summary")

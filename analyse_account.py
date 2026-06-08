@@ -111,6 +111,7 @@ _ISSUE_SIGNATURES = [
     ("using inconsistent bid strategies",          46, "amber",     "Bidding Strategy"),
     ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
     # Targeting & keywords
+    ("Fading winner spotted by comparing",         72, "amber",     "Targeting & Keywords"),  # cross-window pattern (high value)
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend
     ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries (high-value "dropped ball")
     ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
@@ -231,7 +232,14 @@ def select_top_issues(findings, max_issues=6):
         if th:
             seen_themes.add(th)
         deduped.append(item)
-    return deduped[:max_issues]
+
+    # Selection discipline (like a human auditor): if there's already a solid set of
+    # high-impact issues, don't pad the deck with low-octane hygiene points. Keep all
+    # "strong" issues (>= STRONG_FLOOR); only fall back to weaker ones to reach a minimum.
+    STRONG_FLOOR, MIN_ISSUES = 55, 4
+    strong = [i for i in deduped if i["severity"] >= STRONG_FLOOR]
+    chosen = strong if len(strong) >= MIN_ISSUES else deduped
+    return chosen[:max_issues]
 
 
 def overall_rag_from_issues(issues):
@@ -702,11 +710,31 @@ def score_targeting_keywords(data):
             if (t.get("conversions", 0) or 0) >= 1
             and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
         ]
-    # A term that has CONVERTED (over the longer window) must never also be called a
-    # "wasted, no-lead" term — that contradiction would undermine the whole audit. The
-    # 30-day wasted view can show 0 conversions for a term that converted over 90 days,
-    # so exclude any converting term by name.
-    _converting_names = {str(t.get("term", "")).strip().lower() for t in converting_not_added}
+    # ── Fading winners: terms that CONVERTED over 90 days but have gone quiet in the
+    # last 30 (spend, no leads). This isn't a contradiction - it's the cross-window
+    # pattern a good auditor hunts for (a page rename, a bid drop, a competitor moving in).
+    # We surface it explicitly with BOTH windows labelled, and pull these terms out of the
+    # plain converting/wasted lists so each term tells its richest single story.
+    _30d_by_term = {str(t.get("term", "")).strip().lower(): t for t in search_terms}
+    fading_winners = []
+    for ct in converting_not_added:
+        nm = str(ct.get("term", "")).strip().lower()
+        recent = _30d_by_term.get(nm)
+        if recent and (recent.get("conversions", 0) or 0) == 0 and (recent.get("spend", 0) or 0) >= 10:
+            fading_winners.append({
+                "term": ct.get("term", "?"),
+                "conv_90d": ct.get("conversions", 0) or 0,
+                "spend_30d": recent.get("spend", 0) or 0,
+            })
+    _fading_names = {str(f["term"]).strip().lower() for f in fading_winners}
+
+    # Plain converting list excludes the fading winners (they get their own richer finding).
+    converting_not_added = [
+        ct for ct in converting_not_added
+        if str(ct.get("term", "")).strip().lower() not in _fading_names
+    ]
+    # A converting OR fading term must never also be called a "wasted, no-lead" term.
+    _converting_names = {str(t.get("term", "")).strip().lower() for t in converting_not_added} | _fading_names
     wasted_terms = [
         t for t in search_terms
         if (t.get("conversions", 0) or 0) == 0
@@ -715,6 +743,18 @@ def score_targeting_keywords(data):
         and str(t.get("term", "")).strip().lower() not in _converting_names
     ]
     sqr_issues = []
+    if fading_winners:
+        f = max(fading_winners, key=lambda x: x["spend_30d"])
+        c90 = int(round(f["conv_90d"]))
+        sqr_issues.append(
+            f"Fading winner spotted by comparing time windows: '{f['term']}' generated {c90} "
+            f"lead{'s' if c90 != 1 else ''} over the LAST 90 DAYS, but in the LAST 30 DAYS it has spent "
+            f"about £{f['spend_30d']:.0f} with no leads. A proven term going quiet like this usually means "
+            "something changed - a page rename, a dropped bid, or a competitor moving in. Catching it needs "
+            "exactly this 30 vs 90-day comparison, and it's where quietly dropped balls are recovered."
+        )
+        if rag == "green":
+            rag = "amber"
     if converting_not_added:
         # Name the top converting terms with their leads + cost-per-lead so the slide is concrete.
         _top_conv = sorted(converting_not_added, key=lambda t: (t.get("conversions", 0) or 0), reverse=True)[:3]
@@ -726,12 +766,10 @@ def score_targeting_keywords(data):
             _egs.append(f"'{t.get('term', '?')}' ({int(round(conv))} lead{'s' if round(conv) != 1 else ''}{cpl})")
         eg_text = (" For example " + ", ".join(_egs) + ".") if _egs else ""
         sqr_issues.append(
-            f"{len(converting_not_added)} search terms have generated conversions but are NOT added "
-            f"as active keywords.{eg_text} Proven, money-making demand is being captured loosely (or "
-            "not at all) rather than controlled directly. This is also where a quietly dropped ball "
-            "hides: a query that used to convert can stop being captured after a page rename, spelling "
-            "change or paused keyword. Promoting these into dedicated keywords gives control over bids, "
-            "ad copy and landing pages."
+            f"{len(converting_not_added)} search terms have generated conversions over the last 90 days "
+            f"but are NOT added as active keywords.{eg_text} Proven, money-making demand is being captured "
+            "loosely (or not at all) rather than controlled directly. Promoting these into dedicated "
+            "keywords gives control over bids, ad copy and landing pages."
         )
         if rag == "green":
             rag = "amber"
@@ -742,7 +780,9 @@ def score_targeting_keywords(data):
         _weg_text = (f" The biggest are {_weg}.") if _weg else ""
         sqr_issues.append(
             f"{len(wasted_terms)} high-traffic search terms have spent about £{wasted_spend:.2f} "
-            f"without converting.{_weg_text} Reviewing these for negative keywords would cut wasted spend."
+            f"in the last 30 days without converting.{_weg_text} Reviewing these for negative keywords "
+            "would cut wasted spend - and some may be competitor or brand names being matched by broad "
+            "keywords without you realising, which is a common and costly leak."
         )
         if rag == "green":
             rag = "amber"
@@ -996,7 +1036,9 @@ def score_bidding_strategy(data):
             f"{len(efficient_paused)} paused campaign(s) historically converted below the account's "
             f"current £{cpa:.2f} CPA: {names}. From the account data alone there's no clear sign they "
             "underperformed on cost - worth checking whether lead quality, not cost, drove the pause "
-            "before deciding on reactivation."
+            "before deciding on reactivation. Important caveat: confirm those conversions were genuine "
+            "enquiries, not low-value actions (page views) or very short phone calls - a flattering "
+            "historic CPA built on junk conversions isn't a real win."
         )
         if rag == "green":
             rag = "amber"

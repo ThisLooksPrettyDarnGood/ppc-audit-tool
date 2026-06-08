@@ -440,12 +440,13 @@ def get_rsa_ad_strength(client, cid):
     }
 
 
-def get_paused_campaign_history(client, cid, lookback_days=90):
+def get_paused_campaign_history(client, cid, lookback_days=365):
     """
-    Paused campaigns and how they performed over a longer window (default 90 days),
+    Paused campaigns and how they performed over a longer window (default 12 months),
     so the analyser can spot efficient campaigns that were switched off. The standard
     30-day campaign pull shows paused campaigns with ~0 recent metrics, so we need this
-    longer look-back to recover their historic CPA. Caller wraps in try/except.
+    longer look-back to recover their historic CPA. 12 months catches campaigns that ran
+    earlier in the year and were paused. Caller wraps in try/except.
     """
     from datetime import datetime, timedelta
     today = datetime.today()
@@ -750,7 +751,7 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (RSA ad strength query failed: {e})")
         rsa_ad_strength = None
 
-    print("  → Paused campaign history (90d)...")
+    print("  → Paused campaign history (12 months)...")
     try:
         paused_campaign_history = get_paused_campaign_history(client, cid)
         if paused_campaign_history:
