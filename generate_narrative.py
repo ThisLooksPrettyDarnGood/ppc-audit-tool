@@ -440,17 +440,21 @@ def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list) -
         f"  Why it matters: {i.get('why_it_matters','').replace(chr(10), ' ')}"
         for i in issues
     )
+    strengths = findings.get("strengths") or []
+    strengths_note = ("\n\nThings the account already does WELL (verified): "
+                      + "; ".join(strengths) + ".") if strengths else ""
 
     prompt = f"""
 Write the Executive Summary slide for a Google Ads audit presentation.
 
 Here are the full findings from the audit:
-{issues_detail}
+{issues_detail}{strengths_note}
 
 Rules:
 - The headline must be a single punchy sentence — maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
 - The 3 bullets must each reference a specific finding from above — use real details (numbers, named issues, specific tools like Enhanced Conversions or Auto-Apply). No generic statements.
 - COMMERCIAL_IMPACT: 1–2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). Use measured language - prefer "risks"/"could" over a flat "will" for future consequences, and say "genuine lead demand" rather than just "demand".
+- If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot to the commercial impact of the issues. This keeps the audit balanced and credible. Keep it to one short clause; the focus stays on the opportunities.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs — say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - Use British English spelling.
 

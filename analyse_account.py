@@ -74,6 +74,7 @@ def analyse_account(data):
         "targeting_keywords":  score_targeting_keywords(data),
         "bidding_strategy":    score_bidding_strategy(data),
         "efficiency":          score_efficiency(data),
+        "strengths":           build_strengths(data),
         "summary_stats":       build_summary_stats(data),
         "account_type":        account_type,
         "performance_summary": data.get("performance_summary", {}),
@@ -1299,6 +1300,29 @@ def score_efficiency(data):
                       "extensions are in good shape - no change needed here.")
 
     return {"rag": rag, "headline": "Coverage & settings", "issues": issues, "data_points": {}}
+
+
+def build_strengths(data):
+    """Things the account already does WELL (verified clean). A senior auditor opens by
+    acknowledging strengths before the critique - it's honest and builds trust on the call.
+    Returns a short list of plain-English strengths."""
+    s = []
+    neg = data.get("negative_keyword_count")
+    if isinstance(neg, int) and neg >= 100:
+        s.append(f"a well-maintained negative keyword list ({neg:,} negatives)")
+    loc = data.get("location_target_types") or []
+    if loc and not any(c.get("geo") == "PRESENCE_OR_INTEREST" for c in loc):
+        s.append("location targeting correctly set to 'Presence' (people actually in your area)")
+    nets = data.get("network_settings") or []
+    if nets and not any(c.get("search_partners") or c.get("display") for c in nets):
+        s.append("Search Partners and the Display Network correctly switched off on Search")
+    assets = data.get("ad_assets")
+    if assets and {"SITELINK", "CALLOUT", "CALL"}.issubset(set(assets.keys())):
+        s.append("strong ad-extension coverage (sitelinks, callouts, call and more)")
+    summary = data.get("account_summary_30d", {})
+    if (summary.get("conversions", 0) or 0) > 0:
+        s.append("conversion tracking live and recording enquiries")
+    return s
 
 
 def build_summary_stats(data):
