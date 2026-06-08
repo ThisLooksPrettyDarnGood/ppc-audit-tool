@@ -955,7 +955,7 @@ def score_bidding_strategy(data):
     if efficient_paused:
         efficient_paused.sort(key=lambda p: p["cpa"])
         names = ", ".join(
-            f"'{p['name']}' (historic CPA £{p['cpa']:.2f}, {int(round(p['conversions']))} conv)"
+            f"the '{p['name']}' campaign (historic CPA £{p['cpa']:.2f}, {int(round(p['conversions']))} conv)"
             for p in efficient_paused[:3]
         )
         issues.append(

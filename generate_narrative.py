@@ -315,6 +315,30 @@ _CATEGORY_EXAMPLE_KEY = {
 }
 
 
+def _enforce_entity_labels(detail: str, text: str) -> str:
+    """Deterministic override: GPT sometimes squishes "the 'Pools Generic' ad group" down to
+    just "'Pools Generic'", losing the context of what it is. This re-attaches the label
+    ('ad group' / 'campaign') to any quoted entity that the source finding labelled that way,
+    so the deck always says what it's referring to. Never double-labels."""
+    if not text or not detail:
+        return text
+    label_map = {}
+    for label in ("ad group", "campaign"):
+        lbl = label.replace(" ", r"\s+")
+        for m in re.finditer(rf"'([^']+)'\s+{lbl}", detail):       # 'name' ad group
+            label_map.setdefault(m.group(1), label)
+        for m in re.finditer(rf"{lbl}\s+'([^']+)'", detail):       # ad group 'name'
+            label_map.setdefault(m.group(1), label)
+    for name, label in label_map.items():
+        n = re.escape(name)
+        # add the label after an unlabelled quoted mention (not already followed/preceded by a label)
+        text = re.sub(
+            rf"(?<!ad group )(?<!campaign )'{n}'(?!\s+(?:ad group|campaign))",
+            f"'{name}' {label}", text,
+        )
+    return text
+
+
 def _narrative_issue(client: OpenAI, issue: dict, account_type: str = "unknown") -> dict:
     """Generate slide copy for ONE discrete issue: a specific title + the 3-part structure."""
     cat = issue.get("category", "")
@@ -362,6 +386,16 @@ REC3: <third recommendation>
     title = (title or cat).strip().strip('"\'').strip()
     title = re.sub(r'^(issue\s*#?\s*\d*\s*[:.\-]\s*|title\s*[:.\-]\s*)', '', title, flags=re.I).strip()
     parsed["title"] = title or cat
+
+    # Deterministic label override — ensure ad groups / campaigns are named as such.
+    detail = issue.get("detail", "")
+    parsed["title"] = _enforce_entity_labels(detail, parsed["title"])
+    parsed["whats_happening"] = _enforce_entity_labels(detail, parsed.get("whats_happening", ""))
+    parsed["why_it_matters"] = _enforce_entity_labels(detail, parsed.get("why_it_matters", ""))
+    parsed["recommendations"] = [
+        _enforce_entity_labels(detail, r) for r in parsed.get("recommendations", [])
+    ]
+
     parsed["rag"] = issue.get("rag", "amber")
     parsed["category"] = cat
     return parsed
