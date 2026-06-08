@@ -345,6 +345,9 @@ REC3: <third recommendation>
         if line.strip().upper().startswith("TITLE:"):
             title = line.split(":", 1)[1].strip()
             break
+    # Clean: drop surrounding quotes and any stray "Issue #n:" / "Title:" prefix.
+    title = (title or cat).strip().strip('"\'').strip()
+    title = re.sub(r'^(issue\s*#?\s*\d*\s*[:.\-]\s*|title\s*[:.\-]\s*)', '', title, flags=re.I).strip()
     parsed["title"] = title or cat
     parsed["rag"] = issue.get("rag", "amber")
     parsed["category"] = cat
