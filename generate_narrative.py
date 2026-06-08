@@ -267,7 +267,10 @@ CATEGORY_RULES = {
         "- If a low-value action (e.g. page views) is a primary conversion, explain bidding then "
         "optimises towards activity, not real enquiries.\n"
         "- Conversion action names like 'generate_lead' are Google's system names - refer to them in "
-        "plain English ('your lead action'). Never print the raw system name on a client slide."
+        "plain English ('your lead action'). Never print the raw system name on a client slide.\n"
+        "- The TITLE must name the TRACKING / measurement problem itself (e.g. 'Your lead action "
+        "counts low-value activity', 'Conversions are imported, not tracked directly'). Do NOT frame "
+        "the title as a bidding problem - bidding has its own separate slide."
     ),
     "Account Structure": (
         "- Lead with the real structure; treat Auto-Apply as a secondary point.\n"
