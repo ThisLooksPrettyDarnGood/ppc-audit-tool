@@ -301,7 +301,8 @@ def main():
         n = str(i)
         if i <= len(issues):
             issue     = issues[i - 1]
-            title     = issue.get("title") or f"Issue {n}"
+            # Prefix the rank so the priority order (1 = most critical) is visible on the deck.
+            title     = f"{i}. {issue.get('title') or 'Issue'}"
             dot       = rag_dot(issue.get("rag", "AMBER"))
             requests.append(replace(f"{{{{ISSUE_{n}_TITLE}}}}",          title))
             requests.append(replace(f"{{{{ISSUE_{n}_RAG}}}}",            dot))
@@ -313,8 +314,8 @@ def main():
     # ── Key Opportunities slide ──
     requests.append(replace("{{KEY_OPPORTUNITIES}}", to_bullets(opportunities)))
 
-    # ── Key Takeaways slide (3 rows × 3 columns) ──
-    for i in range(1, 4):
+    # ── Key Takeaways slide (5 rows × 3 columns) ──
+    for i in range(1, 6):
         tk = takeaways[i - 1] if i <= len(takeaways) else {}
         n  = str(i)
         requests.append(replace(f"{{{{TK_{n}_CURRENT}}}}", tk.get("current_state", "")))

@@ -264,8 +264,10 @@ CATEGORY_RULES = {
         "- If the primary conversion is imported from GA4, say native Google Ads tags give the "
         "cleanest bidding signal and recommend confirming Enhanced Conversions is active. NEVER say "
         "GA4 'blocks' or 'prevents' Enhanced Conversions.\n"
-        "- If a low-value action (e.g. page views) is a primary conversion, explain bidding then "
-        "optimises towards activity, not real enquiries.\n"
+        "- If a low-value action (e.g. a page-view action) is a primary conversion, NAME it plainly and "
+        "explain it simply, as if to someone non-technical: Google records a 'success' when a visitor "
+        "merely views a page, not when they actually enquire - so the algorithm chases page views, not "
+        "leads. Add a soft hedge like '(worth confirming, in case it's been changed since the audit)'.\n"
         "- Conversion action names like 'generate_lead' are Google's system names - refer to them in "
         "plain English ('your lead action'). Never print the raw system name on a client slide.\n"
         "- The TITLE must name the TRACKING / measurement problem itself (e.g. 'Your lead action "
@@ -280,9 +282,17 @@ CATEGORY_RULES = {
     "Targeting & Keywords": (
         "- Converting search terms not added as keywords, or high-traffic terms spending without "
         "converting, are high-value search-query-report findings - be specific with the numbers.\n"
+        "- CRITICAL: when the finding names specific search terms, ad groups, lead counts, cost-per-lead "
+        "or a percentage of spend, INCLUDE those exact details (in brackets where it reads naturally). "
+        "Specifics like \"'fibreglass pool installation' (6 leads at ~£47 each)\" or \"the 'Pools "
+        "Generic' ad group\" are exactly what make this land on a sales call - never strip them out.\n"
         "- For weak responsive search ad strength: Ad Strength is NOT an auction or Ad Rank factor - "
         "do NOT say it 'reduces impression share' or 'raises CPCs'. The lever is distinct, relevant "
         "headlines and descriptions improving CTR and Quality Score.\n"
+        "- For weak ad strength, the recommendation must go beyond 'rewrite the ads': audit which "
+        "existing headlines and descriptions are already pulling their weight, feed those winners into "
+        "fresh responsive search ads, and A/B test new variants - framed as small, compounding marginal "
+        "gains over 3-6 months, not a one-off fix. Reference the example ad group(s) named.\n"
         "- Few negative keywords or heavy broad match wastes budget on irrelevant searches."
     ),
     "Bidding Strategy": (
@@ -428,15 +438,16 @@ Write the Key Opportunities section for a Google Ads audit presentation.
 Here are the full details of what was found in this account:
 {issues_detail}
 
-Write exactly 4 key opportunities — what could this client unlock if they fix these issues?
+Write exactly 5 key opportunities — what could this client unlock if they fix these issues?
 Rules:
 - Each opportunity must be directly tied to a specific finding above — reference real details (e.g. "12 conversion actions", "88% broad match", "9 conversions/month").
 - Start each with a strong verb (e.g. "Recover", "Unlock", "Cut", "Scale", "Gain", "Eliminate").
 - Focus on tangible business outcomes: more leads, lower CPA, recovered wasted spend, scalable growth.
+- IMPORTANT: do NOT just restate the issue slides word-for-word. REMIX them into fresh, forward-looking value statements — the same substance framed as the upside/prize, so the closing slide doesn't feel repetitive after the audit.
 - Be punchy and specific — these are punchy value statements, not generic descriptions. Under 18 words each.
 - Use British English spelling.
 
-Respond with just the 4 opportunities, one per line, no bullet points or numbering.
+Respond with just the 5 opportunities, one per line, no bullet points or numbering.
 """.strip()
 
     prompt += "\n\n" + OPPORTUNITIES_EXAMPLE
@@ -452,12 +463,12 @@ Respond with just the 4 opportunities, one per line, no bullet points or numberi
         line = re.sub(r'^(OPP\d+|HEADLINE|WHATS_HAPPENING_\d+|WHY_IT_MATTERS_\d+|REC\d+)\s*:\s*', '', line, flags=re.IGNORECASE)
         if line:
             lines.append(line)
-    # Return only the last 4 lines (recommendations are most useful)
-    return "\n".join(lines[-4:])
+    # Return only the last 5 lines (the opportunities themselves)
+    return "\n".join(lines[-5:])
 
 
 def _narrative_takeaways(client: OpenAI, findings: dict, issues: list) -> list:
-    """Generates the 3-row Key Takeaways table content."""
+    """Generates the 5-row Key Takeaways table content (matches Max's 5-row format)."""
 
     issues_detail = "\n".join(
         f"- {i.get('title','Issue')} ({i.get('rag','AMBER')}):\n"
@@ -469,9 +480,10 @@ def _narrative_takeaways(client: OpenAI, findings: dict, issues: list) -> list:
 
     prompt = f"""
 Write the Key Takeaways table for a Google Ads audit presentation.
-The table has 3 rows. Each row has 3 columns: Current State, Changes Needed, Future State.
+The table has 5 rows. Each row has 3 columns: Current State, Changes Needed, Future State.
 
-Pick the 3 most impactful issues from the full audit detail below and write one row for each.
+Pick the 5 most impactful issues from the full audit detail below and write one row for each.
+(If there are fewer than 5 distinct issues, cover the strongest ones and leave the remaining rows blank.)
 Each row must be grounded in specific details from the findings — no generic copy.
 
 Full audit findings:
@@ -494,6 +506,12 @@ TK2_FUTURE: <future state>
 TK3_CURRENT: <current state>
 TK3_CHANGES: <changes needed>
 TK3_FUTURE: <future state>
+TK4_CURRENT: <current state>
+TK4_CHANGES: <changes needed>
+TK4_FUTURE: <future state>
+TK5_CURRENT: <current state>
+TK5_CHANGES: <changes needed>
+TK5_FUTURE: <future state>
 """.strip()
 
     prompt += "\n\n" + TAKEAWAYS_EXAMPLE
@@ -512,20 +530,11 @@ TK3_FUTURE: <future state>
 
     return [
         {
-            "current_state":  lines.get("TK1_CURRENT", ""),
-            "changes_needed": lines.get("TK1_CHANGES", ""),
-            "future_state":   lines.get("TK1_FUTURE", ""),
-        },
-        {
-            "current_state":  lines.get("TK2_CURRENT", ""),
-            "changes_needed": lines.get("TK2_CHANGES", ""),
-            "future_state":   lines.get("TK2_FUTURE", ""),
-        },
-        {
-            "current_state":  lines.get("TK3_CURRENT", ""),
-            "changes_needed": lines.get("TK3_CHANGES", ""),
-            "future_state":   lines.get("TK3_FUTURE", ""),
-        },
+            "current_state":  lines.get(f"TK{n}_CURRENT", ""),
+            "changes_needed": lines.get(f"TK{n}_CHANGES", ""),
+            "future_state":   lines.get(f"TK{n}_FUTURE", ""),
+        }
+        for n in range(1, 6)
     ]
 
 

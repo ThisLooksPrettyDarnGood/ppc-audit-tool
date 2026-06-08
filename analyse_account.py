@@ -312,16 +312,21 @@ def score_conversion_tracking(data):
 
         # Spammable/low-value categories set as primary optimisation goal
         spammable_categories = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD"}
+        _lowval_plain = {"PAGE_VIEW": "a page-view action", "ENGAGEMENT": "an engagement action",
+                         "DOWNLOAD": "a download action"}
         primary_spammable = [
-            ca.get("name", "Unknown") for ca in active_actions
+            (ca.get("name", "Unknown"), ca.get("category", "")) for ca in active_actions
             if ca.get("include_in_conversions")
             and ca.get("category", "") in spammable_categories
         ]
         if primary_spammable:
+            plain = ", ".join(_lowval_plain.get(c, "a low-value action") for _, c in primary_spammable)
             issues.append(
-                "Low-value conversion action(s) included in primary optimisation: "
-                + ", ".join(primary_spammable) + ". "
-                "Campaigns may be optimising towards clicks or page views rather than real leads or sales."
+                f"Low-value conversion action set as a primary 'Conversions' goal that bidding optimises "
+                f"towards: {plain}. In plain terms, Google may be counting low-value website activity - "
+                "someone simply viewing a page, not making an enquiry - as a 'lead' (worth confirming on "
+                "the account, in case it has already been changed). Budget is then steered towards activity "
+                "rather than the genuine enquiries that create revenue."
             )
             # Tracking exists but a low-value action (e.g. page views) is a primary
             # conversion — serious, but not a total failure. Mark it "on the cusp"
@@ -680,21 +685,33 @@ def score_targeting_keywords(data):
     ]
     sqr_issues = []
     if converting_not_added:
+        # Name the top converting terms with their leads + cost-per-lead so the slide is concrete.
+        _top_conv = sorted(converting_not_added, key=lambda t: (t.get("conversions", 0) or 0), reverse=True)[:3]
+        _egs = []
+        for t in _top_conv:
+            conv = t.get("conversions", 0) or 0
+            spend = t.get("spend", 0) or 0
+            cpl = f" at ~£{round(spend / conv)} per lead" if conv else ""
+            _egs.append(f"'{t.get('term', '?')}' ({int(round(conv))} lead{'s' if round(conv) != 1 else ''}{cpl})")
+        eg_text = (" For example " + ", ".join(_egs) + ".") if _egs else ""
         sqr_issues.append(
             f"{len(converting_not_added)} search terms have generated conversions but are NOT added "
-            "as active keywords - so proven, money-making demand is being captured loosely (or not at "
-            "all) rather than controlled directly. This is also where a quietly dropped ball hides: a "
-            "query that used to convert can stop being captured after a page rename, spelling change "
-            "or paused keyword. Promoting these into dedicated keywords gives control over bids, ad "
-            "copy and landing pages."
+            f"as active keywords.{eg_text} Proven, money-making demand is being captured loosely (or "
+            "not at all) rather than controlled directly. This is also where a quietly dropped ball "
+            "hides: a query that used to convert can stop being captured after a page rename, spelling "
+            "change or paused keyword. Promoting these into dedicated keywords gives control over bids, "
+            "ad copy and landing pages."
         )
         if rag == "green":
             rag = "amber"
     if wasted_terms:
         wasted_spend = round(sum((t.get("spend", 0) or 0) for t in wasted_terms), 2)
+        _top_waste = sorted(wasted_terms, key=lambda t: (t.get("spend", 0) or 0), reverse=True)[:3]
+        _weg = ", ".join(f"'{t.get('term', '?')}' (£{round(t.get('spend', 0) or 0)})" for t in _top_waste)
+        _weg_text = (f" The biggest are {_weg}.") if _weg else ""
         sqr_issues.append(
             f"{len(wasted_terms)} high-traffic search terms have spent about £{wasted_spend:.2f} "
-            "without converting. Reviewing these for negative keywords would cut wasted spend."
+            f"without converting.{_weg_text} Reviewing these for negative keywords would cut wasted spend."
         )
         if rag == "green":
             rag = "amber"
@@ -718,11 +735,14 @@ def score_targeting_keywords(data):
             examples = rsa.get("low_strength_examples", [])
             eg = ""
             if examples:
-                names = ", ".join(f"'{e['ad_group']}' ({e['strength']})" for e in examples[:2])
+                names = ", ".join(f"the '{e['ad_group']}' ad group ({e['strength']})" for e in examples[:2])
                 eg = f" For example {names}."
+            # Show the weak-ad spend as a share of total spend so it's easy to weigh.
+            total_spend = (data.get("account_summary_30d", {}) or {}).get("spend", 0) or 0
+            pct = f" - around {round(rsa_low_spend / total_spend * 100)}% of total account spend" if total_spend else ""
             issues.append(
                 f"{rsa_low} of {rsa_total} live responsive search ads are rated Poor or Average "
-                f"ad strength, carrying about £{rsa_low_spend:.2f} of spend.{eg} "
+                f"ad strength, carrying about £{rsa_low_spend:.2f} of spend{pct}.{eg} "
                 "Ad strength reflects how distinct and relevant the headlines and descriptions are - "
                 "improving it tends to lift CTR and Quality Score."
             )
