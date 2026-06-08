@@ -146,6 +146,25 @@ _FILLER_MARKERS = (
     "is appropriate —", "set up and recording", "well-organised", "no action needed",
 )
 
+# Findings that are really the same story — keep only the highest-severity one so the
+# deck doesn't show two near-identical slides (e.g. broad-match by clicks AND by spend).
+_ISSUE_THEMES = {
+    "of keyword clicks come from Broad Match": "broad_match",
+    "of keyword spend is on Broad Match":      "broad_match",
+    # Low negatives is flagged by both the tracking and targeting checks — one slide.
+    "negative keyword(s) found across":        "negatives",
+    "negative keywords applied across":        "negatives",
+    # Per-campaign "spent with 0 conversions" — roll up to a single slide.
+    "with 0 conversions recorded":             "zero_conv_campaign",
+}
+
+
+def _theme_for(detail):
+    for needle, theme in _ISSUE_THEMES.items():
+        if needle in detail:
+            return theme
+    return None
+
 import re as _re
 
 def _largest_pound(text):
@@ -199,9 +218,19 @@ def select_top_issues(findings, max_issues=6):
                 "category": meta["category"],
                 "rag": meta["rag"],
                 "severity": meta["severity"] + bump,
+                "theme": _theme_for(detail),
             })
     flat.sort(key=lambda x: x["severity"], reverse=True)
-    return flat[:max_issues]
+    # Drop lower-severity duplicates of the same theme (keep the first / strongest).
+    seen_themes, deduped = set(), []
+    for item in flat:
+        th = item.get("theme")
+        if th and th in seen_themes:
+            continue
+        if th:
+            seen_themes.add(th)
+        deduped.append(item)
+    return deduped[:max_issues]
 
 
 def overall_rag_from_issues(issues):
@@ -873,8 +902,8 @@ def score_bidding_strategy(data):
                 if rag == "green":
                     rag = "amber"
 
-    # CPA check
-    if cpa > 0 and cpa > 150:
+    # CPA check (cpa is None when there are 0 conversions — guard against it)
+    if cpa and cpa > 150:
         issues.append(
             f"Cost per conversion is £{cpa:.2f}. "
             "Verify this aligns with the client's target CPA."
@@ -918,9 +947,10 @@ def score_bidding_strategy(data):
         rag = "red"
 
     if not issues:
+        cpa_note = f", CPA £{cpa:.2f}" if cpa else ""
         issues.append(
-            f"Bidding strategy is appropriate — {len(smart_campaigns)} smart bidding campaign(s), "
-            f"CPA £{cpa:.2f}."
+            f"Bidding strategy is appropriate — {len(smart_campaigns)} smart bidding campaign(s)"
+            f"{cpa_note}."
         )
 
     return {
