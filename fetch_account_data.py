@@ -73,7 +73,8 @@ def get_conversion_actions(client, cid):
             conversion_action.counting_type,
             conversion_action.include_in_conversions_metric,
             conversion_action.tag_snippets,
-            conversion_action.category
+            conversion_action.category,
+            conversion_action.attribution_model_settings.attribution_model
         FROM conversion_action
         WHERE conversion_action.status != 'REMOVED'
     """
@@ -89,6 +90,7 @@ def get_conversion_actions(client, cid):
             "category": ca.category.name,
             # False = no native tag = likely imported from GA4 or another source
             "has_tag_snippet": len(list(ca.tag_snippets)) > 0,
+            "attribution_model": ca.attribution_model_settings.attribution_model.name,
         })
     return actions
 
@@ -574,6 +576,33 @@ def get_location_target_types(client, cid):
     return out
 
 
+def get_search_network_settings(client, cid):
+    """
+    Per Search campaign: is it opted into Search Partners and/or the Display Network?
+    Both quietly siphon budget to lower-intent placements and are classic audit catches.
+    Caller wraps in try/except.
+    """
+    gaql = """
+        SELECT campaign.name,
+               campaign.network_settings.target_search_network,
+               campaign.network_settings.target_content_network,
+               campaign.network_settings.target_partner_search_network
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+          AND campaign.advertising_channel_type = 'SEARCH'
+    """
+    rows = run_query(client, cid, gaql)
+    out = []
+    for r in rows:
+        n = r.campaign.network_settings
+        out.append({
+            "campaign": r.campaign.name,
+            "search_partners": bool(n.target_partner_search_network),
+            "display": bool(n.target_content_network),
+        })
+    return out
+
+
 def get_ad_assets(client, cid):
     """
     Which ad-extension (asset) TYPES are live across the account (account-level + campaign-level),
@@ -864,6 +893,12 @@ def fetch_account_data(client_cid: str) -> dict:
     except Exception as e:
         print(f"    (ad-assets query failed: {e})"); ad_assets = None
 
+    print("  → Search Partners / Display opt-in...")
+    try:
+        network_settings = get_search_network_settings(client, cid)
+    except Exception as e:
+        print(f"    (network-settings query failed: {e})"); network_settings = None
+
     print("  → Account name (for brand detection)...")
     account_name = ""
     try:
@@ -915,6 +950,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "impression_share_lost": impression_share_lost,
         "location_target_types": location_target_types,
         "ad_assets": ad_assets,
+        "network_settings": network_settings,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
         "paused_campaign_history": paused_campaign_history,

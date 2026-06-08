@@ -113,6 +113,7 @@ _ISSUE_SIGNATURES = [
     ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
     # Efficiency / coverage / settings (expert checks)
     ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak
+    ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("losing a large share of impressions to Ad Rank", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank
     ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions
@@ -133,6 +134,7 @@ _ISSUE_SIGNATURES = [
     ("CTR is",                                     40, "amber",     "Targeting & Keywords"),
     # Conversion tracking (amber)
     ("imported from GA4",                          56, "amber",     "Conversion Tracking"),
+    ("still use last-click attribution",           50, "amber",     "Conversion Tracking"),
     ("set as primary 'Conversions'",               45, "amber",     "Conversion Tracking"),  # too many primary
     ("count 'Every' rather than 'Once'",           40, "amber",     "Conversion Tracking"),
     ("with 0 conversions recorded",                64, "amber",     "Conversion Tracking"),  # campaign spend, no conv
@@ -392,6 +394,23 @@ def score_conversion_tracking(data):
                 "Some lead conversions are set to count 'Every' rather than 'Once'. "
                 "For most lead actions 'Once' is more accurate (calls can be a fair exception) — "
                 "worth confirming these are counting the way you intend."
+            )
+            if rag == "green":
+                rag = "amber"
+
+        # Attribution model — last-click is outdated; data-driven is Google's recommended default.
+        last_click = [
+            ca.get("name", "Unknown") for ca in active_actions
+            if ca.get("include_in_conversions")
+            and ca.get("attribution_model") == "GOOGLE_ADS_LAST_CLICK"
+        ]
+        if last_click:
+            issues.append(
+                f"{len(last_click)} primary conversion action(s) still use last-click attribution. "
+                "Last-click gives all the credit to the final click and ignores the earlier searches that "
+                "helped create the enquiry, so smart bidding optimises on a partial picture. Switching to "
+                "data-driven attribution (Google's recommended default) lets bidding value the whole path "
+                "to an enquiry and usually improves efficiency."
             )
             if rag == "green":
                 rag = "amber"
@@ -1235,6 +1254,25 @@ def score_efficiency(data):
             "is - it typically cuts wasted spend and lowers cost per lead."
         )
         rag = "amber"
+
+    # ── Search Partners / Display opt-in (classic budget leak) ────────────────
+    nets = data.get("network_settings") or []
+    sp = [c["campaign"] for c in nets if c.get("search_partners")]
+    disp = [c["campaign"] for c in nets if c.get("display")]
+    if sp or disp:
+        bits = []
+        if sp:
+            bits.append("Search Partners (" + ", ".join("'%s'" % n for n in sp[:2]) + ")")
+        if disp:
+            bits.append("the Display Network (" + ", ".join("'%s'" % n for n in disp[:2]) + ")")
+        issues.append(
+            f"{len(set(sp) | set(disp))} Search campaign(s) are opted into " + " and ".join(bits) + ". "
+            "These send a share of your budget to lower-intent placements beyond Google search results, "
+            "often at a worse cost per lead. Unless they are proven to convert, turn them off so budget "
+            "concentrates on high-intent search traffic."
+        )
+        if rag == "green":
+            rag = "amber"
 
     # ── Ad extension (asset) coverage ─────────────────────────────────────────
     assets = data.get("ad_assets")
