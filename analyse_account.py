@@ -702,11 +702,17 @@ def score_targeting_keywords(data):
             if (t.get("conversions", 0) or 0) >= 1
             and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
         ]
+    # A term that has CONVERTED (over the longer window) must never also be called a
+    # "wasted, no-lead" term — that contradiction would undermine the whole audit. The
+    # 30-day wasted view can show 0 conversions for a term that converted over 90 days,
+    # so exclude any converting term by name.
+    _converting_names = {str(t.get("term", "")).strip().lower() for t in converting_not_added}
     wasted_terms = [
         t for t in search_terms
         if (t.get("conversions", 0) or 0) == 0
         and (t.get("spend", 0) or 0) >= 10
         and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
+        and str(t.get("term", "")).strip().lower() not in _converting_names
     ]
     sqr_issues = []
     if converting_not_added:
