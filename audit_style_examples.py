@@ -30,6 +30,9 @@ HOUSE STYLE — how our audit team actually writes. Match this voice closely:
 - Never alarmist, never salesy in the analysis. Confident and consultative.
 - British English spelling throughout (optimise, behaviour, prioritise).
 
+MONEY: always show money in whole pounds, no pence. Write £239, not £239.58; £1,620, not
+£1,620.55. Drop the decimals entirely - never round up to the next pound.
+
 BE CONCISE — this is the biggest thing that separates us from generic AI copy:
 - ONE idea per bullet. Aim for 12-18 words; never pad a bullet to fit two thoughts.
 - Cut hedging words (currently, likely, may, can, potentially) unless they genuinely

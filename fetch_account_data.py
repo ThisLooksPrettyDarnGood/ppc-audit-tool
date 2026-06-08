@@ -540,21 +540,21 @@ def get_performance_summary(client, cid):
         print(f"  ⚠ SIS query failed (non-fatal): {e}")
 
     return {
-        # 30 days
-        "spend_30d":  f"£{t30['spend']:,.2f}",
+        # 30 days  (money shown in whole pounds, no pence)
+        "spend_30d":  f"£{int(t30['spend']):,}",
         "impr_30d":   f"{t30['impressions']:,}",
         "clicks_30d": f"{t30['clicks']:,}",
         "convs_30d":  f"{int(round(t30['conversions'])):,}",
         "cvr_30d":    f"{t30['cvr']}%" if t30["cvr"] is not None else "N/A",
-        "cpa_30d":    f"£{t30['cpa']:,.2f}" if t30["cpa"] else "N/A",
+        "cpa_30d":    f"£{int(t30['cpa']):,}" if t30["cpa"] else "N/A",
         "sis_30d":    f"{t30['sis']}%" if t30["sis"] else "N/A",
         # 12 months
-        "spend_12m":  f"£{t12['spend']:,.2f}",
+        "spend_12m":  f"£{int(t12['spend']):,}",
         "impr_12m":   f"{t12['impressions']:,}",
         "clicks_12m": f"{t12['clicks']:,}",
         "convs_12m":  f"{int(round(t12['conversions'])):,}",
         "cvr_12m":    f"{t12['cvr']}%" if t12["cvr"] is not None else "N/A",
-        "cpa_12m":    f"£{t12['cpa']:,.2f}" if t12["cpa"] else "N/A",
+        "cpa_12m":    f"£{int(t12['cpa']):,}" if t12["cpa"] else "N/A",
         "sis_12m":    f"{t12['sis']}%" if t12["sis"] else "N/A",
         # Raw numbers for GPT commentary
         "_raw": {"t30": t30, "t12": t12},

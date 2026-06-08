@@ -12,6 +12,7 @@ Saves output to: ~/Desktop/ppc-audit-tool/narrative_output.json
 """
 
 import os
+import re
 import json
 from openai import OpenAI
 from audit_style_examples import (
@@ -39,6 +40,9 @@ def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
     text = response.choices[0].message.content.strip()
     # Remove em dashes — a common LLM tell — and replace with a regular hyphen
     text = text.replace("—", " - ").replace("–", " - ")
+    # Money is shown in whole pounds (no pence) — drop the decimals: £239.58 -> £239.
+    # Safety net in case the model still writes pence despite the style rule.
+    text = re.sub(r'(£\d[\d,]*)\.\d{1,2}\b', r'\1', text)
     return text
 
 
