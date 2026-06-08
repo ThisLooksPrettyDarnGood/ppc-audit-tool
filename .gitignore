@@ -26,3 +26,6 @@ __pycache__/
 *.key
 *.docx
 sample_audits/
+
+# Local-only narrative eval harness (loads secrets at runtime — never push)
+_local_eval/

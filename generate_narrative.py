@@ -244,6 +244,7 @@ Key rules for this section:
 - If the account type is unknown, default to lead gen recommendations. Do NOT include a generic disclaimer about eCommerce — just give the lead gen advice confidently.
 - If Max Clicks is running, always recommend switching to Maximise Conversions — frame it as "your budget is optimising for website visits, not customers".
 - If bid strategies are inconsistent across campaigns, flag this as sending conflicting signals to Google.
+- If the findings mention paused campaigns that historically converted below the account's current CPA, treat this as a specific, high-value point: efficient activity may have been switched off and budget shifted to pricier conversions. Be humble and consultative - the data can't show why it was paused, so frame it as "worth reviewing whether lead quality (not cost) drove the pause" and recommend reviewing the data before reactivating, NOT blindly turning campaigns back on.
 - The WHY_IT_MATTERS bullets must explain what the wrong or under-powered bidding strategy is costing them in missed conversions or revenue — be specific about the learning state problem if conversion volume is low.
 """.strip()
 

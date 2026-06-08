@@ -377,6 +377,52 @@ def get_rsa_ad_strength(client, cid):
     }
 
 
+def get_paused_campaign_history(client, cid, lookback_days=90):
+    """
+    Paused campaigns and how they performed over a longer window (default 90 days),
+    so the analyser can spot efficient campaigns that were switched off. The standard
+    30-day campaign pull shows paused campaigns with ~0 recent metrics, so we need this
+    longer look-back to recover their historic CPA. Caller wraps in try/except.
+    """
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = today.strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT
+            campaign.id,
+            campaign.name,
+            campaign.advertising_channel_type,
+            metrics.cost_micros,
+            metrics.conversions
+        FROM campaign
+        WHERE campaign.status = 'PAUSED'
+          AND segments.date BETWEEN '{start}' AND '{end}'
+    """
+    rows = run_query(client, cid, gaql)
+
+    # Rows are segmented by date — aggregate per campaign id.
+    agg = {}
+    for row in rows:
+        c = row.campaign
+        m = row.metrics
+        key = str(c.id)
+        if key not in agg:
+            agg[key] = {"id": key, "name": c.name,
+                        "type": c.advertising_channel_type.name,
+                        "spend": 0.0, "conversions": 0.0}
+        agg[key]["spend"] += m.cost_micros / 1_000_000
+        agg[key]["conversions"] += m.conversions
+
+    history = []
+    for v in agg.values():
+        v["spend"] = round(v["spend"], 2)
+        v["conversions"] = round(v["conversions"], 2)
+        v["cpa"] = round(v["spend"] / v["conversions"], 2) if v["conversions"] > 0 else None
+        history.append(v)
+    return history
+
+
 def get_account_summary(client, cid):
     gaql = """
         SELECT
@@ -612,6 +658,15 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (RSA ad strength query failed: {e})")
         rsa_ad_strength = None
 
+    print("  → Paused campaign history (90d)...")
+    try:
+        paused_campaign_history = get_paused_campaign_history(client, cid)
+        if paused_campaign_history:
+            print(f"    {len(paused_campaign_history)} paused campaign(s) with history")
+    except Exception as e:
+        print(f"    (paused campaign history query failed: {e})")
+        paused_campaign_history = None
+
     print("  → 30-day account summary...")
     account_summary = get_account_summary(client, cid)
 
@@ -633,6 +688,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "audience_signals": audience_signals,
         "quality_scores": quality_scores,
         "rsa_ad_strength": rsa_ad_strength,
+        "paused_campaign_history": paused_campaign_history,
         "negative_keyword_count": neg_kw_total,
         "auto_apply_recommendations": auto_apply_enabled,
         "auto_apply_types": auto_apply_types,

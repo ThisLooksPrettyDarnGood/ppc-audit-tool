@@ -645,7 +645,11 @@ def score_bidding_strategy(data):
     summary = data.get("account_summary_30d", {})
     total_conversions = summary.get("conversions", 0)
     total_cost = summary.get("spend", 0)
-    cpa = summary.get("cpa", 0)
+    # Use the SAME 30-day CPA the deck shows on the Performance Summary table
+    # (campaign-level, from get_performance_summary) so a client never sees two
+    # different CPAs for the same period. Fall back to the customer-level figure.
+    perf_t30 = (data.get("performance_summary", {}) or {}).get("_raw", {}).get("t30", {})
+    cpa = perf_t30.get("cpa") or summary.get("cpa", 0)
 
     smart_bidding_strategies = {
         "TARGET_CPA", "TARGET_ROAS", "MAXIMIZE_CONVERSIONS",
@@ -746,6 +750,33 @@ def score_bidding_strategy(data):
         if rag == "green":
             rag = "amber"
 
+    # ── Paused campaigns with strong historic CPA (Max's Issue #3) ────────────
+    # If a campaign was paused despite historically converting more cheaply than the
+    # account currently does, that's worth a look — budget may have shifted to pricier
+    # conversions. Stay humble (the human audit does too): the pause may have been a
+    # lead-quality call we can't see from the data, so recommend REVIEW, not blind
+    # reactivation. Only fires with meaningful historic volume. Never escalates past amber.
+    paused_hist = data.get("paused_campaign_history") or []
+    efficient_paused = [
+        p for p in paused_hist
+        if (p.get("conversions", 0) or 0) >= 5
+        and p.get("cpa") and cpa and p["cpa"] < cpa
+    ]
+    if efficient_paused:
+        efficient_paused.sort(key=lambda p: p["cpa"])
+        names = ", ".join(
+            f"'{p['name']}' (historic CPA £{p['cpa']:.2f}, {int(round(p['conversions']))} conv)"
+            for p in efficient_paused[:3]
+        )
+        issues.append(
+            f"{len(efficient_paused)} paused campaign(s) historically converted below the account's "
+            f"current £{cpa:.2f} CPA: {names}. From the account data alone there's no clear sign they "
+            "underperformed on cost - worth checking whether lead quality, not cost, drove the pause "
+            "before deciding on reactivation."
+        )
+        if rag == "green":
+            rag = "amber"
+
     # Zero conversions with spend
     if total_conversions == 0 and total_cost > 50:
         issues.append(
@@ -769,6 +800,7 @@ def score_bidding_strategy(data):
             "manual_cpc_campaigns": len(manual_campaigns),
             "total_conversions_30d": total_conversions,
             "cpa_gbp": cpa,
+            "paused_efficient_count": len(efficient_paused),
         },
     }
 
