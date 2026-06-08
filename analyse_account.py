@@ -73,6 +73,7 @@ def analyse_account(data):
         "account_structure":   score_account_structure(data),
         "targeting_keywords":  score_targeting_keywords(data),
         "bidding_strategy":    score_bidding_strategy(data),
+        "efficiency":          score_efficiency(data),
         "summary_stats":       build_summary_stats(data),
         "account_type":        account_type,
         "performance_summary": data.get("performance_summary", {}),
@@ -110,6 +111,12 @@ _ISSUE_SIGNATURES = [
     ("on smart bidding recorded only",             50, "amber",     "Bidding Strategy"),
     ("using inconsistent bid strategies",          46, "amber",     "Bidding Strategy"),
     ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
+    # Efficiency / coverage / settings (expert checks)
+    ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak
+    ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
+    ("losing a large share of impressions to Ad Rank", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank
+    ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions
+    ("have a LOW score (4 or below)",              54, "amber",     "Ad Rank & Quality"),  # low Quality Score
     # Targeting & keywords
     ("Fading winner spotted by comparing",         72, "amber",     "Targeting & Keywords"),  # cross-window pattern (high value)
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend
@@ -204,6 +211,7 @@ def select_top_issues(findings, max_issues=6):
         "account_structure":   "Account Structure",
         "targeting_keywords":  "Targeting & Keywords",
         "bidding_strategy":    "Bidding Strategy",
+        "efficiency":          "Budget & Coverage",
     }
     flat = []
     for key, name in section_map.items():
@@ -699,6 +707,19 @@ def score_targeting_keywords(data):
     # Mirrors the human SQR review: (a) converting queries not yet added as
     # keywords, and (b) spend on terms that aren't converting (negative candidates).
     search_terms = data.get("top_search_terms", []) or []
+
+    # ── Brand vs non-brand: a top auditor never lets the client's OWN brand name be
+    # presented as "proven new demand" - brand is cheap and already theirs. Derive brand
+    # token(s) from the account name and exclude them from the SQR analysis below.
+    _generic = {"ltd", "limited", "pool", "pools", "leisure", "group", "services", "company",
+                "uk", "the", "ads", "account", "marketing", "co", "and"}
+    brand_tokens = [w.lower() for w in str(data.get("account_name", "")).split()
+                    if len(w) > 3 and w.lower() not in _generic]
+
+    def _is_brand(term):
+        t = str(term).lower()
+        return any(tok in t for tok in brand_tokens)
+
     # Prefer the dedicated 90-day query (catches winners that have tailed off / a page or
     # keyword change quietly stopped capturing) and fall back to the 30-day top terms.
     dedicated_converting = data.get("converting_unkeyworded_terms")
@@ -710,6 +731,9 @@ def score_targeting_keywords(data):
             if (t.get("conversions", 0) or 0) >= 1
             and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
         ]
+    # Drop the client's own brand terms from the converting list (not new demand).
+    if brand_tokens:
+        converting_not_added = [t for t in converting_not_added if not _is_brand(t.get("term", ""))]
     # ── Fading winners: terms that CONVERTED over 90 days but have gone quiet in the
     # last 30 (spend, no leads). This isn't a contradiction - it's the cross-window
     # pattern a good auditor hunts for (a page rename, a bid drop, a competitor moving in).
@@ -741,6 +765,7 @@ def score_targeting_keywords(data):
         and (t.get("spend", 0) or 0) >= 10
         and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
         and str(t.get("term", "")).strip().lower() not in _converting_names
+        and not _is_brand(t.get("term", ""))
     ]
     # The same search term can appear on several ad groups (separate rows) — aggregate by
     # term so counts and examples don't double-count (e.g. 'giles pool lewes' twice).
@@ -803,6 +828,31 @@ def score_targeting_keywords(data):
         )
         if rag == "green":
             rag = "amber"
+    # ── Quality Score (we already fetch it — now we use it) ───────────────────
+    qs_list = data.get("quality_scores") or []
+    scored = [q for q in qs_list if q.get("qs")]
+    low_qs = [q for q in scored if (q.get("qs") or 10) <= 4]
+    if scored and len(low_qs) >= max(5, round(0.25 * len(scored))):
+        worst = sorted(low_qs, key=lambda q: q.get("qs", 10))[:3]
+        egs = ", ".join(f"'{q.get('keyword', '?')}' (QS {q.get('qs')})" for q in worst)
+        # Roll up the most common weak component (ad relevance / landing page / expected CTR).
+        from collections import Counter as _C
+        weak_parts = _C()
+        for q in low_qs:
+            for part, key in (("ad relevance", "ad_relevance"), ("landing page experience", "landing_page"),
+                              ("expected CTR", "expected_ctr")):
+                if str(q.get(key, "")).upper().startswith(("BELOW", "BELOW_AVERAGE")):
+                    weak_parts[part] += 1
+        driver = weak_parts.most_common(1)[0][0] if weak_parts else "ad relevance and landing pages"
+        sqr_issues.append(
+            f"{len(low_qs)} of {len(scored)} keywords have a LOW Quality Score (4 or below), e.g. {egs}. "
+            f"Low Quality Score means you pay more per click and rank lower for the same bid - the most "
+            f"common weak point here is {driver}. Tightening keyword-to-ad relevance, landing page "
+            "experience and grouping keywords into tighter themes lifts Quality Score and lowers CPCs."
+        )
+        if rag == "green":
+            rag = "amber"
+
     # Lead the section with the search-query story — for many accounts the SQR IS the
     # real issue, more than match-type distribution (practitioner feedback).
     issues[:0] = sqr_issues
@@ -1125,6 +1175,93 @@ def _bs_headline(rag, smart, manual):
 # ─────────────────────────────────────────────
 # SUMMARY STATS
 # ─────────────────────────────────────────────
+
+def score_efficiency(data):
+    """
+    Expert checks that sit outside the original 4 sections: impression share lost
+    (budget vs rank), location targeting setting, and ad-extension coverage. Each is a
+    standard senior-auditor check. All inputs may be None (live query failed) → skip safely.
+    """
+    issues = []
+    rag = "green"
+    campaigns = data.get("campaigns", [])
+    account_type = detect_account_type(data)
+    AWARENESS = {"DISPLAY", "VIDEO", "DEMAND_GEN", "MULTI_CHANNEL"}
+
+    # ── Impression share lost to BUDGET (capped campaigns) ────────────────────
+    isl = data.get("impression_share_lost") or []
+    # Pair with conversions so we only push budget where it actually converts.
+    conv_by_name = {c.get("name"): (c.get("conversions_30d", 0) or 0) for c in campaigns}
+    budget_capped = [c for c in isl if (c.get("lost_budget", 0) or 0) >= 10]
+    if budget_capped:
+        budget_capped.sort(key=lambda c: c.get("lost_budget", 0), reverse=True)
+        names = ", ".join(f"'{c['campaign']}' (losing {c['lost_budget']:.0f}% to budget)"
+                          for c in budget_capped[:3])
+        issues.append(
+            f"{len(budget_capped)} Search campaign(s) are capped by budget - they stop showing because "
+            f"the budget runs out, not because demand dries up: {names}. Where these convert efficiently, "
+            "you are leaving leads on the table every day; raise their budget or reallocate from weaker "
+            "activity to capture more of the searches you already win."
+        )
+        if rag == "green":
+            rag = "amber"
+
+    # ── Impression share lost to RANK (Ad Rank / quality, not money) ──────────
+    rank_lost = [c for c in isl if (c.get("lost_rank", 0) or 0) >= 30]
+    if rank_lost:
+        rank_lost.sort(key=lambda c: c.get("lost_rank", 0), reverse=True)
+        names = ", ".join(f"'{c['campaign']}' ({c['lost_rank']:.0f}%)" for c in rank_lost[:3])
+        issues.append(
+            f"{len(rank_lost)} Search campaign(s) are losing a large share of impressions to Ad Rank, "
+            f"not budget: {names}. Ad Rank is driven by bids, ad relevance and Quality Score - so this is "
+            "a quality/bid problem, not a money one. Tighter keyword-to-ad relevance, stronger ad copy and "
+            "better landing pages recover this visibility without simply spending more."
+        )
+        if rag == "green":
+            rag = "amber"
+
+    # ── Location targeting setting (Presence vs Presence-or-interest) ─────────
+    loc = data.get("location_target_types") or []
+    poi = [c for c in loc if c.get("geo") == "PRESENCE_OR_INTEREST" and c.get("type") not in AWARENESS]
+    if poi:
+        names = ", ".join(f"'{c['campaign']}'" for c in poi[:3])
+        local_note = (" For a local business this is a major silent leak."
+                      if account_type in ("lead_gen", "unknown") else "")
+        issues.append(
+            f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
+            f"{names}. This shows your ads to people merely INTERESTED in your area, including those who "
+            f"are nowhere near it (e.g. someone who once searched your town).{local_note} Switching to "
+            "'Presence (people in, or regularly in, your locations)' is one of the highest-ROI fixes there "
+            "is - it typically cuts wasted spend and lowers cost per lead."
+        )
+        rag = "amber"
+
+    # ── Ad extension (asset) coverage ─────────────────────────────────────────
+    assets = data.get("ad_assets")
+    if assets is not None:
+        present = set(assets.keys())
+        labels = {"SITELINK": "sitelinks", "CALLOUT": "callouts", "STRUCTURED_SNIPPET": "structured snippets",
+                  "CALL": "call (click-to-call) extensions", "AD_IMAGE": "image extensions",
+                  "LEAD_FORM": "lead-form extensions", "PRICE": "price extensions", "PROMOTION": "promotion extensions"}
+        core = {"SITELINK", "CALLOUT", "STRUCTURED_SNIPPET", "CALL", "AD_IMAGE"}
+        missing_core = [labels[t] for t in ("CALL", "AD_IMAGE", "SITELINK", "CALLOUT", "STRUCTURED_SNIPPET")
+                        if t not in present]
+        if missing_core:
+            issues.append(
+                f"Your ads are missing high-value extension types: {', '.join(missing_core)}. Extensions "
+                "make ads bigger and more clickable and feed Ad Rank - all at no extra cost per click. "
+                "Call and image extensions in particular tend to lift click-through rate by 10-20%. Add the "
+                "missing types across your campaigns."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    if not issues:
+        issues.append("Coverage and settings look healthy: location targeting, impression share and ad "
+                      "extensions are in good shape - no change needed here.")
+
+    return {"rag": rag, "headline": "Coverage & settings", "issues": issues, "data_points": {}}
+
 
 def build_summary_stats(data):
     s = data.get("account_summary_30d", {})

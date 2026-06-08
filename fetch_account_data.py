@@ -521,6 +521,77 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
     return history
 
 
+def get_impression_share_lost(client, cid):
+    """
+    Per Search campaign: impression share, and WHY it's being lost — to budget (capped,
+    could spend more) vs to rank (Ad Rank / quality / bids). A top auditor always splits
+    these because the fix is completely different. Caller wraps in try/except.
+    """
+    gaql = """
+        SELECT campaign.name,
+               metrics.search_impression_share,
+               metrics.search_budget_lost_impression_share,
+               metrics.search_rank_lost_impression_share
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+          AND campaign.advertising_channel_type = 'SEARCH'
+          AND segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    out = []
+    for r in rows:
+        m = r.metrics
+        out.append({
+            "campaign": r.campaign.name,
+            "sis": round((m.search_impression_share or 0) * 100, 1),
+            "lost_budget": round((m.search_budget_lost_impression_share or 0) * 100, 1),
+            "lost_rank": round((m.search_rank_lost_impression_share or 0) * 100, 1),
+        })
+    return out
+
+
+def get_location_target_types(client, cid):
+    """
+    Per campaign: the location targeting 'Target' setting. PRESENCE = people physically
+    in/regularly in the area; PRESENCE_OR_INTEREST = also people merely *interested* in it
+    (the default, and the #1 silent budget leak for local businesses). Caller wraps in try/except.
+    """
+    gaql = """
+        SELECT campaign.name,
+               campaign.geo_target_type_setting.positive_geo_target_type,
+               campaign.advertising_channel_type
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+    """
+    rows = run_query(client, cid, gaql)
+    out = []
+    for r in rows:
+        out.append({
+            "campaign": r.campaign.name,
+            "type": r.campaign.advertising_channel_type.name,
+            "geo": r.campaign.geo_target_type_setting.positive_geo_target_type.name,
+        })
+    return out
+
+
+def get_ad_assets(client, cid):
+    """
+    Which ad-extension (asset) TYPES are live across the account (account-level + campaign-level),
+    so we can flag missing high-value types. Assets lift CTR/Ad Rank; missing core types is a
+    near-universal audit finding. Note the API enum uses AD_IMAGE for image extensions.
+    Caller wraps in try/except.
+    """
+    from collections import Counter
+    counts = Counter()
+    for r in run_query(client, cid, "SELECT customer_asset.field_type FROM customer_asset"):
+        counts[r.customer_asset.field_type.name] += 1
+    for r in run_query(client, cid,
+                       "SELECT campaign.status, campaign_asset.field_type FROM campaign_asset "
+                       "WHERE campaign.status = 'ENABLED'"):
+        counts[r.campaign_asset.field_type.name] += 1
+    return dict(counts)
+
+
 def get_account_summary(client, cid):
     gaql = """
         SELECT
@@ -775,6 +846,32 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → Quality scores...")
     quality_scores = get_quality_scores(client, cid)
 
+    print("  → Impression share lost (budget vs rank)...")
+    try:
+        impression_share_lost = get_impression_share_lost(client, cid)
+    except Exception as e:
+        print(f"    (IS-lost query failed: {e})"); impression_share_lost = None
+
+    print("  → Location targeting setting...")
+    try:
+        location_target_types = get_location_target_types(client, cid)
+    except Exception as e:
+        print(f"    (location-type query failed: {e})"); location_target_types = None
+
+    print("  → Ad assets / extensions...")
+    try:
+        ad_assets = get_ad_assets(client, cid)
+    except Exception as e:
+        print(f"    (ad-assets query failed: {e})"); ad_assets = None
+
+    print("  → Account name (for brand detection)...")
+    account_name = ""
+    try:
+        for r in run_query(client, cid, "SELECT customer.descriptive_name FROM customer"):
+            account_name = r.customer.descriptive_name; break
+    except Exception as e:
+        print(f"    (account-name query failed: {e})")
+
     print("  → RSA ad strength...")
     try:
         rsa_ad_strength = get_rsa_ad_strength(client, cid)
@@ -815,6 +912,10 @@ def fetch_account_data(client_cid: str) -> dict:
         "location_targeting": location_targeting,
         "audience_signals": audience_signals,
         "quality_scores": quality_scores,
+        "impression_share_lost": impression_share_lost,
+        "location_target_types": location_target_types,
+        "ad_assets": ad_assets,
+        "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
         "paused_campaign_history": paused_campaign_history,
         "negative_keyword_count": neg_kw_total,

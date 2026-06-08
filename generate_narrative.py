@@ -310,11 +310,38 @@ CATEGORY_RULES = {
     ),
 }
 
+CATEGORY_RULES["Budget & Coverage"] = (
+    "- Keep the specific campaign names and the exact percentages from the finding (e.g. \"'Kent "
+    "Pool builder' loses 19% to budget\").\n"
+    "- Budget-capped (lost to budget): frame as opportunity - the account already WINS these searches "
+    "but runs out of money; raising budget or reallocating captures more leads. Only push budget where "
+    "it converts well.\n"
+    "- 'Presence or interest' location: explain plainly that ads show to people merely interested in the "
+    "area (not actually there), and that switching to 'Presence' is a high-ROI, low-effort fix.\n"
+    "- The WHY_IT_MATTERS bullets must be about leads and wasted money, not technical settings."
+)
+CATEGORY_RULES["Ad Rank & Quality"] = (
+    "- Keep the specific campaign names / keywords and percentages.\n"
+    "- Lost-to-rank and low Quality Score are quality problems, NOT budget ones - the fix is ad "
+    "relevance, keyword-to-ad tightness, and landing page experience, not spending more.\n"
+    "- Be concrete about the lever (e.g. 'most of these keywords have below-average ad relevance')."
+)
+CATEGORY_RULES["Ads & Assets"] = (
+    "- Name the exact missing extension types from the finding (e.g. call extensions, image extensions).\n"
+    "- Frame as free upside: extensions make ads bigger and more clickable and feed Ad Rank at no extra "
+    "cost per click. For a phone-driven or visual business, call and image assets matter most.\n"
+    "- Recommend adding the missing types across campaigns and keeping at least 4 sitelinks, 4 callouts, "
+    "2 structured snippets."
+)
+
 _CATEGORY_EXAMPLE_KEY = {
     "Conversion Tracking": "conversion_tracking",
     "Account Structure":   "account_structure",
     "Targeting & Keywords": "targeting_keywords",
     "Bidding Strategy":    "bidding_strategy",
+    "Budget & Coverage":   "account_structure",
+    "Ad Rank & Quality":   "targeting_keywords",
+    "Ads & Assets":        "account_structure",
 }
 
 
