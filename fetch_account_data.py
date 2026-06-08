@@ -1,7 +1,7 @@
 import os
 """
 fetch_account_data.py
-Step 3 — PPC Team Audit Tool
+Step 3  -  PPC Team Audit Tool
 """
 
 import json
@@ -74,6 +74,7 @@ def get_conversion_actions(client, cid):
             conversion_action.include_in_conversions_metric,
             conversion_action.tag_snippets,
             conversion_action.category,
+            conversion_action.type,
             conversion_action.attribution_model_settings.attribution_model
         FROM conversion_action
         WHERE conversion_action.status != 'REMOVED'
@@ -88,6 +89,7 @@ def get_conversion_actions(client, cid):
             "counting_type": ca.counting_type.name,
             "include_in_conversions": ca.include_in_conversions_metric,
             "category": ca.category.name,
+            "type": ca.type.name,
             # False = no native tag = likely imported from GA4 or another source
             "has_tag_snippet": len(list(ca.tag_snippets)) > 0,
             "attribution_model": ca.attribution_model_settings.attribution_model.name,
@@ -251,7 +253,7 @@ def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
     """
     Search terms that have CONVERTED over a longer window (default 90 days) but are NOT
     added as keywords (search_term_view.status = NONE). This catches proven demand the
-    account is paying for via broad/loose matching instead of capturing directly — and,
+    account is paying for via broad/loose matching instead of capturing directly  -  and,
     crucially, the 'dropped ball' case where a product used to convert but a page/keyword
     change quietly stopped it being captured. The 30-day top-terms pull would miss those.
     Caller wraps in try/except.
@@ -394,7 +396,7 @@ def get_rsa_ad_strength(client, cid):
     higher CPCs, so weak ad strength is a genuine efficiency leak worth surfacing.
 
     Returns a summary dict. Only ENABLED RSAs count toward the quality picture
-    (paused ads aren't serving). Wrapped by the caller in try/except — if the query
+    (paused ads aren't serving). Wrapped by the caller in try/except  -  if the query
     fails for any reason it must not break the pipeline.
     """
     gaql = """
@@ -467,7 +469,7 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
     """
     rows = run_query(client, cid, gaql)
 
-    # Rows are segmented by date — aggregate per campaign id.
+    # Rows are segmented by date  -  aggregate per campaign id.
     agg = {}
     for row in rows:
         c = row.campaign
@@ -481,7 +483,7 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
         agg[key]["spend"] += m.cost_micros / 1_000_000
         agg[key]["conversions"] += m.conversions
 
-    # Second query: PRIMARY conversions (metrics.conversions — what drives the headline
+    # Second query: PRIMARY conversions (metrics.conversions  -  what drives the headline
     # CPA) split by category, so we can tell whether a tempting CPA is built on genuine
     # leads or on low-value actions (page views / engagement) set as primary. Can't be
     # combined with cost_micros in one query, hence a separate pass. Conversion-quality dig.
@@ -517,7 +519,7 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
         v["lowval_conv"] = round(v["lowval_conv"], 2)
         # Share of PRIMARY conversions that are genuine leads (vs low-value primaries).
         v["genuine_pct"] = round(v["genuine_conv"] / v["conversions"] * 100) if v["conversions"] > 0 else None
-        # The CPA on genuine leads only — the real cost per enquiry.
+        # The CPA on genuine leads only  -  the real cost per enquiry.
         v["real_cpa"] = round(v["spend"] / v["genuine_conv"], 2) if v["genuine_conv"] > 0 else None
         history.append(v)
     return history
@@ -525,7 +527,7 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
 
 def get_impression_share_lost(client, cid):
     """
-    Per Search campaign: impression share, and WHY it's being lost — to budget (capped,
+    Per Search campaign: impression share, and WHY it's being lost  -  to budget (capped,
     could spend more) vs to rank (Ad Rank / quality / bids). A top auditor always splits
     these because the fix is completely different. Caller wraps in try/except.
     """
@@ -574,6 +576,43 @@ def get_location_target_types(client, cid):
             "geo": r.campaign.geo_target_type_setting.positive_geo_target_type.name,
         })
     return out
+
+
+def _brand_tokens_from(name):
+    generic = {"ltd", "limited", "pool", "pools", "leisure", "group", "services", "company",
+               "uk", "the", "ads", "account", "marketing", "co", "and"}
+    return [w.lower() for w in str(name).split() if len(w) > 3 and w.lower() not in generic]
+
+
+def get_brand_leakage(client, cid, account_name):
+    """
+    Are the client's OWN brand searches being captured by NON-brand campaigns (instead of
+    a dedicated Brand campaign)? That means brand isn't excluded as a negative in the other
+    campaigns - a small but telling sign of missing brand/non-brand separation. Returns the
+    non-brand campaigns picking up brand traffic. Caller wraps in try/except.
+    """
+    tokens = _brand_tokens_from(account_name)
+    if not tokens:
+        return []
+    gaql = """
+        SELECT search_term_view.search_term, campaign.name,
+               metrics.cost_micros, metrics.conversions
+        FROM search_term_view
+        WHERE segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    leak = {}
+    for r in rows:
+        term = r.search_term_view.search_term.lower()
+        if any(tok in term for tok in tokens):
+            camp = r.campaign.name
+            if "brand" not in camp.lower():   # leaking into a NON-brand campaign
+                d = leak.setdefault(camp, {"campaign": camp, "spend": 0.0, "conversions": 0.0})
+                d["spend"] += r.metrics.cost_micros / 1_000_000
+                d["conversions"] += r.metrics.conversions
+    out = [{"campaign": v["campaign"], "spend": round(v["spend"], 2),
+            "conversions": round(v["conversions"], 2)} for v in leak.values()]
+    return sorted(out, key=lambda x: x["spend"], reverse=True)
 
 
 def get_search_network_settings(client, cid):
@@ -677,7 +716,7 @@ def get_performance_summary(client, cid):
         t["sis"]  = round(t["sis_sum"] / t["sis_count"] * 100, 1) if t["sis_count"] > 0 else None
         return t
 
-    # Core metrics — no SIS (works for all campaign types including PMax)
+    # Core metrics  -  no SIS (works for all campaign types including PMax)
     gaql_30d = f"""
         SELECT
             metrics.cost_micros,
@@ -698,7 +737,7 @@ def get_performance_summary(client, cid):
         WHERE campaign.status != 'REMOVED'
           AND segments.date BETWEEN '{date_12m_start}' AND '{date_today}'
     """
-    # SIS — Search campaigns only (PMax doesn't support this metric)
+    # SIS  -  Search campaigns only (PMax doesn't support this metric)
     # Impression share trio: overall SIS, absolute-top (very first ad), and top-of-page.
     # A falling absolute-top / top share signals losing visibility on your best terms.
     _sis_cols = ("metrics.search_impression_share, "
@@ -739,7 +778,7 @@ def get_performance_summary(client, cid):
         t["abs_top"] = round(abt_s / abt_n * 100, 1) if abt_n else None
         t["top"]     = round(top_s / top_n * 100, 1) if top_n else None
 
-    # Overlay impression-share metrics separately — safe to fail
+    # Overlay impression-share metrics separately  -  safe to fail
     try:
         _avg_share(t30, run_query(client, cid, gaql_sis_30d))
         _avg_share(t12, run_query(client, cid, gaql_sis_12m))
@@ -907,6 +946,12 @@ def fetch_account_data(client_cid: str) -> dict:
     except Exception as e:
         print(f"    (account-name query failed: {e})")
 
+    print("  → Brand leakage into non-brand campaigns...")
+    try:
+        brand_leakage = get_brand_leakage(client, cid, account_name)
+    except Exception as e:
+        print(f"    (brand-leakage query failed: {e})"); brand_leakage = None
+
     print("  → RSA ad strength...")
     try:
         rsa_ad_strength = get_rsa_ad_strength(client, cid)
@@ -951,6 +996,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "location_target_types": location_target_types,
         "ad_assets": ad_assets,
         "network_settings": network_settings,
+        "brand_leakage": brand_leakage,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
         "paused_campaign_history": paused_campaign_history,
@@ -973,4 +1019,4 @@ if __name__ == "__main__":
     print(f"\nCampaigns found: {len(result['campaigns'])}")
     for c in result["campaigns"][:5]:
         tcpa = c.get("target_cpa_gbp")
-        print(f"  {c['name']} ({c['type']}) — £{c['spend_30d']} spend / tCPA: {tcpa}")
+        print(f"  {c['name']} ({c['type']})  -  £{c['spend_30d']} spend / tCPA: {tcpa}")

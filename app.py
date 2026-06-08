@@ -127,7 +127,7 @@ def _audits_today() -> int:
 def _password_gate():
     """
     Require a shared team password before the tool can be used.
-    Only active if APP_PASSWORD is set in secrets — so the app is never
+    Only active if APP_PASSWORD is set in secrets  -  so the app is never
     bricked if the password hasn't been configured yet.
     """
     try:
@@ -151,7 +151,7 @@ def _password_gate():
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
-st.title("📊 PPC Team — Audit Generator")
+st.title("📊 PPC Team  -  Audit Generator")
 _password_gate()
 st.markdown("Fill in the details below and click **Run Audit** to generate the Google Slides deck.")
 
@@ -164,7 +164,7 @@ try:
     _sheet_id = st.secrets.get("AUDIT_LOG_SHEET_ID", "") or os.environ.get("AUDIT_LOG_SHEET_ID", "")
     if _sheet_id:
         os.environ["AUDIT_LOG_SHEET_ID"] = _sheet_id
-        # Build creds directly from secrets — works before any audit has run
+        # Build creds directly from secrets  -  works before any audit has run
         _stats_creds = _StatsCreds(
             token=None,
             refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
@@ -200,12 +200,12 @@ with st.form("audit_form"):
     )
 
     st.markdown("---")
-    st.markdown("**Slide 3 — Client context**")
+    st.markdown("**Slide 3  -  Client context**")
     st.caption("Paste the completed market analysis questionnaire below. The AI will extract the key details automatically.")
 
     raw_questionnaire = st.text_area(
         "Market Analysis Questionnaire",
-        placeholder="Paste the full questionnaire response here — objectives, spend, success metric, pain points, etc.",
+        placeholder="Paste the full questionnaire response here  -  objectives, spend, success metric, pain points, etc.",
         height=220,
     )
 
@@ -224,19 +224,19 @@ if submitted:
         st.error(f"Please fill in: {', '.join(missing)}")
         st.stop()
 
-    # ── Guardrail: daily cap (whole team) — only enforced when a limit is set ──
+    # ── Guardrail: daily cap (whole team)  -  only enforced when a limit is set ──
     _limit = _daily_limit()
     if _limit > 0:
         _today_count = _audits_today()
         if _today_count >= _limit:
             st.error(
-                f"🛑 Daily limit reached — the team has run {_today_count} audits today "
+                f"🛑 Daily limit reached  -  the team has run {_today_count} audits today "
                 f"(cap is {_limit}). This protects our OpenAI credit. "
                 f"Please try again tomorrow, or ask Dan if you need the cap raised."
             )
             st.stop()
 
-    # Normalise CID — strip hyphens for the API
+    # Normalise CID  -  strip hyphens for the API
     cid_clean = client_cid.strip().replace("-", "")
 
     st.markdown("---")
@@ -266,7 +266,7 @@ if submitted:
         # Expose secrets as env vars so existing modules can read them
         os.environ["OPENAI_API_KEY"]              = get_secret("OPENAI_API_KEY")
         os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"]  = get_secret("GOOGLE_ADS_DEVELOPER_TOKEN")
-        # Audit log sheet ID — set here so the end-of-run log write can find it
+        # Audit log sheet ID  -  set here so the end-of-run log write can find it
         _log_sheet_id = st.secrets.get("AUDIT_LOG_SHEET_ID", "") or os.environ.get("AUDIT_LOG_SHEET_ID", "")
         if _log_sheet_id:
             os.environ["AUDIT_LOG_SHEET_ID"] = _log_sheet_id
@@ -323,7 +323,19 @@ if submitted:
             _duration = _time.time() - _audit_start
             _tokens   = narrative.get("_tokens_used", 0)
 
-            # Build credentials directly from secrets — reliable on cloud
+            # Full ranked findings list (incl. those below the 6-slide cut) for the
+            # internal email, so the auditor can reference everything on the call.
+            try:
+                from analyse_account import select_top_issues as _sti
+                _all_findings = _sti(findings, max_issues=50, apply_floor=False)
+                _findings_lines = [
+                    f"[{i.get('category','')}] " + i.get("detail", "").split(". ")[0].strip()
+                    for i in _all_findings
+                ]
+            except Exception:
+                _findings_lines = []
+
+            # Build credentials directly from secrets  -  reliable on cloud
             _lc = _Creds(
                 token=None,
                 refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
@@ -341,7 +353,8 @@ if submitted:
                                      _duration, slides_url, _tokens)
             _email_err = _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
                                                 _duration, slides_url, _tokens,
-                                                recipient=runner_email.strip())
+                                                recipient=runner_email.strip(),
+                                                findings_lines=_findings_lines)
 
             # Surface results so we are never flying blind again
             if _log_err:
@@ -395,7 +408,7 @@ if submitted:
                 )
                 st.stop()
         else:
-            # Non-transient — something we should actually fix
+            # Non-transient  -  something we should actually fix
             progress_bar.empty()
             status_box.empty()
             st.error(

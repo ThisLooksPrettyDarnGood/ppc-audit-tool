@@ -56,7 +56,7 @@ def replace(old, new):
 
 RAG_DOT = {
     "RED":       "🔴",
-    "AMBER_RED": "🟠🔴",   # "on the cusp" — tracking exists but a serious, red-leaning issue
+    "AMBER_RED": "🟠🔴",   # "on the cusp"  -  tracking exists but a serious, red-leaning issue
     "AMBER":     "🟠",
     "GREEN":     "🟢",
 }
@@ -164,7 +164,7 @@ def rag_dot(rag_str):
 
 def _delete_unused_issue_slides(slides_service, presentation_id):
     """Issue-led decks fill a variable number of issue slides. Any issue slide left
-    with unfilled {{ISSUE_n_*}} placeholders is one we didn't need — delete the whole
+    with unfilled {{ISSUE_n_*}} placeholders is one we didn't need  -  delete the whole
     slide so the client never sees a blank. Identifies issue slides purely by the
     leftover placeholder, so it never touches a populated slide.
     """
@@ -234,7 +234,7 @@ def main():
     slides_service = build("slides", "v1", credentials=creds)
     drive_service  = build("drive",  "v3", credentials=creds)
 
-    deck_title = f"PPC Audit — {client_name}"
+    deck_title = f"PPC Audit  -  {client_name}"
     print(f"Creating copy of template: '{deck_title}'...")
     copied = drive_service.files().copy(
         fileId=TEMPLATE_PRESENTATION_ID,
@@ -287,7 +287,7 @@ def main():
     # The template carries 6 issue slides. We fill as many as we have issues, using
     # each issue's own title (not a fixed category). Any slide left unfilled is
     # deleted after population (see _delete_unused_issue_slides) so the client never
-    # sees a blank — find 3 issues, get 3 slides; find 6, get 6.
+    # sees a blank  -  find 3 issues, get 3 slides; find 6, get 6.
     MAX_ISSUE_SLIDES = 6
     for i in range(1, MAX_ISSUE_SLIDES + 1):
         n = str(i)
@@ -301,7 +301,7 @@ def main():
             requests.append(replace(f"{{{{ISSUE_{n}_HAPPENING}}}}",      issue.get("whats_happening", "")))
             requests.append(replace(f"{{{{ISSUE_{n}_MATTERS}}}}",        issue.get("why_it_matters", "")))
             requests.append(replace(f"{{{{ISSUE_{n}_RECOMMENDATION}}}}", bullets(issue.get("recommendations", []))))
-        # else: leave this issue slide's placeholders unfilled — it gets deleted below.
+        # else: leave this issue slide's placeholders unfilled  -  it gets deleted below.
 
     # ── Key Opportunities slide ──
     requests.append(replace("{{KEY_OPPORTUNITIES}}", to_bullets(opportunities)))
@@ -342,7 +342,7 @@ def main():
         except Exception as e:
             print(f"  ⚠ Could not swap dial image: {e}")
     else:
-        print("  ⚠ No dial config found — skipping image swap.")
+        print("  ⚠ No dial config found  -  skipping image swap.")
 
     # ── Insert client logo on slide 1 ─────────────────────────────────────────
     if website_url:
@@ -352,9 +352,9 @@ def main():
             print(f"  Logo downloaded ({len(img_bytes)} bytes, {content_type})")
             _insert_logo(slides_service, drive_service, new_id, img_bytes, content_type)
         else:
-            print("  ⚠ Could not download a logo — skipping.")
+            print("  ⚠ Could not download a logo  -  skipping.")
     else:
-        print("  ⚠ No website URL in narrative — skipping logo.")
+        print("  ⚠ No website URL in narrative  -  skipping logo.")
 
     replaced = sum(
         r.get("replaceAllTextResponse", {}).get("occurrencesChanged", 0)

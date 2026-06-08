@@ -1,5 +1,5 @@
 """
-Step 5 — AI Narrative Layer
+Step 5  -  AI Narrative Layer
 Takes the findings dict from analyse_account.py and generates slide copy
 for each of the 4 audit sections via OpenAI.
 
@@ -38,9 +38,10 @@ def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
     if response.usage:
         _total_tokens += response.usage.total_tokens
     text = response.choices[0].message.content.strip()
-    # Remove em dashes — a common LLM tell — and replace with a regular hyphen
-    text = text.replace("—", " - ").replace("–", " - ")
-    # Money is shown in whole pounds (no pence) — drop the decimals: £239.58 -> £239.
+    # Remove em/en dashes (a common LLM tell) and replace with a spaced hyphen.
+    # Unicode escapes so a source-wide dash scrub can't accidentally neutralise this.
+    text = text.replace("\u2014", " - ").replace("\u2013", " - ")
+    # Money is shown in whole pounds (no pence)  -  drop the decimals: £239.58 -> £239.
     # Safety net in case the model still writes pence despite the style rule.
     text = re.sub(r'(£\d[\d,]*)\.\d{1,2}\b', r'\1', text)
     return text
@@ -91,27 +92,27 @@ def _parse_response(raw: str) -> dict:
 
 SYSTEM_PROMPT = """
 You are a senior Google Ads auditor writing copy for a client-facing audit presentation.
-Your tone is professional, direct, and consultative — not salesy.
+Your tone is professional, direct, and consultative  -  not salesy.
 You write for non-technical business owners who care about results, not jargon.
 Always use British English spelling (e.g. optimise, recognise, behaviour, prioritise).
 
 Each section of the audit follows this exact 3-part structure used by the audit team:
-1. What's happening — 2 short bullet points describing the current account situation in plain English.
-2. Why it matters commercially — 2 short bullet points on the real business impact. What is this costing them? What are they missing out on? Keep it grounded in pounds, performance, and growth.
-3. Our recommendation — 2 to 3 specific, actionable steps starting with a verb.
+1. What's happening  -  2 short bullet points describing the current account situation in plain English.
+2. Why it matters commercially  -  2 short bullet points on the real business impact. What is this costing them? What are they missing out on? Keep it grounded in pounds, performance, and growth.
+3. Our recommendation  -  2 to 3 specific, actionable steps starting with a verb.
 
 Keep the headline under 10 words.
-Each WHATS_HAPPENING bullet: aim 12-18 words, hard max 22 — one fact, plainly stated.
-Each WHY_IT_MATTERS bullet: aim 12-18 words, hard max 24 — one commercial consequence.
+Each WHATS_HAPPENING bullet: aim 12-18 words, hard max 22  -  one fact, plainly stated.
+Each WHY_IT_MATTERS bullet: aim 12-18 words, hard max 24  -  one commercial consequence.
 Each recommendation must be a single actionable sentence starting with a verb (under 18 words).
 Do not pack two ideas into one bullet. Shorter and sharper beats longer and complete.
 
 Respond in EXACTLY this format (no extra text, no markdown):
 HEADLINE: <headline>
-WHATS_HAPPENING_1: <first bullet point — what is happening in the account>
-WHATS_HAPPENING_2: <second bullet point — what is happening in the account>
-WHY_IT_MATTERS_1: <first bullet point — commercial impact in plain English>
-WHY_IT_MATTERS_2: <second bullet point — commercial impact in plain English>
+WHATS_HAPPENING_1: <first bullet point  -  what is happening in the account>
+WHATS_HAPPENING_2: <second bullet point  -  what is happening in the account>
+WHY_IT_MATTERS_1: <first bullet point  -  commercial impact in plain English>
+WHY_IT_MATTERS_2: <second bullet point  -  commercial impact in plain English>
 REC1: <first recommendation>
 REC2: <second recommendation>
 REC3: <third recommendation>
@@ -141,12 +142,12 @@ Issues found:
 Supporting data: {data}
 
 Key rules for this section:
-- If the primary conversion is imported from GA4 rather than a native web tag, flag this explicitly — it prevents Enhanced Conversions from working.
+- If the primary conversion is imported from GA4 rather than a native web tag, flag this explicitly  -  it prevents Enhanced Conversions from working.
 - Always recommend replacing GA4 imports with a direct web-based conversion tag.
 - Always recommend checking that Enhanced Conversions is correctly configured.
 - If there is a phone number on the website, recommend reviewing call tracking.
 - The WHY_IT_MATTERS bullets must explain what the missing data means for the bidding algorithm, not just say "data is missing".
-- Conversion action names like "generate_lead", "purchase" or "submit_lead_form" are Google's system names — refer to them in plain English (e.g. "your lead action", "your purchase conversion"). Never print the raw system name on a client slide.
+- Conversion action names like "generate_lead", "purchase" or "submit_lead_form" are Google's system names  -  refer to them in plain English (e.g. "your lead action", "your purchase conversion"). Never print the raw system name on a client slide.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["conversion_tracking"])
@@ -175,9 +176,9 @@ Key rules for this section:
 - If all keywords are in a single campaign or ad group, explain that this means a handful of keywords dominate the budget and others get starved of spend.
 - If budget is spread too thin across too many campaigns, flag the risk of no campaign having enough data to optimise.
 - If the account has a shared budget across campaigns, flag that this restricts individual campaign growth.
-- If GREEN, write encouraging copy that validates their structure and gives 1–2 tips to maintain it.
+- If GREEN, write encouraging copy that validates their structure and gives 1 - 2 tips to maintain it.
 - The WHY_IT_MATTERS bullets must be about money and growth, not technical structure.
-- IMPORTANT: if the findings include a description of the actual structure (e.g. a lean, appropriate setup), LEAD with that real structure. Treat Auto-Apply Recommendations as a secondary point, not the whole slide — unless it is genuinely the only finding.
+- IMPORTANT: if the findings include a description of the actual structure (e.g. a lean, appropriate setup), LEAD with that real structure. Treat Auto-Apply Recommendations as a secondary point, not the whole slide  -  unless it is genuinely the only finding.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["account_structure"])
@@ -210,9 +211,9 @@ Key rules for this section:
 - If the account has very few negative keywords (under 50), flag this explicitly and explain that irrelevant searches are likely wasting budget.
 - If the account uses predominantly broad match keywords, explain the risk of serving irrelevant traffic and driving up costs.
 - If the account uses only exact match, explain the risk of limiting reach and missing relevant search variations.
-- If PMax campaigns are running with few negative keywords, escalate the concern — PMax runs broadly by default.
+- If PMax campaigns are running with few negative keywords, escalate the concern  -  PMax runs broadly by default.
 - The WHY_IT_MATTERS bullets must explain the financial consequence: wasted spend on irrelevant clicks, missed qualified leads, inflated CPCs.
-- If the findings mention search terms that are converting but not yet added as keywords, or high-traffic terms spending without converting, treat these as high-value, specific points worth including — they reflect a proper search-query-report review.
+- If the findings mention search terms that are converting but not yet added as keywords, or high-traffic terms spending without converting, treat these as high-value, specific points worth including  -  they reflect a proper search-query-report review.
 - If the findings mention responsive search ads rated Poor or Average ad strength, include this as a clear, specific point (use the real counts/spend) and call them "responsive search ads". Frame it as an efficiency opportunity, not a crisis. IMPORTANT: Ad Strength is Google's guide to how well-built an RSA is - it is NOT itself an auction or Ad Rank factor, so do NOT claim weak ad strength directly "reduces impression share" or "raises CPCs". Instead explain that the distinct, relevant headlines and descriptions that earn a strong rating are what improve CTR and Quality Score - that is where the efficiency gain comes from. Recommend adding more distinct, keyword-relevant headlines and descriptions. Lead with the search-term/match-type story first if both are present.
 """.strip()
 
@@ -242,14 +243,14 @@ Supporting data: {data}
 Account type: {account_type}
 
 Key rules for this section:
-- For lead gen accounts: the correct bid strategy is Maximise Conversions (moving to tCPA once there is sufficient conversion data). Never recommend reverting to Manual CPC — that is a step backwards.
+- For lead gen accounts: the correct bid strategy is Maximise Conversions (moving to tCPA once there is sufficient conversion data). Never recommend reverting to Manual CPC  -  that is a step backwards.
 - For eCommerce accounts: the correct bid strategy is Maximise Conversion Value (moving to tROAS once there is sufficient data). Maximise Conversions is not appropriate for eCommerce as it ignores revenue value.
-- If smart bidding has too few conversions to learn (under 30/month), the recommendation is NOT to switch to manual — it is to build conversion volume first, or temporarily lower the conversion goal threshold so more signals feed the algorithm.
-- If the account type is unknown, default to lead gen recommendations. Do NOT include a generic disclaimer about eCommerce — just give the lead gen advice confidently.
-- If Max Clicks is running, always recommend switching to Maximise Conversions — frame it as "your budget is optimising for website visits, not customers".
+- If smart bidding has too few conversions to learn (under 30/month), the recommendation is NOT to switch to manual  -  it is to build conversion volume first, or temporarily lower the conversion goal threshold so more signals feed the algorithm.
+- If the account type is unknown, default to lead gen recommendations. Do NOT include a generic disclaimer about eCommerce  -  just give the lead gen advice confidently.
+- If Max Clicks is running, always recommend switching to Maximise Conversions  -  frame it as "your budget is optimising for website visits, not customers".
 - If bid strategies are inconsistent across campaigns, flag this as sending conflicting signals to Google.
 - If the findings mention paused campaigns that historically converted below the account's current CPA, treat this as a specific, high-value point: efficient activity may have been switched off and budget shifted to pricier conversions. Be humble and consultative - the data can't show why it was paused, so frame it as "worth reviewing whether lead quality (not cost) drove the pause" and recommend reviewing the data before reactivating, NOT blindly turning campaigns back on.
-- The WHY_IT_MATTERS bullets must explain what the wrong or under-powered bidding strategy is costing them in missed conversions or revenue — be specific about the learning state problem if conversion volume is low.
+- The WHY_IT_MATTERS bullets must explain what the wrong or under-powered bidding strategy is costing them in missed conversions or revenue  -  be specific about the learning state problem if conversion volume is low.
 """.strip()
 
     prompt += "\n\n" + example_block(EXAMPLES["bidding_strategy"])
@@ -272,7 +273,13 @@ CATEGORY_RULES = {
         "plain English ('your lead action'). Never print the raw system name on a client slide.\n"
         "- The TITLE must name the TRACKING / measurement problem itself (e.g. 'Your lead action "
         "counts low-value activity', 'Conversions are imported, not tracked directly'). Do NOT frame "
-        "the title as a bidding problem - bidding has its own separate slide."
+        "the title as a bidding problem - bidding has its own separate slide.\n"
+        "- If offline conversion imports (OCI) are missing, present it as a major OPPORTUNITY for a lead "
+        "gen business (feeding which enquiries became real jobs/sales back via a CRM export), not a "
+        "criticism - it's a forward-looking 'here's a big lever' point.\n"
+        "- If last-click attribution actions are named with their 30-day counts, KEEP those exact names "
+        "and counts (and which are call actions) - they let the auditor reference specific actions on "
+        "the call. If a named action recorded 0 conversions, keep the note that it may be legacy."
     ),
     "Account Structure": (
         "- Lead with the real structure; treat Auto-Apply as a secondary point.\n"
@@ -392,10 +399,10 @@ would - not the topic area. Under 9 words. E.g. "Maximise Clicks is buying traff
 
 Respond in EXACTLY this format (no extra text, no markdown):
 TITLE: <title>
-WHATS_HAPPENING_1: <first bullet — what is happening>
-WHATS_HAPPENING_2: <second bullet — what is happening>
-WHY_IT_MATTERS_1: <first bullet — commercial impact>
-WHY_IT_MATTERS_2: <second bullet — commercial impact>
+WHATS_HAPPENING_1: <first bullet  -  what is happening>
+WHATS_HAPPENING_2: <second bullet  -  what is happening>
+WHY_IT_MATTERS_1: <first bullet  -  commercial impact>
+WHY_IT_MATTERS_2: <second bullet  -  commercial impact>
 REC1: <first recommendation>
 REC2: <second recommendation>
 REC3: <third recommendation>
@@ -417,7 +424,7 @@ REC3: <third recommendation>
     title = re.sub(r'^(issue\s*#?\s*\d*\s*[:.\-]\s*|title\s*[:.\-]\s*)', '', title, flags=re.I).strip()
     parsed["title"] = title or cat
 
-    # Deterministic label override — ensure ad groups / campaigns are named as such.
+    # Deterministic label override  -  ensure ad groups / campaigns are named as such.
     detail = issue.get("detail", "")
     parsed["title"] = _enforce_entity_labels(detail, parsed["title"])
     parsed["whats_happening"] = _enforce_entity_labels(detail, parsed.get("whats_happening", ""))
@@ -451,25 +458,25 @@ Here are the full findings from the audit:
 {issues_detail}{strengths_note}
 
 Rules:
-- The headline must be a single punchy sentence — maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
-- The 3 bullets must each reference a specific finding from above — use real details (numbers, named issues, specific tools like Enhanced Conversions or Auto-Apply). No generic statements.
-- COMMERCIAL_IMPACT: 1–2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). Use measured language - prefer "risks"/"could" over a flat "will" for future consequences, and say "genuine lead demand" rather than just "demand".
-- If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot to the commercial impact of the issues. This keeps the audit balanced and credible. Keep it to one short clause; the focus stays on the opportunities.
-- FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs — say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
+- The headline must be a single punchy sentence  -  maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
+- The 3 bullets must each reference a specific finding from above  -  use real details (numbers, named issues, specific tools like Enhanced Conversions or Auto-Apply). No generic statements.
+- COMMERCIAL_IMPACT: 1 - 2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). Use measured language - prefer "risks"/"could" over a flat "will" for future consequences, and say "genuine lead demand" rather than just "demand".
+- If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK or STRANGLED by the issues - e.g. solid groundwork is being throttled while budget is capped on winning campaigns and leaks into non-converting searches. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
+- FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - Use British English spelling.
 
 Respond in EXACTLY this format (no extra text, no markdown):
-EXEC_HEADLINE: <punchy specific headline — under 15 words>
+EXEC_HEADLINE: <punchy specific headline  -  under 15 words>
 BULLET_1: <specific key finding 1 with real details>
 BULLET_2: <specific key finding 2 with real details>
 BULLET_3: <specific key finding 3 with real details>
-COMMERCIAL_IMPACT: <specific commercial impact — 1–2 sentences>
+COMMERCIAL_IMPACT: <specific commercial impact  -  1 - 2 sentences>
 """.strip()
 
     prompt += "\n\n" + EXEC_SUMMARY_EXAMPLE
     exec_system_prompt = (
         "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
-        "Your tone is professional, direct, and consultative — not salesy. "
+        "Your tone is professional, direct, and consultative  -  not salesy. "
         "Always use British English spelling. "
         "Respond ONLY in the exact key: value format requested. No extra text, no markdown."
     )
@@ -506,13 +513,13 @@ Write the Key Opportunities section for a Google Ads audit presentation.
 Here are the full details of what was found in this account:
 {issues_detail}
 
-Write exactly 5 key opportunities — what could this client unlock if they fix these issues?
+Write exactly 5 key opportunities  -  what could this client unlock if they fix these issues?
 Rules:
-- Each opportunity must be directly tied to a specific finding above — reference real details (e.g. "12 conversion actions", "88% broad match", "9 conversions/month").
+- Each opportunity must be directly tied to a specific finding above  -  reference real details (e.g. "12 conversion actions", "88% broad match", "9 conversions/month").
 - Start each with a strong verb (e.g. "Recover", "Unlock", "Cut", "Scale", "Gain", "Eliminate").
 - Focus on tangible business outcomes: more leads, lower CPA, recovered wasted spend, scalable growth.
-- IMPORTANT: do NOT just restate the issue slides word-for-word. REMIX them into fresh, forward-looking value statements — the same substance framed as the upside/prize, so the closing slide doesn't feel repetitive after the audit.
-- Be punchy and specific — these are punchy value statements, not generic descriptions. Under 18 words each.
+- IMPORTANT: do NOT just restate the issue slides word-for-word. REMIX them into fresh, forward-looking value statements  -  the same substance framed as the upside/prize, so the closing slide doesn't feel repetitive after the audit.
+- Be punchy and specific  -  these are punchy value statements, not generic descriptions. Under 18 words each.
 - Use British English spelling.
 
 Respond with just the 5 opportunities, one per line, no bullet points or numbering.
@@ -552,7 +559,7 @@ The table has 5 rows. Each row has 3 columns: Current State, Changes Needed, Fut
 
 Pick the 5 most impactful issues from the full audit detail below and write one row for each.
 (If there are fewer than 5 distinct issues, cover the strongest ones and leave the remaining rows blank.)
-Each row must be grounded in specific details from the findings — no generic copy.
+Each row must be grounded in specific details from the findings  -  no generic copy.
 
 Full audit findings:
 {issues_detail}
@@ -562,7 +569,7 @@ Rules:
 - Changes Needed: one concrete action starting with a verb. Under 15 words.
 - Future State: the specific business benefit that unlocks. Under 15 words.
 - Use British English spelling.
-- Do NOT just repeat the section name — describe the actual situation.
+- Do NOT just repeat the section name  -  describe the actual situation.
 
 Respond in EXACTLY this format (no extra text, no markdown):
 TK1_CURRENT: <current state>
@@ -611,9 +618,9 @@ TK5_FUTURE: <future state>
 def _narrative_objectives(client: OpenAI, raw_questionnaire: str) -> dict:
     """
     Takes raw pasted questionnaire text and returns clean slide-3 copy:
-      objectives_text  — what they want to achieve
-      success_metric   — how they measure success
-      pain_points_text — what's frustrating them right now
+      objectives_text   -  what they want to achieve
+      success_metric    -  how they measure success
+      pain_points_text  -  what's frustrating them right now
     """
     prompt = f"""
 A PPC agency has received the following client questionnaire. Extract the key information and rewrite it as clean, client-facing copy for a slide in a Google Ads audit presentation.
@@ -624,10 +631,10 @@ RAW QUESTIONNAIRE:
 Rules:
 - objectives_text: List their main objectives as a short, readable sentence or comma-separated list. Start with "To ". E.g. "To increase lead volume, improve lead quality, and reduce cost per acquisition."
 - success_metric: One punchy sentence on what success looks like to them. E.g. "3 good appointments a day at a sustainable CPA."
-- pain_points_text: Summarise their challenges in 1–2 short sentences. Be empathetic but factual. E.g. "Campaign performance has dropped recently and the team lacks the time and expertise to diagnose why."
+- pain_points_text: Summarise their challenges in 1 - 2 short sentences. Be empathetic but factual. E.g. "Campaign performance has dropped recently and the team lacks the time and expertise to diagnose why."
 - website_url: Extract the client's website URL exactly as written. Include the full URL with protocol if present. If not found, leave blank.
 - Use British English spelling.
-- Keep it concise — this is slide copy, not a report.
+- Keep it concise  -  this is slide copy, not a report.
 
 Respond in EXACTLY this format (no extra text, no markdown):
 OBJECTIVES: <objectives text>
@@ -659,7 +666,7 @@ WEBSITE_URL: <full website URL or blank>
 
 def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: str = "") -> str:
     """
-    Write 2–3 sentences interpreting the 30-day vs 12-month performance numbers.
+    Write 2 - 3 sentences interpreting the 30-day vs 12-month performance numbers.
     Flags whether trend is positive, negative, or mixed.
     """
     raw = perf.get("_raw", {})
@@ -682,10 +689,10 @@ Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m
     client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
 
     prompt = f"""
-You are writing 2–3 sentences for a Google Ads audit slide called "Performance Summary".
+You are writing 2 - 3 sentences for a Google Ads audit slide called "Performance Summary".
 The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
-Be specific — reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).
+Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).
 If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
 Use British English. Be direct, not alarmist.
 {client_context}
@@ -693,12 +700,12 @@ Use British English. Be direct, not alarmist.
 Performance data:
 {context}
 
-Write only the 2–3 sentence commentary. No labels, no bullet points.
+Write only the 2 - 3 sentence commentary. No labels, no bullet points.
 """.strip()
 
     system = (
         "You are a senior Google Ads analyst writing plain-English commentary on account performance trends. "
-        "Be specific, use the actual numbers, and keep it to 2–3 sentences."
+        "Be specific, use the actual numbers, and keep it to 2 - 3 sentences."
     )
     return _call_openai(client, system, prompt).strip()
 
@@ -721,7 +728,7 @@ def _retry(fn, label: str, max_attempts: int = 3):
         if has_content:
             return result
         print(f"  ⚠ {label}: empty result on attempt {attempt}, retrying...")
-    print(f"  ✗ {label}: still empty after {max_attempts} attempts — check GPT output format.")
+    print(f"  ✗ {label}: still empty after {max_attempts} attempts  -  check GPT output format.")
     return result
 
 
@@ -746,9 +753,9 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     # ── ISSUE-LED: pick the top problems and narrate each one individually ────
     selected = select_top_issues(findings, max_issues=6)
     if not selected:
-        # Genuinely clean account — fall back so the deck still has a slide.
+        # Genuinely clean account  -  fall back so the deck still has a slide.
         selected = [{
-            "detail": "No material issues were detected — the account is in good health.",
+            "detail": "No material issues were detected  -  the account is in good health.",
             "category": "Account Structure", "rag": "green", "severity": 1.0,
         }]
 
@@ -784,7 +791,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     print("  → Generating Key Takeaways...")
     takeaways = _retry(lambda: _narrative_takeaways(client, findings, issues), "Key Takeaways")
 
-    # ── Slide 3: Objectives — from raw questionnaire or left blank ───────────
+    # ── Slide 3: Objectives  -  from raw questionnaire or left blank ───────────
     if raw_questionnaire.strip():
         print("  → Extracting client objectives from questionnaire...")
         objectives = _retry(
@@ -805,7 +812,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     else:
         perf_commentary = ""
 
-    # Holistic section RAGs (incl. healthy ones) — drives the dial image, which must
+    # Holistic section RAGs (incl. healthy ones)  -  drives the dial image, which must
     # reflect OVERALL account health, not just the problems shown on the issue slides.
     section_rags = [
         findings.get("conversion_tracking", {}).get("rag", "amber"),

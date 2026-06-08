@@ -4,8 +4,8 @@
 # ── Auto-Apply Recommendation types the team is HAPPY to leave ON ─────────────
 # Source: Max's Auto-Apply screen (the red-boxed items the team approves of).
 # Verified against the official Google Ads API RecommendationType enum (v24).
-# KEY FINDING: the team's approved "maintenance" toggles — Remove conflicting/
-# redundant/non-serving keywords and Upgrade conversion tracking — are NOT in the
+# KEY FINDING: the team's approved "maintenance" toggles  -  Remove conflicting/
+# redundant/non-serving keywords and Upgrade conversion tracking  -  are NOT in the
 # RecommendationType enum, so recommendation_subscription won't return them. They
 # therefore CAN'T be false-flagged. The only approved option the API surfaces is
 # ad rotation, so it's the sole entry here. Everything else the API returns
@@ -85,17 +85,17 @@ def analyse_account(data):
 # ─────────────────────────────────────────────────────────────────────────────
 # ISSUE-LED SELECTION LAYER
 # The 4 scorers above produce all the diagnostics. A human auditor doesn't present
-# 4 fixed category slides — they pick the most important PROBLEMS and lead with them.
+# 4 fixed category slides  -  they pick the most important PROBLEMS and lead with them.
 # This layer turns the scorers' findings into a ranked, flat list of discrete issues
 # so the deck can be issue-led (top-N named problems, one per slide). The scorers are
-# left completely untouched — this only re-organises and prioritises their output.
+# left completely untouched  -  this only re-organises and prioritises their output.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # (needle in the finding text, severity, per-issue RAG, slide category)
 # Order matters: the first matching signature wins, so put the most severe / most
 # specific needles first. Severity ~ how much a human auditor would lead with it.
 _ISSUE_SIGNATURES = [
-    # Critical — account fundamentally not working
+    # Critical  -  account fundamentally not working
     ("No conversion actions found",              130, "red",       "Conversion Tracking"),
     ("recorded 0 conversions in the last 30",    122, "red",       "Conversion Tracking"),
     ("spent with 0 conversions",                 116, "red",       "Bidding Strategy"),
@@ -134,8 +134,10 @@ _ISSUE_SIGNATURES = [
     ("No keyword click data",                      48, "amber",     "Targeting & Keywords"),
     ("CTR is",                                     40, "amber",     "Targeting & Keywords"),
     # Conversion tracking (amber)
+    ("offline conversion imports (OCI)",           70, "amber",     "Conversion Tracking"),  # the elephant (lead gen) - paramount
     ("imported from GA4",                          56, "amber",     "Conversion Tracking"),
     ("still use last-click attribution",           50, "amber",     "Conversion Tracking"),
+    ("being picked up by non-brand campaigns",     48, "amber",     "Targeting & Keywords"),  # brand leakage
     ("set as primary 'Conversions'",               45, "amber",     "Conversion Tracking"),  # too many primary
     ("count 'Every' rather than 'Once'",           40, "amber",     "Conversion Tracking"),
     ("with 0 conversions recorded",                64, "amber",     "Conversion Tracking"),  # campaign spend, no conv
@@ -155,18 +157,18 @@ _ISSUE_SIGNATURES = [
 # These are NOT issues and must never become a slide.
 _FILLER_MARKERS = (
     "lean and focused", "is healthy", "looks well-structured", "looks healthy",
-    "is appropriate —", "set up and recording", "well-organised", "no action needed",
+    "is appropriate  - ", "set up and recording", "well-organised", "no action needed",
 )
 
-# Findings that are really the same story — keep only the highest-severity one so the
+# Findings that are really the same story  -  keep only the highest-severity one so the
 # deck doesn't show two near-identical slides (e.g. broad-match by clicks AND by spend).
 _ISSUE_THEMES = {
     "of keyword clicks come from Broad Match": "broad_match",
     "of keyword spend is on Broad Match":      "broad_match",
-    # Low negatives is flagged by both the tracking and targeting checks — one slide.
+    # Low negatives is flagged by both the tracking and targeting checks  -  one slide.
     "negative keyword(s) found across":        "negatives",
     "negative keywords applied across":        "negatives",
-    # Per-campaign "spent with 0 conversions" — roll up to a single slide.
+    # Per-campaign "spent with 0 conversions"  -  roll up to a single slide.
     "with 0 conversions recorded":             "zero_conv_campaign",
 }
 
@@ -204,10 +206,11 @@ def _classify_issue(detail, section_name, section_rag):
     return {"severity": 40.0, "rag": rag, "category": section_name}
 
 
-def select_top_issues(findings, max_issues=6):
+def select_top_issues(findings, max_issues=6, apply_floor=True):
     """Flatten the 4 scorers' findings into a ranked list of discrete issues,
     most important first, capped at max_issues. Each item:
         {detail, category, rag, severity}
+    apply_floor=False returns the full ranked list (used for the internal email summary).
     """
     section_map = {
         "conversion_tracking": "Conversion Tracking",
@@ -248,6 +251,8 @@ def select_top_issues(findings, max_issues=6):
     # high-impact issues, don't pad the deck with low-octane hygiene points. Keep all
     # "strong" issues (>= STRONG_FLOOR); only fall back to weaker ones to reach a minimum.
     STRONG_FLOOR, MIN_ISSUES = 55, 4
+    if not apply_floor:
+        return deduped[:max_issues]
     strong = [i for i in deduped if i["severity"] >= STRONG_FLOOR]
     chosen = strong if len(strong) >= MIN_ISSUES else deduped
     return chosen[:max_issues]
@@ -273,7 +278,7 @@ def score_conversion_tracking(data):
     campaigns = data.get("campaigns", [])
 
     if len(conversion_actions) == 0:
-        issues.append("No conversion actions found — tracking is not set up.")
+        issues.append("No conversion actions found  -  tracking is not set up.")
         rag = "red"
     else:
         if total_conversions == 0:
@@ -288,13 +293,13 @@ def score_conversion_tracking(data):
                 cvr = total_conversions / clicks
                 if cvr < 0.005:
                     issues.append(
-                        f"Conversion rate is {cvr:.2%} — unusually low. "
+                        f"Conversion rate is {cvr:.2%}  -  unusually low. "
                         "Check for tracking gaps or low-quality traffic."
                     )
                     if rag == "green":
                         rag = "amber"
 
-        # Only ACTIVE conversion actions matter — inactive/hidden ones aren't being
+        # Only ACTIVE conversion actions matter  -  inactive/hidden ones aren't being
         # used by the account, so don't flag them at all (practitioner feedback).
         active_actions = [ca for ca in conversion_actions if ca.get("status") == "ENABLED"]
         # Count only PRIMARY actions (the ones bidding actually optimises towards).
@@ -303,12 +308,12 @@ def score_conversion_tracking(data):
             issues.append(
                 f"{len(primary_actions)} conversion actions are set as primary 'Conversions' that "
                 "bidding optimises towards. Too many primary actions can dilute reporting and confuse "
-                "bidding — review for duplicates, test tags or low-value actions."
+                "bidding  -  review for duplicates, test tags or low-value actions."
             )
             if rag == "green":
                 rag = "amber"
 
-        # GA4 import detection — no native tag snippet = likely imported from GA4
+        # GA4 import detection  -  no native tag snippet = likely imported from GA4
         web_categories = {
             "PURCHASE", "SUBMIT_LEAD_FORM", "LEAD", "CONTACT",
             "BOOK_APPOINTMENT", "REQUEST_QUOTE", "SIGNUP",
@@ -324,7 +329,7 @@ def score_conversion_tracking(data):
             issues.append(
                 "Some primary conversions appear to be imported from GA4 rather than tracked via a "
                 "native Google Ads tag. Native Google Ads tags give the cleanest, most complete signal "
-                "for bidding — it's worth confirming Enhanced Conversions is active and that tracking "
+                "for bidding  -  it's worth confirming Enhanced Conversions is active and that tracking "
                 "is firing correctly."
             )
             if rag == "green":
@@ -378,7 +383,7 @@ def score_conversion_tracking(data):
                 if rag != "red":
                     rag = "amber_red"
 
-        # Conversion count type — MANY_PER_CLICK on lead gen actions inflates numbers
+        # Conversion count type  -  MANY_PER_CLICK on lead gen actions inflates numbers
         lead_categories = {
             "CONTACT", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT", "REQUEST_QUOTE",
             "SIGNUP", "LEAD", "PHONE_CALL_LEAD", "IMPORTED_LEAD", "DEFAULT", "OTHER"
@@ -393,30 +398,66 @@ def score_conversion_tracking(data):
         if many_per_click_leads:
             issues.append(
                 "Some lead conversions are set to count 'Every' rather than 'Once'. "
-                "For most lead actions 'Once' is more accurate (calls can be a fair exception) — "
+                "For most lead actions 'Once' is more accurate (calls can be a fair exception)  -  "
                 "worth confirming these are counting the way you intend."
             )
             if rag == "green":
                 rag = "amber"
 
-        # Attribution model — last-click is outdated; data-driven is Google's recommended default.
+        # Attribution model  -  last-click is outdated; data-driven is Google's recommended default.
+        # Name the actions, flag call actions, show 30-day volume (a 0-conv one may be legacy).
         last_click = [
-            ca.get("name", "Unknown") for ca in active_actions
+            ca for ca in active_actions
             if ca.get("include_in_conversions")
             and ca.get("attribution_model") == "GOOGLE_ADS_LAST_CLICK"
         ]
         if last_click:
+            parts, legacy, any_call = [], [], False
+            for ca in last_click:
+                nm = ca.get("name", "Unknown")
+                is_call = "CALL" in str(ca.get("type", "")).upper()
+                any_call = any_call or is_call
+                conv = ca.get("conversions_30d")
+                lbl = f"'{nm}'" + (" (a call action)" if is_call else "")
+                if conv is not None:
+                    lbl += f" - {int(round(conv))} conv in 30d"
+                    if conv == 0:
+                        legacy.append(nm)
+                parts.append(lbl)
+            call_note = (" Several of these are call actions, where the journey often spans several "
+                         "visits, so last-click especially undervalues them.") if any_call else ""
+            legacy_note = ""
+            if legacy:
+                legacy_note = (" Note: " + ", ".join(f"'{n}'" for n in legacy) + " recorded no conversions "
+                               "in the last 30 days, so it may be a legacy action worth removing entirely "
+                               "rather than re-attributing.")
             issues.append(
-                f"{len(last_click)} primary conversion action(s) still use last-click attribution. "
-                "Last-click gives all the credit to the final click and ignores the earlier searches that "
-                "helped create the enquiry, so smart bidding optimises on a partial picture. Switching to "
-                "data-driven attribution (Google's recommended default) lets bidding value the whole path "
-                "to an enquiry and usually improves efficiency."
+                f"{len(last_click)} primary conversion action(s) still use last-click attribution: "
+                f"{', '.join(parts)}.{call_note} Last-click credits only the final click and ignores the "
+                "earlier searches that helped create the enquiry, so smart bidding optimises on a partial "
+                "picture. Switching the active ones to data-driven attribution (Google's recommended "
+                f"default) lets bidding value the whole path to an enquiry.{legacy_note}"
             )
             if rag == "green":
                 rag = "amber"
 
-    # Campaigns spending with zero conversions. Skip awareness-style campaigns —
+        # Offline Conversion Imports (OCI)  -  the elephant for lead gen. If enquiries that became
+        # real jobs/sales aren't imported back, bidding optimises towards form fills, not revenue.
+        OCI_TYPES = {"UPLOAD_CLICKS", "UPLOAD_CALLS", "STORE_SALES", "STORE_SALES_DIRECT_UPLOAD"}
+        has_oci = any(str(ca.get("type", "")) in OCI_TYPES for ca in conversion_actions)
+        if not has_oci and detect_account_type(data) in ("lead_gen", "unknown"):
+            issues.append(
+                "We checked for offline conversion imports (OCI) and could not find any set up. For a lead "
+                "generation business this is one of the biggest opportunities there is: importing which "
+                "enquiries actually became booked jobs or sales back into Google Ads (using the click ID "
+                "and a simple CRM export - even a spreadsheet works) lets smart bidding optimise towards "
+                "real revenue, not just form fills. In today's expensive paid media, feeding back genuine "
+                "lead quality is often the single highest-leverage change an account can make."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    # Campaigns spending with zero conversions. Skip awareness-style campaigns  - 
     # Display / Video / Demand Gen are often run for reach, so zero conversions is
     # expected and must NOT be flagged as wasted spend (per practitioner feedback).
     AWARENESS_TYPES = {"DISPLAY", "VIDEO", "DEMAND_GEN", "MULTI_CHANNEL"}
@@ -428,7 +469,7 @@ def score_conversion_tracking(data):
         c_type = c.get("type", "")
         if c_status == "ENABLED" and c_cost > 50 and c_conv == 0 and c_type not in AWARENESS_TYPES:
             issues.append(
-                f"Campaign '{c_name}' spent £{c_cost:.2f} with 0 conversions recorded — "
+                f"Campaign '{c_name}' spent £{c_cost:.2f} with 0 conversions recorded  -  "
                 "worth confirming it isn't an awareness or brand campaign before treating this as wasted spend."
             )
             if rag == "green":
@@ -446,7 +487,7 @@ def score_conversion_tracking(data):
 
     if not issues:
         issues.append(
-            f"Conversion tracking is healthy — {len(conversion_actions)} actions "
+            f"Conversion tracking is healthy  -  {len(conversion_actions)} actions "
             f"set up and recording {total_conversions:.0f} conversions."
         )
 
@@ -538,7 +579,7 @@ def score_account_structure(data):
             if len(enabled_campaigns) > 2 and avg_budget < 10:
                 issues.append(
                     f"£{total_budget:.2f}/day total budget is split across {len(enabled_campaigns)} campaigns "
-                    f"(avg £{avg_budget:.2f} each). Campaigns need sufficient budget to gather data and learn — "
+                    f"(avg £{avg_budget:.2f} each). Campaigns need sufficient budget to gather data and learn  -  "
                     "consider consolidating into fewer campaigns."
                 )
                 rag = "amber"
@@ -551,7 +592,7 @@ def score_account_structure(data):
                     rag = "amber"
 
     # If no genuine structural problems surfaced, describe the structure positively
-    # FIRST — so the slide validates a lean-but-appropriate setup the way our team does,
+    # FIRST  -  so the slide validates a lean-but-appropriate setup the way our team does,
     # rather than letting the Auto-Apply note become the whole slide.
     if not issues:
         parts = []
@@ -563,10 +604,10 @@ def score_account_structure(data):
         issues.append(
             f"Structure is lean and focused: {desc}. "
             "A simple structure like this is appropriate while the account gathers data "
-            "and tests what works — no need to add complexity yet."
+            "and tests what works  -  no need to add complexity yet."
         )
 
-    # Auto-apply recommendations — now TYPE-AWARE. The team is happy with a known set
+    # Auto-apply recommendations  -  now TYPE-AWARE. The team is happy with a known set
     # of low-risk AAR types; flag only types enabled OUTSIDE that approved set.
     auto_apply = data.get("auto_apply_recommendations", None)
     auto_apply_types = data.get("auto_apply_types") or []
@@ -575,17 +616,17 @@ def score_account_structure(data):
         non_approved = [t for t in auto_apply_types if t not in APPROVED_AAR_TYPES]
         if non_approved:
             # Name exactly what's enabled (self-documents on the deck) and invite review.
-            # INFORMATIONAL ONLY — we do NOT escalate the RAG here: whether a given
+            # INFORMATIONAL ONLY  -  we do NOT escalate the RAG here: whether a given
             # auto-apply type is acceptable is a human judgement we can't make from here,
             # so flagging it as a "problem" risks a false positive. List it, let a human decide.
             issues.append(
                 f"Auto-Apply is enabled for: {labelled}. Worth confirming each of these is a type "
-                "you're happy to let Google change automatically — some can affect keywords, "
+                "you're happy to let Google change automatically  -  some can affect keywords, "
                 "bidding, or where your ads show."
             )
         else:
             issues.append(
-                f"Auto-Apply is enabled, but only for low-risk types ({labelled}) — no action needed."
+                f"Auto-Apply is enabled, but only for low-risk types ({labelled})  -  no action needed."
             )
     elif auto_apply:
         issues.append(
@@ -599,7 +640,7 @@ def score_account_structure(data):
         ctr_pct = summary.get("ctr_pct", 0) or 0
         if ctr_pct < 1.0:
             issues.append(
-                f"Overall CTR is {ctr_pct:.2f}% — below the 1% benchmark. "
+                f"Overall CTR is {ctr_pct:.2f}%  -  below the 1% benchmark. "
                 "Ad relevance or Quality Score may need improvement."
             )
             if rag == "green":
@@ -607,7 +648,7 @@ def score_account_structure(data):
 
     if not issues:
         issues.append(
-            f"Account structure looks healthy — {num_campaigns} campaigns, "
+            f"Account structure looks healthy  -  {num_campaigns} campaigns, "
             f"{num_ad_groups} ad groups."
         )
 
@@ -678,7 +719,7 @@ def score_targeting_keywords(data):
 
         if exact_pct > 0.8 and broad_clicks == 0 and phrase_clicks == 0:
             issues.append(
-                f"{exact_pct:.0%} of clicks come from Exact Match only — no Phrase or Broad match active. "
+                f"{exact_pct:.0%} of clicks come from Exact Match only  -  no Phrase or Broad match active. "
                 "This restricts search volume and limits growth. Consider adding Phrase Match keywords."
             )
             if rag == "green":
@@ -714,12 +755,12 @@ def score_targeting_keywords(data):
         if rag == "green":
             rag = "amber"
 
-    # Escalation: heavy broad match AND weak negatives together is a RED combination —
+    # Escalation: heavy broad match AND weak negatives together is a RED combination  - 
     # the budget is wide open with little to filter waste (matches team judgement).
     if broad_pct > 0.8 and neg_kw_count is not None and neg_kw_count < 50:
         issues.append(
             "Most keyword spend is on broad match with very few negatives in place. "
-            "Together these leave the budget wide open to irrelevant searches — this should be treated as urgent."
+            "Together these leave the budget wide open to irrelevant searches  -  this should be treated as urgent."
         )
         rag = "red"
 
@@ -787,7 +828,7 @@ def score_targeting_keywords(data):
         and str(t.get("term", "")).strip().lower() not in _converting_names
         and not _is_brand(t.get("term", ""))
     ]
-    # The same search term can appear on several ad groups (separate rows) — aggregate by
+    # The same search term can appear on several ad groups (separate rows)  -  aggregate by
     # term so counts and examples don't double-count (e.g. 'giles pool lewes' twice).
     def _agg_by_term(terms):
         agg = {}
@@ -848,7 +889,7 @@ def score_targeting_keywords(data):
         )
         if rag == "green":
             rag = "amber"
-    # ── Quality Score (we already fetch it — now we use it) ───────────────────
+    # ── Quality Score (we already fetch it  -  now we use it) ───────────────────
     qs_list = data.get("quality_scores") or []
     scored = [q for q in qs_list if q.get("qs")]
     low_qs = [q for q in scored if (q.get("qs") or 10) <= 4]
@@ -873,14 +914,33 @@ def score_targeting_keywords(data):
         if rag == "green":
             rag = "amber"
 
-    # Lead the section with the search-query story — for many accounts the SQR IS the
+    # ── Brand leaking into non-brand campaigns (missing brand/non-brand separation) ──
+    leak = data.get("brand_leakage") or []
+    material_leak = [l for l in leak if (l.get("spend", 0) or 0) >= 1]
+    if material_leak and brand_tokens:
+        names = ", ".join(f"the '{l['campaign']}' campaign (£{l['spend']:.0f})" for l in material_leak[:3])
+        conv_total = sum((l.get("conversions", 0) or 0) for l in material_leak)
+        conv_note = (f" and have produced {int(round(conv_total))} of your reported conversions"
+                     if conv_total >= 1 else "")
+        sqr_issues.append(
+            f"Your own brand searches (for '{brand_tokens[0]}') are being picked up by non-brand "
+            f"campaigns - {names}{conv_note} - rather than only a dedicated Brand campaign. It is small "
+            "money on its own, but it shows brand isn't excluded as a negative in those campaigns, so "
+            "brand and non-brand performance get blended in reporting and brand traffic quietly flatters "
+            "non-brand numbers over time. Adding your brand name as a negative keyword in the non-brand "
+            "campaigns keeps each campaign's data clean and is the kind of detail a well-run account gets right."
+        )
+        if rag == "green":
+            rag = "amber"
+
+    # Lead the section with the search-query story  -  for many accounts the SQR IS the
     # real issue, more than match-type distribution (practitioner feedback).
     issues[:0] = sqr_issues
 
     # ── RSA Ad Strength (Max's #2) ────────────────────────────────────────────
     # Ad Strength is Google's rating of how well an RSA is built. Poor/Average ads
     # win less impression share and pay higher CPCs, so weak strength is a real
-    # efficiency leak — but it's a "worth improving" point, not an account emergency.
+    # efficiency leak  -  but it's a "worth improving" point, not an account emergency.
     # Stay humble: only flag when a MEANINGFUL share of live RSAs are weak, or weak
     # ads are carrying real spend. Never escalate past amber on ad strength alone.
     rsa = data.get("rsa_ad_strength") or {}
@@ -911,7 +971,7 @@ def score_targeting_keywords(data):
     ctr_pct = summary.get("ctr_pct", 0) or 0
     if ctr_pct > 0 and ctr_pct < 1.5 and has_search:
         issues.append(
-            f"Search CTR is {ctr_pct:.2f}% — below the 2% benchmark. "
+            f"Search CTR is {ctr_pct:.2f}%  -  below the 2% benchmark. "
             "Ad copy or keyword relevance may need tightening."
         )
         if rag == "green":
@@ -926,7 +986,7 @@ def score_targeting_keywords(data):
         if pmax_enabled and len(audience_signals) == 0:
             issues.append(
                 "Performance Max campaign is running without audience signals. "
-                "Audience signals help Google identify your ideal customer profile — "
+                "Audience signals help Google identify your ideal customer profile  -  "
                 "without them PMax targets very broadly and learning is slower."
             )
             if rag == "green":
@@ -943,14 +1003,14 @@ def score_targeting_keywords(data):
         if national_targets:
             issues.append(
                 "Performance Max appears to be targeting the whole UK. "
-                "For local businesses this wastes budget on out-of-area traffic — "
+                "For local businesses this wastes budget on out-of-area traffic  -  "
                 "narrow location targeting to your service area."
             )
             rag = "amber"
 
     if not issues:
         issues.append(
-            f"Keyword targeting looks well-structured — "
+            f"Keyword targeting looks well-structured  -  "
             f"broad: {broad_clicks} clicks, phrase: {phrase_clicks}, exact: {exact_clicks}."
         )
 
@@ -1003,7 +1063,7 @@ def score_bidding_strategy(data):
         "TARGET_CPA", "TARGET_ROAS", "MAXIMIZE_CONVERSIONS",
         "MAXIMIZE_CONVERSION_VALUE", "TARGET_IMPRESSION_SHARE"
     }
-    # Note: in the Google Ads API, "Maximise Clicks" is reported as TARGET_SPEND —
+    # Note: in the Google Ads API, "Maximise Clicks" is reported as TARGET_SPEND  - 
     # NOT "MAXIMIZE_CLICKS". Missing this made Max Clicks campaigns invisible to the tool.
     manual_strategies = {"MANUAL_CPC", "MANUAL_CPM", "MANUAL_CPV", "MAXIMIZE_CLICKS", "TARGET_SPEND"}
 
@@ -1027,7 +1087,7 @@ def score_bidding_strategy(data):
 
     if max_clicks:
         issues.append(
-            f"{len(max_clicks)} campaign(s) on Maximise Clicks — this optimises for traffic, not conversions. "
+            f"{len(max_clicks)} campaign(s) on Maximise Clicks  -  this optimises for traffic, not conversions. "
             "Two things worth checking: whether it's a newer or low-data campaign that hasn't moved on yet, "
             "and - importantly - whether a maximum CPC bid limit is set. Without a sensible CPC ceiling, "
             "Maximise Clicks can pay far more per click than needed. Once there is enough conversion data, "
@@ -1058,20 +1118,20 @@ def score_bidding_strategy(data):
             "Campaigns are using inconsistent bid strategies: "
             + ", ".join(smart_strategy_types) + ". "
             "Mixing strategies (e.g. Maximise Conversions and Maximise Conversion Value) "
-            "sends conflicting signals — align all campaigns to the same goal."
+            "sends conflicting signals  -  align all campaigns to the same goal."
         )
         if rag == "green":
             rag = "amber"
 
     # Smart bidding with low conversion volume.
-    # NOTE: there is NO hard 30-50/month minimum — modern smart bidding works at
+    # NOTE: there is NO hard 30-50/month minimum  -  modern smart bidding works at
     # lower volumes; more good-quality data simply helps. (Per practitioner feedback.)
     if smart_campaigns and total_conversions < 15:
         issues.append(
             f"{len(smart_campaigns)} campaign(s) on smart bidding recorded only "
             f"{total_conversions:.0f} conversions in the last 30 days. "
             "Smart bidding optimises better with more conversion data, so improving tracking quality "
-            "and conversion volume will help — there's no hard minimum, more good data just helps."
+            "and conversion volume will help  -  there's no hard minimum, more good data just helps."
         )
         if rag == "green":
             rag = "amber"
@@ -1086,13 +1146,13 @@ def score_bidding_strategy(data):
                 issues.append(
                     f"Campaign '{c.get('name')}' has a target CPA of £{tcpa:.2f} but actual CPA is £{cpa:.2f}. "
                     "When the target is set much lower than actual performance, Google throttles spend "
-                    "chasing an unachievable goal — raise the target CPA closer to actual performance, "
+                    "chasing an unachievable goal  -  raise the target CPA closer to actual performance, "
                     "then reduce it incrementally once volume is stable."
                 )
                 if rag == "green":
                     rag = "amber"
 
-    # CPA check (cpa is None when there are 0 conversions — guard against it)
+    # CPA check (cpa is None when there are 0 conversions  -  guard against it)
     if cpa and cpa > 150:
         issues.append(
             f"Cost per conversion is £{cpa:.2f}. "
@@ -1103,7 +1163,7 @@ def score_bidding_strategy(data):
 
     # ── Paused campaigns with strong historic CPA (Max's Issue #3) ────────────
     # If a campaign was paused despite historically converting more cheaply than the
-    # account currently does, that's worth a look — budget may have shifted to pricier
+    # account currently does, that's worth a look  -  budget may have shifted to pricier
     # conversions. Stay humble (the human audit does too): the pause may have been a
     # lead-quality call we can't see from the data, so recommend REVIEW, not blind
     # reactivation. Only fires with meaningful historic volume. Never escalates past amber.
@@ -1166,7 +1226,7 @@ def score_bidding_strategy(data):
     if not issues:
         cpa_note = f", CPA £{cpa:.2f}" if cpa else ""
         issues.append(
-            f"Bidding strategy is appropriate — {len(smart_campaigns)} smart bidding campaign(s)"
+            f"Bidding strategy is appropriate  -  {len(smart_campaigns)} smart bidding campaign(s)"
             f"{cpa_note}."
         )
 
@@ -1186,7 +1246,7 @@ def score_bidding_strategy(data):
 
 def _bs_headline(rag, smart, manual):
     if rag == "red":
-        return "Bidding cannot be assessed — fix conversion tracking first"
+        return "Bidding cannot be assessed  -  fix conversion tracking first"
     if rag == "amber":
         return "Bidding strategy has room to improve"
     return f"Bidding strategy is appropriate ({smart} smart bidding, {manual} manual)"
