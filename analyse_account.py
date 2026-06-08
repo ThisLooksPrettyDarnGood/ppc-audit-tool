@@ -111,7 +111,7 @@ _ISSUE_SIGNATURES = [
     ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
     # Targeting & keywords
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend
-    ("not been added as keywords",                 60, "amber",     "Targeting & Keywords"),  # converting queries
+    ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries (high-value "dropped ball")
     ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
     ("targeting the whole UK",                     55, "amber",     "Targeting & Keywords"),
     ("responsive search ads are rated",            54, "amber",     "Targeting & Keywords"),  # RSA ad strength
@@ -661,11 +661,17 @@ def score_targeting_keywords(data):
     # Mirrors the human SQR review: (a) converting queries not yet added as
     # keywords, and (b) spend on terms that aren't converting (negative candidates).
     search_terms = data.get("top_search_terms", []) or []
-    converting_not_added = [
-        t for t in search_terms
-        if (t.get("conversions", 0) or 0) >= 1
-        and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
-    ]
+    # Prefer the dedicated 90-day query (catches winners that have tailed off / a page or
+    # keyword change quietly stopped capturing) and fall back to the 30-day top terms.
+    dedicated_converting = data.get("converting_unkeyworded_terms")
+    if dedicated_converting is not None:
+        converting_not_added = dedicated_converting
+    else:
+        converting_not_added = [
+            t for t in search_terms
+            if (t.get("conversions", 0) or 0) >= 1
+            and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
+        ]
     wasted_terms = [
         t for t in search_terms
         if (t.get("conversions", 0) or 0) == 0
@@ -675,9 +681,12 @@ def score_targeting_keywords(data):
     sqr_issues = []
     if converting_not_added:
         sqr_issues.append(
-            f"{len(converting_not_added)} of your highest-traffic search terms are generating "
-            "conversions but have not been added as keywords. Promoting proven converting queries "
-            "into keywords gives more control over bids, ad copy and landing pages."
+            f"{len(converting_not_added)} search terms have generated conversions but are NOT added "
+            "as active keywords - so proven, money-making demand is being captured loosely (or not at "
+            "all) rather than controlled directly. This is also where a quietly dropped ball hides: a "
+            "query that used to convert can stop being captured after a page rename, spelling change "
+            "or paused keyword. Promoting these into dedicated keywords gives control over bids, ad "
+            "copy and landing pages."
         )
         if rag == "green":
             rag = "amber"

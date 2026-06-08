@@ -225,6 +225,49 @@ def get_top_search_terms(client, cid, limit=30):
     return terms
 
 
+def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
+    """
+    Search terms that have CONVERTED over a longer window (default 90 days) but are NOT
+    added as keywords (search_term_view.status = NONE). This catches proven demand the
+    account is paying for via broad/loose matching instead of capturing directly — and,
+    crucially, the 'dropped ball' case where a product used to convert but a page/keyword
+    change quietly stopped it being captured. The 30-day top-terms pull would miss those.
+    Caller wraps in try/except.
+    """
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = today.strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT
+            search_term_view.search_term,
+            search_term_view.status,
+            metrics.clicks,
+            metrics.cost_micros,
+            metrics.conversions
+        FROM search_term_view
+        WHERE segments.date BETWEEN '{start}' AND '{end}'
+          AND metrics.conversions > 0
+        ORDER BY metrics.conversions DESC
+        LIMIT {limit}
+    """
+    rows = run_query(client, cid, gaql)
+    terms = []
+    for row in rows:
+        st = row.search_term_view
+        if st.status.name != "NONE":      # already added as a keyword (or excluded)
+            continue
+        m = row.metrics
+        terms.append({
+            "term": st.search_term,
+            "status": st.status.name,
+            "clicks": m.clicks,
+            "spend": round(m.cost_micros / 1_000_000, 2),
+            "conversions": round(m.conversions, 2),
+        })
+    return terms
+
+
 def get_location_targeting(client, cid):
     gaql = """
         SELECT
@@ -639,6 +682,15 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → Top search terms...")
     top_search_terms = get_top_search_terms(client, cid)
 
+    print("  → Converting search terms not added as keywords (90d)...")
+    try:
+        converting_unkeyworded_terms = get_converting_unkeyworded_terms(client, cid)
+        if converting_unkeyworded_terms:
+            print(f"    {len(converting_unkeyworded_terms)} converting term(s) not added as keywords")
+    except Exception as e:
+        print(f"    (converting-unkeyworded query failed: {e})")
+        converting_unkeyworded_terms = None
+
     print("  → Location targeting...")
     location_targeting = get_location_targeting(client, cid)
 
@@ -684,6 +736,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "conversion_actions": conversion_actions,
         "keyword_match_breakdown": keyword_match_breakdown,
         "top_search_terms": top_search_terms,
+        "converting_unkeyworded_terms": converting_unkeyworded_terms,
         "location_targeting": location_targeting,
         "audience_signals": audience_signals,
         "quality_scores": quality_scores,
