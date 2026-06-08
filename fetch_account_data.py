@@ -474,15 +474,49 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
         if key not in agg:
             agg[key] = {"id": key, "name": c.name,
                         "type": c.advertising_channel_type.name,
-                        "spend": 0.0, "conversions": 0.0}
+                        "spend": 0.0, "conversions": 0.0,
+                        "genuine_conv": 0.0, "lowval_conv": 0.0}
         agg[key]["spend"] += m.cost_micros / 1_000_000
         agg[key]["conversions"] += m.conversions
+
+    # Second query: PRIMARY conversions (metrics.conversions — what drives the headline
+    # CPA) split by category, so we can tell whether a tempting CPA is built on genuine
+    # leads or on low-value actions (page views / engagement) set as primary. Can't be
+    # combined with cost_micros in one query, hence a separate pass. Conversion-quality dig.
+    GENUINE_CATS = {"SUBMIT_LEAD_FORM", "PHONE_CALL_LEAD", "CONTACT", "BOOK_APPOINTMENT",
+                    "REQUEST_QUOTE", "SIGNUP", "PURCHASE", "IMPORTED_LEAD", "LEAD"}
+    LOWVAL_CATS = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD", "STORE_VISIT"}
+    gaql_cat = f"""
+        SELECT campaign.id, segments.conversion_action_category, metrics.conversions
+        FROM campaign
+        WHERE campaign.status = 'PAUSED'
+          AND segments.date BETWEEN '{start}' AND '{end}'
+    """
+    try:
+        for row in run_query(client, cid, gaql_cat):
+            key = str(row.campaign.id)
+            if key not in agg:
+                continue
+            cat = row.segments.conversion_action_category.name
+            conv = row.metrics.conversions
+            if cat in GENUINE_CATS:
+                agg[key]["genuine_conv"] += conv
+            elif cat in LOWVAL_CATS:
+                agg[key]["lowval_conv"] += conv
+    except Exception as e:
+        print(f"    (paused conversion-quality query failed: {e})")
 
     history = []
     for v in agg.values():
         v["spend"] = round(v["spend"], 2)
         v["conversions"] = round(v["conversions"], 2)
         v["cpa"] = round(v["spend"] / v["conversions"], 2) if v["conversions"] > 0 else None
+        v["genuine_conv"] = round(v["genuine_conv"], 2)
+        v["lowval_conv"] = round(v["lowval_conv"], 2)
+        # Share of PRIMARY conversions that are genuine leads (vs low-value primaries).
+        v["genuine_pct"] = round(v["genuine_conv"] / v["conversions"] * 100) if v["conversions"] > 0 else None
+        # The CPA on genuine leads only — the real cost per enquiry.
+        v["real_cpa"] = round(v["spend"] / v["genuine_conv"], 2) if v["genuine_conv"] > 0 else None
         history.append(v)
     return history
 

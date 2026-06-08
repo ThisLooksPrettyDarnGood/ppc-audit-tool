@@ -103,7 +103,7 @@ _ISSUE_SIGNATURES = [
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
     # Bidding
     ("on Maximise Clicks",                         78, "amber",     "Bidding Strategy"),
-    ("paused campaign(s) historically converted",  66, "amber",     "Bidding Strategy"),
+    ("paused campaign(s) historically delivered",  66, "amber",     "Bidding Strategy"),
     ("still on Manual CPC despite",                62, "amber",     "Bidding Strategy"),
     ("on Manual CPC.",                             58, "amber",     "Bidding Strategy"),
     ("has a target CPA of",                        55, "amber",     "Bidding Strategy"),
@@ -568,7 +568,7 @@ def score_account_structure(data):
     # CTR check
     impressions = summary.get("impressions", 0)
     if impressions > 0:
-        ctr_pct = summary.get("ctr_pct", 0)
+        ctr_pct = summary.get("ctr_pct", 0) or 0
         if ctr_pct < 1.0:
             issues.append(
                 f"Overall CTR is {ctr_pct:.2f}% — below the 1% benchmark. "
@@ -742,6 +742,23 @@ def score_targeting_keywords(data):
         and str(t.get("status", "")).upper() in ("NONE", "UNKNOWN", "")
         and str(t.get("term", "")).strip().lower() not in _converting_names
     ]
+    # The same search term can appear on several ad groups (separate rows) — aggregate by
+    # term so counts and examples don't double-count (e.g. 'giles pool lewes' twice).
+    def _agg_by_term(terms):
+        agg = {}
+        for t in terms:
+            k = str(t.get("term", "")).strip().lower()
+            if not k:
+                continue
+            a = agg.setdefault(k, {"term": t.get("term"), "spend": 0.0, "conversions": 0.0,
+                                   "status": t.get("status", "NONE")})
+            a["spend"] += t.get("spend", 0) or 0
+            a["conversions"] += t.get("conversions", 0) or 0
+        return list(agg.values())
+
+    converting_not_added = _agg_by_term(converting_not_added)
+    wasted_terms = _agg_by_term(wasted_terms)
+
     sqr_issues = []
     if fading_winners:
         f = max(fading_winners, key=lambda x: x["spend_30d"])
@@ -820,8 +837,8 @@ def score_targeting_keywords(data):
             if rag == "green":
                 rag = "amber"
 
-    # CTR check as proxy for relevance
-    ctr_pct = summary.get("ctr_pct", 0)
+    # CTR check as proxy for relevance (ctr_pct is None when there are 0 impressions)
+    ctr_pct = summary.get("ctr_pct", 0) or 0
     if ctr_pct > 0 and ctr_pct < 1.5 and has_search:
         issues.append(
             f"Search CTR is {ctr_pct:.2f}% — below the 2% benchmark. "
@@ -1021,24 +1038,49 @@ def score_bidding_strategy(data):
     # lead-quality call we can't see from the data, so recommend REVIEW, not blind
     # reactivation. Only fires with meaningful historic volume. Never escalates past amber.
     paused_hist = data.get("paused_campaign_history") or []
-    efficient_paused = [
-        p for p in paused_hist
-        if (p.get("conversions", 0) or 0) >= 5
-        and p.get("cpa") and cpa and p["cpa"] < cpa
-    ]
+
+    def _is_efficient(p):
+        # Prefer the GENUINE-lead CPA (conversion-quality dig). A campaign only counts as
+        # efficient if it produced real enquiries below the current CPA - not page-view /
+        # engagement "conversions". Fall back to total CPA only if quality data is missing.
+        g = p.get("genuine_conv")
+        rc = p.get("real_cpa")
+        if g is not None and g >= 5:
+            return bool(rc and cpa and rc < cpa)
+        if p.get("genuine_pct") is None:   # quality data unavailable → old behaviour
+            return (p.get("conversions", 0) or 0) >= 5 and p.get("cpa") and cpa and p["cpa"] < cpa
+        return False
+
+    efficient_paused = [p for p in paused_hist if _is_efficient(p)]
     if efficient_paused:
-        efficient_paused.sort(key=lambda p: p["cpa"])
-        names = ", ".join(
-            f"the '{p['name']}' campaign (historic CPA £{p['cpa']:.2f}, {int(round(p['conversions']))} conv)"
-            for p in efficient_paused[:3]
-        )
+        efficient_paused.sort(key=lambda p: (p.get("real_cpa") or p.get("cpa") or 1e9))
+        descs = []
+        for p in efficient_paused[:3]:
+            rc, g, gp = p.get("real_cpa"), p.get("genuine_conv"), p.get("genuine_pct")
+            if rc and g:
+                d = f"the '{p['name']}' campaign (£{rc:.0f} per genuine lead from {int(round(g))} real enquiries"
+                if gp is not None and gp < 70:
+                    d += (f"; note only {gp:.0f}% of its tracked conversions were genuine leads, so its "
+                          f"headline CPA of £{p.get('cpa', 0):.0f} flatters it")
+                d += ")"
+            else:
+                d = f"the '{p['name']}' campaign (historic CPA £{p.get('cpa', 0):.2f}, {int(round(p.get('conversions', 0)))} conv)"
+            descs.append(d)
+        names = ", ".join(descs)
+
+        _have_quality = [p for p in efficient_paused[:3] if p.get("genuine_pct") is not None]
+        if _have_quality and all((p.get("genuine_pct") or 0) >= 70 for p in _have_quality):
+            verify = (" We checked the conversion quality: these were genuine leads (form fills, calls and "
+                      "contacts), not page views or engagement actions - so this is real efficient activity "
+                      "that was switched off, not vanity metrics.")
+        else:
+            verify = (" Worth confirming the conversion quality before reactivating - some of the apparent "
+                      "efficiency leans on low-value actions (page views, engagement) rather than genuine enquiries.")
+
         issues.append(
-            f"{len(efficient_paused)} paused campaign(s) historically converted below the account's "
-            f"current £{cpa:.2f} CPA: {names}. From the account data alone there's no clear sign they "
-            "underperformed on cost - worth checking whether lead quality, not cost, drove the pause "
-            "before deciding on reactivation. Important caveat: confirm those conversions were genuine "
-            "enquiries, not low-value actions (page views) or very short phone calls - a flattering "
-            "historic CPA built on junk conversions isn't a real win."
+            f"{len(efficient_paused)} paused campaign(s) historically delivered genuine leads below the "
+            f"account's current £{cpa:.0f} CPA: {names}.{verify} Worth reviewing whether lead quality, not "
+            "cost, drove the pause before deciding on reactivation."
         )
         if rag == "green":
             rag = "amber"
