@@ -78,14 +78,16 @@ try:
 except FileNotFoundError:
     _DIAL_CONFIG = {}
 
-def pick_dial(issues: list) -> str:
+def pick_dial(section_rags: list) -> str:
     """
-    Score each section: RED=0, AMBER=1, GREEN=2.
-    Total 0–8 → one of 5 dial images.
+    Score the 4 audit sections: RED/AMBER_RED=0, AMBER=1, GREEN=2 → total 0–8 → one of
+    5 dial images. Driven by the holistic section RAGs (incl. healthy sections), NOT the
+    issue-led slide list — the dial must reflect OVERALL health, not just the problems shown.
+    Accepts a list of RAG strings.
     Returns a Google Drive URL or empty string if config missing.
     """
     score_map = {"RED": 0, "AMBER_RED": 0, "AMBER": 1, "GREEN": 2}
-    total = sum(score_map.get(i.get("rag", "AMBER").upper(), 1) for i in issues)
+    total = sum(score_map.get(str(r).upper(), 1) for r in section_rags)
     # 0-1 → red, 2-3 → orange, 4 → amber, 5-6 → light_green, 7-8 → dark_green
     if total <= 1:
         key = "dial_red"
@@ -167,6 +169,41 @@ def bullets(items):
 
 def rag_dot(rag_str):
     return RAG_DOT.get(str(rag_str).upper(), "🟠")
+
+def _delete_unused_issue_slides(slides_service, presentation_id):
+    """Issue-led decks fill a variable number of issue slides. Any issue slide left
+    with unfilled {{ISSUE_n_*}} placeholders is one we didn't need — delete the whole
+    slide so the client never sees a blank. Identifies issue slides purely by the
+    leftover placeholder, so it never touches a populated slide.
+    """
+    import re as _re
+    try:
+        deck = slides_service.presentations().get(presentationId=presentation_id).execute()
+    except Exception as e:
+        print(f"  ⚠ Could not fetch deck to trim issue slides: {e}")
+        return
+
+    issue_ph = _re.compile(r"\{\{ISSUE_\d+_(?:TITLE|RAG|HAPPENING|MATTERS|RECOMMENDATION)\}\}")
+    delete_requests = []
+    for slide in deck.get("slides", []):
+        slide_id = slide.get("objectId")
+        slide_text = ""
+        for el in slide.get("pageElements", []):
+            for te in el.get("shape", {}).get("text", {}).get("textElements", []):
+                slide_text += te.get("textRun", {}).get("content", "")
+        if issue_ph.search(slide_text):
+            delete_requests.append({"deleteObject": {"objectId": slide_id}})
+
+    if delete_requests:
+        try:
+            slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={"requests": delete_requests},
+            ).execute()
+            print(f"  Trimmed {len(delete_requests)} unused issue slide(s).")
+        except Exception as e:
+            print(f"  ⚠ Could not delete unused issue slides: {e}")
+
 
 def to_bullets(text):
     """Convert a plain multi-line string to bullet-prefixed lines."""
@@ -254,19 +291,24 @@ def main():
     requests.append(replace("{{PERF_SIS_12M}}",    perf.get("sis_12m",    "N/A")))
     requests.append(replace("{{PERF_COMMENTARY}}", perf_commentary))
 
-    # ── Issue slides (up to 4) ──
-    for i in range(1, 5):
-        issue        = issues[i - 1] if i <= len(issues) else {}
-        n            = str(i)
-        section_name = SECTION_NAMES[i - 1]
-        issue_rag    = issue.get("rag", "AMBER")
-        dot          = rag_dot(issue_rag)
-
-        requests.append(replace(f"{{{{ISSUE_{n}_TITLE}}}}",          section_name))
-        requests.append(replace(f"{{{{ISSUE_{n}_RAG}}}}",            dot))
-        requests.append(replace(f"{{{{ISSUE_{n}_HAPPENING}}}}",      issue.get("whats_happening", "")))
-        requests.append(replace(f"{{{{ISSUE_{n}_MATTERS}}}}",        issue.get("why_it_matters", "")))
-        requests.append(replace(f"{{{{ISSUE_{n}_RECOMMENDATION}}}}", bullets(issue.get("recommendations", []))))
+    # ── Issue slides (ISSUE-LED: up to 6, ranked by severity) ──
+    # The template carries 6 issue slides. We fill as many as we have issues, using
+    # each issue's own title (not a fixed category). Any slide left unfilled is
+    # deleted after population (see _delete_unused_issue_slides) so the client never
+    # sees a blank — find 3 issues, get 3 slides; find 6, get 6.
+    MAX_ISSUE_SLIDES = 6
+    for i in range(1, MAX_ISSUE_SLIDES + 1):
+        n = str(i)
+        if i <= len(issues):
+            issue     = issues[i - 1]
+            title     = issue.get("title") or f"Issue {n}"
+            dot       = rag_dot(issue.get("rag", "AMBER"))
+            requests.append(replace(f"{{{{ISSUE_{n}_TITLE}}}}",          title))
+            requests.append(replace(f"{{{{ISSUE_{n}_RAG}}}}",            dot))
+            requests.append(replace(f"{{{{ISSUE_{n}_HAPPENING}}}}",      issue.get("whats_happening", "")))
+            requests.append(replace(f"{{{{ISSUE_{n}_MATTERS}}}}",        issue.get("why_it_matters", "")))
+            requests.append(replace(f"{{{{ISSUE_{n}_RECOMMENDATION}}}}", bullets(issue.get("recommendations", []))))
+        # else: leave this issue slide's placeholders unfilled — it gets deleted below.
 
     # ── Key Opportunities slide ──
     requests.append(replace("{{KEY_OPPORTUNITIES}}", to_bullets(opportunities)))
@@ -285,8 +327,14 @@ def main():
         body={"requests": requests},
     ).execute()
 
+    # ── Delete any unused issue slides (issue-led: found fewer than the template holds) ──
+    _delete_unused_issue_slides(slides_service, new_id)
+
     # ── Swap the dial image based on RAG score ────────────────────────────────
-    dial_url = pick_dial(issues)
+    # Use holistic section RAGs (incl. healthy sections) so the dial reflects overall
+    # health; fall back to the issue list's RAGs for older narrative files.
+    section_rags = data.get("section_rags") or [iss.get("rag", "AMBER") for iss in issues]
+    dial_url = pick_dial(section_rags)
     if dial_url:
         print(f"Swapping dial image…")
         try:

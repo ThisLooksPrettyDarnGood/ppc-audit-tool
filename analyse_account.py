@@ -79,6 +79,138 @@ def analyse_account(data):
     }
     return findings
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ISSUE-LED SELECTION LAYER
+# The 4 scorers above produce all the diagnostics. A human auditor doesn't present
+# 4 fixed category slides — they pick the most important PROBLEMS and lead with them.
+# This layer turns the scorers' findings into a ranked, flat list of discrete issues
+# so the deck can be issue-led (top-N named problems, one per slide). The scorers are
+# left completely untouched — this only re-organises and prioritises their output.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# (needle in the finding text, severity, per-issue RAG, slide category)
+# Order matters: the first matching signature wins, so put the most severe / most
+# specific needles first. Severity ~ how much a human auditor would lead with it.
+_ISSUE_SIGNATURES = [
+    # Critical — account fundamentally not working
+    ("No conversion actions found",              130, "red",       "Conversion Tracking"),
+    ("recorded 0 conversions in the last 30",    122, "red",       "Conversion Tracking"),
+    ("spent with 0 conversions",                 116, "red",       "Bidding Strategy"),
+    ("should be treated as urgent",              112, "red",       "Targeting & Keywords"),  # broad + weak negatives combo
+    # On the cusp
+    ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
+    # Bidding
+    ("on Maximise Clicks",                         78, "amber",     "Bidding Strategy"),
+    ("paused campaign(s) historically converted",  66, "amber",     "Bidding Strategy"),
+    ("still on Manual CPC despite",                62, "amber",     "Bidding Strategy"),
+    ("on Manual CPC.",                             58, "amber",     "Bidding Strategy"),
+    ("has a target CPA of",                        55, "amber",     "Bidding Strategy"),
+    ("on smart bidding recorded only",             50, "amber",     "Bidding Strategy"),
+    ("using inconsistent bid strategies",          46, "amber",     "Bidding Strategy"),
+    ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
+    # Targeting & keywords
+    ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend
+    ("not been added as keywords",                 60, "amber",     "Targeting & Keywords"),  # converting queries
+    ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
+    ("targeting the whole UK",                     55, "amber",     "Targeting & Keywords"),
+    ("responsive search ads are rated",            54, "amber",     "Targeting & Keywords"),  # RSA ad strength
+    ("of keyword clicks come from Broad Match",    58, "amber",     "Targeting & Keywords"),
+    ("of keyword spend is on Broad Match",         57, "amber",     "Targeting & Keywords"),
+    ("negative keywords applied across",           50, "amber",     "Targeting & Keywords"),
+    ("Exact Match only",                           45, "amber",     "Targeting & Keywords"),
+    ("No Exact Match keyword clicks",              44, "amber",     "Targeting & Keywords"),
+    ("No keyword click data",                      48, "amber",     "Targeting & Keywords"),
+    ("CTR is",                                     40, "amber",     "Targeting & Keywords"),
+    # Conversion tracking (amber)
+    ("imported from GA4",                          56, "amber",     "Conversion Tracking"),
+    ("set as primary 'Conversions'",               45, "amber",     "Conversion Tracking"),  # too many primary
+    ("count 'Every' rather than 'Once'",           40, "amber",     "Conversion Tracking"),
+    ("with 0 conversions recorded",                64, "amber",     "Conversion Tracking"),  # campaign spend, no conv
+    ("negative keyword(s) found across",           50, "amber",     "Conversion Tracking"),
+    ("Conversion rate is",                         48, "amber",     "Conversion Tracking"),
+    # Account structure
+    ("received zero impressions",                  46, "amber",     "Account Structure"),
+    ("ad groups across",                           45, "amber",     "Account Structure"),
+    ("No Search or Performance Max",               50, "amber",     "Account Structure"),
+    ("split across",                               48, "amber",     "Account Structure"),  # budget too thin
+    ("smart bidding cannot learn",                 50, "amber",     "Account Structure"),
+    ("Auto-Apply is enabled for:",                 32, "amber",     "Account Structure"),
+    ("Auto-Apply Recommendations are enabled",     30, "amber",     "Account Structure"),
+]
+
+# Positive / "all good" filler lines the scorers add when a section is clean.
+# These are NOT issues and must never become a slide.
+_FILLER_MARKERS = (
+    "lean and focused", "is healthy", "looks well-structured", "looks healthy",
+    "is appropriate —", "set up and recording", "well-organised", "no action needed",
+)
+
+import re as _re
+
+def _largest_pound(text):
+    """Largest £ figure in a finding, used as a small commercial-magnitude tie-break."""
+    vals = []
+    for m in _re.findall(r"£([\d,]+)", text or ""):
+        try:
+            vals.append(float(m.replace(",", "")))
+        except ValueError:
+            pass
+    return max(vals) if vals else 0.0
+
+
+def _classify_issue(detail, section_name, section_rag):
+    if any(marker in detail for marker in _FILLER_MARKERS):
+        return None
+    for needle, sev, rag, cat in _ISSUE_SIGNATURES:
+        if needle in detail:
+            return {"severity": float(sev), "rag": rag, "category": cat}
+    # Genuine but unsignatured finding: keep it (don't lose real issues) unless the
+    # whole section came back green (then it's almost certainly positive filler).
+    if section_rag == "green":
+        return None
+    rag = "amber" if section_rag == "amber_red" else section_rag
+    return {"severity": 40.0, "rag": rag, "category": section_name}
+
+
+def select_top_issues(findings, max_issues=6):
+    """Flatten the 4 scorers' findings into a ranked list of discrete issues,
+    most important first, capped at max_issues. Each item:
+        {detail, category, rag, severity}
+    """
+    section_map = {
+        "conversion_tracking": "Conversion Tracking",
+        "account_structure":   "Account Structure",
+        "targeting_keywords":  "Targeting & Keywords",
+        "bidding_strategy":    "Bidding Strategy",
+    }
+    flat = []
+    for key, name in section_map.items():
+        sec = findings.get(key, {})
+        srag = sec.get("rag", "amber")
+        for detail in sec.get("issues", []):
+            meta = _classify_issue(detail, name, srag)
+            if not meta:
+                continue
+            mag = _largest_pound(detail)
+            bump = min(mag / 200.0, 12.0) if mag else 0.0   # up to +12 for big money
+            flat.append({
+                "detail": detail,
+                "category": meta["category"],
+                "rag": meta["rag"],
+                "severity": meta["severity"] + bump,
+            })
+    flat.sort(key=lambda x: x["severity"], reverse=True)
+    return flat[:max_issues]
+
+
+def overall_rag_from_issues(issues):
+    """Worst RAG across the issues (amber_red sits between red and amber)."""
+    order = {"red": 0, "amber_red": 0.5, "amber": 1, "green": 2}
+    if not issues:
+        return "green"
+    return min((i.get("rag", "amber") for i in issues), key=lambda r: order.get(r, 1))
+
 # ─────────────────────────────────────────────
 # SECTION 1: CONVERSION TRACKING
 # ─────────────────────────────────────────────

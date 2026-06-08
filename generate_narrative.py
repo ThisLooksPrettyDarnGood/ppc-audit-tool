@@ -257,16 +257,108 @@ Key rules for this section:
     return _parse_response(raw)
 
 
+# ── Issue-led: narrate ONE discrete issue (title + 3-part structure) ──────────
+
+CATEGORY_RULES = {
+    "Conversion Tracking": (
+        "- If the primary conversion is imported from GA4, say native Google Ads tags give the "
+        "cleanest bidding signal and recommend confirming Enhanced Conversions is active. NEVER say "
+        "GA4 'blocks' or 'prevents' Enhanced Conversions.\n"
+        "- If a low-value action (e.g. page views) is a primary conversion, explain bidding then "
+        "optimises towards activity, not real enquiries.\n"
+        "- Conversion action names like 'generate_lead' are Google's system names - refer to them in "
+        "plain English ('your lead action'). Never print the raw system name on a client slide."
+    ),
+    "Account Structure": (
+        "- Lead with the real structure; treat Auto-Apply as a secondary point.\n"
+        "- If budget is spread too thin, flag that no campaign gathers enough data to optimise.\n"
+        "- The WHY_IT_MATTERS bullets must be about money and growth, not technical structure."
+    ),
+    "Targeting & Keywords": (
+        "- Converting search terms not added as keywords, or high-traffic terms spending without "
+        "converting, are high-value search-query-report findings - be specific with the numbers.\n"
+        "- For weak responsive search ad strength: Ad Strength is NOT an auction or Ad Rank factor - "
+        "do NOT say it 'reduces impression share' or 'raises CPCs'. The lever is distinct, relevant "
+        "headlines and descriptions improving CTR and Quality Score.\n"
+        "- Few negative keywords or heavy broad match wastes budget on irrelevant searches."
+    ),
+    "Bidding Strategy": (
+        "- Lead gen: the correct strategy is Maximise Conversions (then Target CPA once there's data). "
+        "eCommerce: Maximise Conversion Value (then Target ROAS). Never recommend Manual CPC.\n"
+        "- Maximise Clicks: frame as 'optimising for website visits, not customers'; recommend "
+        "Maximise Conversions.\n"
+        "- There is no hard '30-50 conversions' minimum for smart bidding.\n"
+        "- Paused campaigns that historically converted below the current CPA: frame as efficient "
+        "activity possibly switched off; recommend reviewing lead quality before reactivating, not "
+        "blindly turning campaigns back on."
+    ),
+}
+
+_CATEGORY_EXAMPLE_KEY = {
+    "Conversion Tracking": "conversion_tracking",
+    "Account Structure":   "account_structure",
+    "Targeting & Keywords": "targeting_keywords",
+    "Bidding Strategy":    "bidding_strategy",
+}
+
+
+def _narrative_issue(client: OpenAI, issue: dict, account_type: str = "unknown") -> dict:
+    """Generate slide copy for ONE discrete issue: a specific title + the 3-part structure."""
+    cat = issue.get("category", "")
+    rules = CATEGORY_RULES.get(cat, "")
+    ex_key = _CATEGORY_EXAMPLE_KEY.get(cat)
+
+    prompt = f"""
+Write slide copy for ONE issue in a Google Ads audit. Focus ONLY on this single finding.
+
+Finding: {issue.get('detail', '')}
+RAG status: {issue.get('rag', 'amber')}
+Topic area: {cat}
+Account type: {account_type}
+
+Key rules:
+{rules}
+
+Produce a TITLE: a specific, punchy headline that NAMES the actual problem the way a senior auditor
+would - not the topic area. Under 9 words. E.g. "Maximise Clicks is buying traffic, not leads" or
+"Weak ad strength is limiting your reach".
+
+Respond in EXACTLY this format (no extra text, no markdown):
+TITLE: <title>
+WHATS_HAPPENING_1: <first bullet — what is happening>
+WHATS_HAPPENING_2: <second bullet — what is happening>
+WHY_IT_MATTERS_1: <first bullet — commercial impact>
+WHY_IT_MATTERS_2: <second bullet — commercial impact>
+REC1: <first recommendation>
+REC2: <second recommendation>
+REC3: <third recommendation>
+""".strip()
+
+    if ex_key:
+        prompt += "\n\n" + example_block(EXAMPLES[ex_key])
+
+    raw = _call_openai(client, SYSTEM_PROMPT, prompt)
+    parsed = _parse_response(raw)
+
+    title = ""
+    for line in raw.splitlines():
+        if line.strip().upper().startswith("TITLE:"):
+            title = line.split(":", 1)[1].strip()
+            break
+    parsed["title"] = title or cat
+    parsed["rag"] = issue.get("rag", "amber")
+    parsed["category"] = cat
+    return parsed
+
+
 def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list) -> dict:
     """Generates the Executive Summary slide content."""
 
-    section_names = ["Conversion Tracking", "Account Structure", "Targeting & Keywords", "Bidding Strategy"]
-
     issues_detail = "\n".join(
-        f"- {s} ({i.get('rag','AMBER').upper()}):\n"
+        f"- {i.get('title','Issue')} ({i.get('rag','AMBER').upper()}):\n"
         f"  What's happening: {i.get('whats_happening','').replace(chr(10), ' ')}\n"
         f"  Why it matters: {i.get('why_it_matters','').replace(chr(10), ' ')}"
-        for s, i in zip(section_names, issues)
+        for i in issues
     )
 
     prompt = f"""
@@ -317,13 +409,11 @@ COMMERCIAL_IMPACT: <specific commercial impact — 1–2 sentences>
 def _narrative_key_opportunities(client: OpenAI, findings: dict, issues: list) -> str:
     """Generates the Key Opportunities slide content."""
 
-    section_names = ["Conversion Tracking", "Account Structure", "Targeting & Keywords", "Bidding Strategy"]
-
     issues_detail = "\n".join(
-        f"- {s} ({i.get('rag','AMBER')}):\n"
+        f"- {i.get('title','Issue')} ({i.get('rag','AMBER')}):\n"
         f"  What's happening: {i.get('whats_happening','').replace(chr(10), ' ')}\n"
         f"  Why it matters: {i.get('why_it_matters','').replace(chr(10), ' ')}"
-        for s, i in zip(section_names, issues)
+        for i in issues
     )
 
     prompt = f"""
@@ -363,14 +453,12 @@ Respond with just the 4 opportunities, one per line, no bullet points or numberi
 def _narrative_takeaways(client: OpenAI, findings: dict, issues: list) -> list:
     """Generates the 3-row Key Takeaways table content."""
 
-    section_names = ["Conversion Tracking", "Account Structure", "Targeting & Keywords", "Bidding Strategy"]
-
     issues_detail = "\n".join(
-        f"- {s} ({i.get('rag','AMBER')}):\n"
+        f"- {i.get('title','Issue')} ({i.get('rag','AMBER')}):\n"
         f"  What's happening: {i.get('whats_happening','').replace(chr(10), ' ')}\n"
         f"  Why it matters: {i.get('why_it_matters','').replace(chr(10), ' ')}\n"
         f"  Recommendations: {'; '.join(i.get('recommendations', []))}"
-        for s, i in zip(section_names, issues)
+        for i in issues
     )
 
     prompt = f"""
@@ -559,30 +647,29 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     _total_tokens = 0  # reset for this run
     client = OpenAI(api_key=openai_api_key)
 
-    print("  → Generating Conversion Tracking narrative...")
-    conv  = _retry(lambda: _narrative_conversion_tracking(client, findings), "Conversion Tracking")
-    conv["rag"] = findings.get("conversion_tracking", {}).get("rag", "AMBER")
+    from analyse_account import select_top_issues, overall_rag_from_issues
 
-    print("  → Generating Account Structure narrative...")
-    struc = _retry(lambda: _narrative_account_structure(client, findings), "Account Structure")
-    struc["rag"] = findings.get("account_structure", {}).get("rag", "AMBER")
+    account_type = findings.get("account_type", "unknown")
 
-    print("  → Generating Targeting & Keywords narrative...")
-    targ  = _retry(lambda: _narrative_targeting_keywords(client, findings), "Targeting & Keywords")
-    targ["rag"] = findings.get("targeting_keywords", {}).get("rag", "AMBER")
+    # ── ISSUE-LED: pick the top problems and narrate each one individually ────
+    selected = select_top_issues(findings, max_issues=6)
+    if not selected:
+        # Genuinely clean account — fall back so the deck still has a slide.
+        selected = [{
+            "detail": "No material issues were detected — the account is in good health.",
+            "category": "Account Structure", "rag": "green", "severity": 1.0,
+        }]
 
-    print("  → Generating Bidding Strategy narrative...")
-    bid   = _retry(lambda: _narrative_bidding_strategy(client, findings), "Bidding Strategy")
-    bid["rag"] = findings.get("bidding_strategy", {}).get("rag", "AMBER")
+    issues = []
+    for n, iss in enumerate(selected, 1):
+        print(f"  → Generating issue {n}/{len(selected)}: {iss['category']} (sev {iss['severity']:.0f})...")
+        narrated = _retry(lambda i=iss: _narrative_issue(client, i, account_type),
+                          f"Issue {n}")
+        narrated["rag"] = iss["rag"]            # trust the analyser's RAG, not the model
+        narrated["category"] = iss["category"]
+        issues.append(narrated)
 
-    issues = [conv, struc, targ, bid]
-
-    # Overall RAG = worst of the four ("amber_red" sits on the cusp between them)
-    rag_order = {"RED": 0, "AMBER_RED": 0.5, "AMBER": 1, "GREEN": 2}
-    overall_rag = min(
-        [conv["rag"], struc["rag"], targ["rag"], bid["rag"]],
-        key=lambda r: rag_order.get(r.upper(), 1)
-    )
+    overall_rag = overall_rag_from_issues(selected)
 
     print("  → Generating Executive Summary...")
     exec_sum = _retry(lambda: _narrative_executive_summary(client, findings, issues), "Executive Summary")
@@ -614,10 +701,20 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     else:
         perf_commentary = ""
 
+    # Holistic section RAGs (incl. healthy ones) — drives the dial image, which must
+    # reflect OVERALL account health, not just the problems shown on the issue slides.
+    section_rags = [
+        findings.get("conversion_tracking", {}).get("rag", "amber"),
+        findings.get("account_structure", {}).get("rag", "amber"),
+        findings.get("targeting_keywords", {}).get("rag", "amber"),
+        findings.get("bidding_strategy", {}).get("rag", "amber"),
+    ]
+
     return {
         "client_name":       client_name,
         "account_cid":       findings.get("account_cid", ""),
         "overall_rag":       overall_rag,
+        "section_rags":      section_rags,
         "_tokens_used":      _total_tokens,
         "issues":            issues,
         "executive_summary": exec_sum,
