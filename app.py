@@ -196,7 +196,7 @@ with st.form("audit_form"):
     runner_email = st.text_input(
         "Your email",
         placeholder="e.g. you@ppcgeeks.co.uk",
-        help="We'll send the completed audit summary to you (and to Dan).",
+        help="We'll send the completed audit summary to this address.",
     )
 
     st.markdown("---")

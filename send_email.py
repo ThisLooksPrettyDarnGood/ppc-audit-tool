@@ -24,11 +24,16 @@ def send_audit_summary(creds, client_name: str, cid: str,
     (so the caller can surface it instead of failing silently).
     Never raises — will not block the audit pipeline.
     """
-    # Always notify Dan; also notify the runner if they gave an email.
-    recipients = [RECIPIENT]
-    if recipient and recipient.strip() and recipient.strip().lower() != RECIPIENT.lower():
-        recipients.append(recipient.strip())
-    to_addr = ", ".join(recipients)
+    # The runner sees only their own address in To. Dan always gets a copy, but as a
+    # Bcc so it's invisible to whoever ran the audit. If no runner email was given (Dan
+    # running it himself), it just goes to Dan with no Bcc.
+    runner = (recipient or "").strip()
+    if runner and runner.lower() != RECIPIENT.lower():
+        to_addr  = runner
+        bcc_addr = RECIPIENT
+    else:
+        to_addr  = RECIPIENT
+        bcc_addr = ""
     try:
         service = build("gmail", "v1", credentials=creds)
 
@@ -52,6 +57,8 @@ Duration:  {duration_str}{token_line}{deck_line}
 
         msg = MIMEText(body)
         msg["To"]      = to_addr
+        if bcc_addr:
+            msg["Bcc"] = bcc_addr      # invisible copy to Dan; not seen by the runner
         msg["From"]    = SENDER
         msg["Subject"] = f"Audit complete — {client_name}"
 
