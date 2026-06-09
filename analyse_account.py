@@ -1790,18 +1790,20 @@ def score_efficiency(data):
         _acct_spend = (data.get("account_summary_30d") or {}).get("spend") or sum(
             (c.get("spend_30d") or 0) for c in _camps if c.get("status") == "ENABLED")
         _pct = (_poi_spend / _acct_spend) if _acct_spend else 0
-        _mag = (f" These campaigns spent about £{_poi_spend:.0f} in the last 30 days"
-                + (f" ({_pct:.0%} of account spend)" if _acct_spend else "") + ".")
+        _mag = (f" These campaigns carry about £{_poi_spend:.0f} of spend in the last 30 days"
+                + (f" - {_pct:.0%} of the account" if _acct_spend else "") + ".")
         material = _poi_spend >= max(100.0, 0.10 * (_acct_spend or 0))
         if material:
             local_note = (" For a local business this is a major silent leak."
                           if account_type in ("lead_gen", "unknown") else "")
             issues.append(
                 f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
-                f"{names}.{_mag} This shows your ads to people merely INTERESTED in your area, including those "
-                f"who are nowhere near it (e.g. someone who once searched your town).{local_note} Switching to "
-                "'Presence (people in, or regularly in, your locations)' is one of the highest-ROI fixes there "
-                "is - it typically cuts wasted spend and lowers cost per lead."
+                f"{names}.{_mag} The setting shows your ads to people merely INTERESTED in your area, not only "
+                f"those actually in it - so with it active across {_pct:.0%} of your spend, effectively your "
+                "whole budget is EXPOSED to out-of-area clicks. (This is exposure, NOT proof that all of it was "
+                "wasted - the exact out-of-area share needs a location/geographic report to confirm.)"
+                f"{local_note} Switching to 'Presence (people in, or regularly in, your locations)' is one of "
+                "the highest-ROI fixes there is - it typically cuts wasted spend and lowers cost per lead."
             )
         else:
             issues.append(
