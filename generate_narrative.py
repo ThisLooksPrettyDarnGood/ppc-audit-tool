@@ -542,6 +542,53 @@ Respond with just the 5 opportunities, one per line, no bullet points or numberi
     return "\n".join(lines[-5:])
 
 
+def _narrative_additional_observations(client: OpenAI, below_cut: list) -> list:
+    """Compress the genuine findings that ranked BELOW the 6-slide cut into a short
+    list of crisp, client-facing one-line observations for the 'Additional
+    Observations' slide. These are real but secondary points (Quality Score, brand
+    leakage, RSA strength, etc.) that would otherwise only live in the internal email.
+    Returns a list of strings (house-styled via _call_openai). Falls back to a plain
+    first-sentence extraction if the model returns nothing usable.
+    """
+    if not below_cut:
+        return []
+    items = below_cut[:6]   # one slide stays scannable
+    findings_text = "\n".join(
+        f"- [{i.get('category', '')}] {i.get('detail', '')}" for i in items
+    )
+    prompt = f"""
+Below are genuine SECONDARY findings from a Google Ads audit that did not make the main
+issue slides (those already cover the biggest problems). Summarise each as ONE crisp,
+client-facing observation for an "Additional Observations" slide.
+
+Findings:
+{findings_text}
+
+Rules:
+- One line per finding, in the SAME order. Maximum {len(items)} lines.
+- Plain English for a non-technical business owner. Under 22 words each.
+- Lead with the concrete fact (a number, percentage or specific item) where there is one.
+- Neutral, observational tone - these are smaller notes worth flagging, not alarms. No hard sell.
+- British English spelling. Whole pounds, no pence.
+- Do NOT restate the main issue slides; keep each line tied to its finding above.
+
+Respond with just the observations, one per line, with no bullets or numbering.
+""".strip()
+    raw = _call_openai(client, "You are a concise, precise Google Ads auditor.", prompt)
+    lines = []
+    for line in raw.splitlines():
+        # Strip only genuine list markers ("- ", "• ", "1. ", "2) ") - NOT leading
+        # numbers that are part of the content (e.g. "55 of 114 ads...").
+        line = re.sub(r'^\s*(?:[-•*]\s+|\d{1,2}[.)]\s+)', '', line).strip()
+        if line:
+            lines.append(line)
+    if not lines:
+        # Fallback: first sentence of each finding so the slide is never empty by accident.
+        lines = [str(i.get('detail', '')).split('. ')[0].strip() for i in items]
+        lines = [l for l in lines if l]
+    return lines[:len(items)]
+
+
 def _narrative_takeaways(client: OpenAI, findings: dict, issues: list) -> list:
     """Generates the 5-row Key Takeaways table content (matches Max's 5-row format)."""
 
@@ -718,10 +765,12 @@ def _retry(fn, label: str, max_attempts: int = 3):
         if isinstance(result, dict):
             has_content = any(v for v in result.values() if isinstance(v, str) and v.strip())
         elif isinstance(result, list):
-            has_content = any(
-                any(v for v in row.values() if isinstance(v, str) and v.strip())
-                for row in result if isinstance(row, dict)
-            )
+            # Rows may be dicts (e.g. takeaways) or plain strings (e.g. observations).
+            def _row_has(row):
+                if isinstance(row, dict):
+                    return any(v for v in row.values() if isinstance(v, str) and v.strip())
+                return bool(str(row).strip())
+            has_content = any(_row_has(row) for row in result)
         else:
             has_content = bool(str(result).strip())
 
@@ -767,6 +816,21 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         narrated["rag"] = iss["rag"]            # trust the analyser's RAG, not the model
         narrated["category"] = iss["category"]
         issues.append(narrated)
+
+    # ── Additional observations: genuine findings that ranked BELOW the 6-slide cut ──
+    # They were only living in the internal email; surface them on their own slide so
+    # the client sees the full picture (the slide is auto-deleted when there are none).
+    _all_ranked = select_top_issues(findings, max_issues=50, apply_floor=False)
+    _selected_details = {i.get("detail") for i in selected}
+    _below_cut = [i for i in _all_ranked if i.get("detail") not in _selected_details]
+    if _below_cut:
+        print(f"  → Summarising {min(len(_below_cut), 6)} additional observation(s)...")
+        additional_observations = _retry(
+            lambda: _narrative_additional_observations(client, _below_cut),
+            "Additional Observations"
+        )
+    else:
+        additional_observations = []
 
     overall_rag = overall_rag_from_issues(selected)
 
@@ -828,6 +892,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "section_rags":      section_rags,
         "_tokens_used":      _total_tokens,
         "issues":            issues,
+        "additional_observations": additional_observations,
         "executive_summary": exec_sum,
         "objectives":        objectives,
         "key_opportunities": opps,

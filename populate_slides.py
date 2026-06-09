@@ -165,8 +165,10 @@ def rag_dot(rag_str):
 def _delete_unused_issue_slides(slides_service, presentation_id):
     """Issue-led decks fill a variable number of issue slides. Any issue slide left
     with unfilled {{ISSUE_n_*}} placeholders is one we didn't need  -  delete the whole
-    slide so the client never sees a blank. Identifies issue slides purely by the
-    leftover placeholder, so it never touches a populated slide.
+    slide so the client never sees a blank. Also trims the Additional Observations slide
+    when there were no below-cut findings (its {{ADDITIONAL_OBSERVATIONS}} placeholder is
+    left unfilled). Identifies slides purely by the leftover placeholder, so it never
+    touches a populated slide.
     """
     import re as _re
     try:
@@ -175,7 +177,9 @@ def _delete_unused_issue_slides(slides_service, presentation_id):
         print(f"  ⚠ Could not fetch deck to trim issue slides: {e}")
         return
 
-    issue_ph = _re.compile(r"\{\{ISSUE_\d+_(?:TITLE|RAG|HAPPENING|MATTERS|RECOMMENDATION)\}\}")
+    issue_ph = _re.compile(
+        r"\{\{(?:ISSUE_\d+_(?:TITLE|RAG|HAPPENING|MATTERS|RECOMMENDATION)|ADDITIONAL_OBSERVATIONS)\}\}"
+    )
     delete_requests = []
     for slide in deck.get("slides", []):
         slide_id = slide.get("objectId")
@@ -224,6 +228,7 @@ def main():
     objectives    = data.get("objectives", {})
     takeaways     = data.get("takeaways", [])
     opportunities = data.get("key_opportunities", "")
+    observations  = data.get("additional_observations", [])
     website_url   = data.get("website_url", "")
 
     print(f"Loaded narrative for: {client_name} (CID: {account_cid})")
@@ -302,6 +307,12 @@ def main():
             requests.append(replace(f"{{{{ISSUE_{n}_MATTERS}}}}",        issue.get("why_it_matters", "")))
             requests.append(replace(f"{{{{ISSUE_{n}_RECOMMENDATION}}}}", bullets(issue.get("recommendations", []))))
         # else: leave this issue slide's placeholders unfilled  -  it gets deleted below.
+
+    # ── Additional Observations slide (secondary findings below the 6-issue cut) ──
+    # Only fill it when there are observations; otherwise leave the placeholder so the
+    # whole slide is trimmed below (same pattern as unused issue slides).
+    if observations:
+        requests.append(replace("{{ADDITIONAL_OBSERVATIONS}}", to_bullets(observations)))
 
     # ── Key Opportunities slide ──
     requests.append(replace("{{KEY_OPPORTUNITIES}}", to_bullets(opportunities)))
