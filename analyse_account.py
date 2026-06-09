@@ -405,38 +405,36 @@ def score_conversion_tracking(data):
                 rag = "amber"
 
         # Attribution model  -  last-click is outdated; data-driven is Google's recommended default.
-        # Name the actions, flag call actions, show 30-day volume (a 0-conv one may be legacy).
-        last_click = [
+        # IMPORTANT: ignore map/directions actions (low-value, often junk for a business like this)
+        # and only flag if a real action is ACTUALLY recording conversions on last-click. If every
+        # last-click action recorded 0 conversions, there's nothing being mis-attributed - suppress
+        # it (a 0-conv last-click action is just legacy clutter, not a live attribution problem).
+        def _is_map(ca):
+            blob = (str(ca.get("type", "")) + " " + str(ca.get("name", ""))).upper()
+            return "MAP" in blob or "DIRECTION" in blob
+        last_click_firing = [
             ca for ca in active_actions
             if ca.get("include_in_conversions")
             and ca.get("attribution_model") == "GOOGLE_ADS_LAST_CLICK"
+            and not _is_map(ca)
+            and (ca.get("conversions_30d") or 0) > 0
         ]
-        if last_click:
-            parts, legacy, any_call = [], [], False
-            for ca in last_click:
-                nm = ca.get("name", "Unknown")
+        if last_click_firing:
+            parts, any_call = [], False
+            for ca in last_click_firing:
                 is_call = "CALL" in str(ca.get("type", "")).upper()
                 any_call = any_call or is_call
-                conv = ca.get("conversions_30d")
-                lbl = f"'{nm}'" + (" (a call action)" if is_call else "")
-                if conv is not None:
-                    lbl += f" - {int(round(conv))} conv in 30d"
-                    if conv == 0:
-                        legacy.append(nm)
-                parts.append(lbl)
+                conv = int(round(ca.get("conversions_30d") or 0))
+                parts.append(f"'{ca.get('name','Unknown')}'" + (" (a call action)" if is_call else "")
+                             + f" - {conv} conv in 30d")
             call_note = (" Several of these are call actions, where the journey often spans several "
                          "visits, so last-click especially undervalues them.") if any_call else ""
-            legacy_note = ""
-            if legacy:
-                legacy_note = (" Note: " + ", ".join(f"'{n}'" for n in legacy) + " recorded no conversions "
-                               "in the last 30 days, so it may be a legacy action worth removing entirely "
-                               "rather than re-attributing.")
             issues.append(
-                f"{len(last_click)} primary conversion action(s) still use last-click attribution: "
-                f"{', '.join(parts)}.{call_note} Last-click credits only the final click and ignores the "
-                "earlier searches that helped create the enquiry, so smart bidding optimises on a partial "
-                "picture. Switching the active ones to data-driven attribution (Google's recommended "
-                f"default) lets bidding value the whole path to an enquiry.{legacy_note}"
+                f"{len(last_click_firing)} primary conversion action(s) that ARE recording conversions "
+                f"still use last-click attribution: {', '.join(parts)}.{call_note} Last-click credits only "
+                "the final click and ignores the earlier searches that helped create the enquiry, so smart "
+                "bidding optimises on a partial picture. Switching them to data-driven attribution "
+                "(Google's recommended default) lets bidding value the whole path to an enquiry."
             )
             if rag == "green":
                 rag = "amber"
@@ -1372,7 +1370,7 @@ def build_strengths(data):
         s.append(f"a well-maintained negative keyword list ({neg:,} negatives)")
     loc = data.get("location_target_types") or []
     if loc and not any(c.get("geo") == "PRESENCE_OR_INTEREST" for c in loc):
-        s.append("location targeting correctly set to 'Presence' (people actually in your area)")
+        s.append("location targeting set up correctly")
     nets = data.get("network_settings") or []
     if nets and not any(c.get("search_partners") or c.get("display") for c in nets):
         s.append("Search Partners and the Display Network correctly switched off on Search")
