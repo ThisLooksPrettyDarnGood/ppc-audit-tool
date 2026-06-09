@@ -306,6 +306,33 @@ def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
     return terms
 
 
+def get_term_conversion_breakdown(client, cid, lookback_days=90):
+    """Per search term, which CONVERSION ACTIONS its conversions came through (last 90d).
+    Answers 'were these 6 leads form fills or page scrolls?'. Returns
+    {term_lower: [(action_name, conversions), ...] sorted desc}. Read-only; caller wraps.
+    """
+    from datetime import datetime, timedelta
+    start = (datetime.today() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = datetime.today().strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT search_term_view.search_term, segments.conversion_action_name, metrics.conversions
+        FROM search_term_view
+        WHERE segments.date BETWEEN '{start}' AND '{end}'
+          AND metrics.conversions > 0
+        ORDER BY metrics.conversions DESC
+        LIMIT 200
+    """
+    rows = run_query(client, cid, gaql)
+    out = {}
+    for r in rows:
+        term = str(r.search_term_view.search_term).strip().lower()
+        action = r.segments.conversion_action_name
+        conv = round(r.metrics.conversions, 2)
+        out.setdefault(term, {})
+        out[term][action] = out[term].get(action, 0) + conv
+    return {t: sorted(d.items(), key=lambda x: x[1], reverse=True) for t, d in out.items()}
+
+
 def get_max_clicks_costly_terms(client, cid, campaign_ids):
     """For the given (uncapped Maximise Clicks) campaigns, return the single priciest
     search term per campaign over the last 30 days: {campaign_id: {term, cpc}}. Used to
@@ -999,6 +1026,12 @@ def fetch_account_data(client_cid: str) -> dict:
     except Exception as e:
         print(f"    (priciest-clicks query failed: {e})"); priciest_clicks = None
 
+    print("  → Per-term conversion-action breakdown (90d)...")
+    try:
+        term_conversion_breakdown = get_term_conversion_breakdown(client, cid)
+    except Exception as e:
+        print(f"    (term conv-breakdown query failed: {e})"); term_conversion_breakdown = {}
+
     print("  → Converting search terms not added as keywords (90d)...")
     try:
         converting_unkeyworded_terms = get_converting_unkeyworded_terms(client, cid)
@@ -1093,6 +1126,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "keyword_match_breakdown": keyword_match_breakdown,
         "top_search_terms": top_search_terms,
         "priciest_clicks": priciest_clicks,
+        "term_conversion_breakdown": term_conversion_breakdown,
         "converting_unkeyworded_terms": converting_unkeyworded_terms,
         "location_targeting": location_targeting,
         "audience_signals": audience_signals,

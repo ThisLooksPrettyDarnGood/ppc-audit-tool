@@ -282,6 +282,33 @@ def _clean_action_label(name, fallback=""):
     return n or fallback
 
 
+def _action_kind(name):
+    """Classify a conversion-action NAME as genuine vs low-value, for the per-term breakdown."""
+    n = str(name).lower()
+    if any(k in n for k in ("scroll", "page_view", "pageview", "page view", "engag", "view",
+                            "impression", "outbound")):
+        return "low-value page activity"
+    if any(k in n for k in ("form", "formularz", "lead", "contact", "enquir", "quote",
+                            "appoint", "submit", "call", "kontakt")):
+        return "a genuine enquiry"
+    return ""
+
+
+def _term_breakdown_str(term, data):
+    """Plain-English breakdown of WHICH conversion actions a term's conversions came through,
+    e.g. " Its 6 conversions came through: 6 via 'Przeslany formularz kontaktowy' (a genuine
+    enquiry)." - answers 'were these form fills or page scrolls?'. '' if no data."""
+    bd = (data.get("term_conversion_breakdown") or {}).get(str(term).strip().lower())
+    if not bd:
+        return ""
+    parts = []
+    for action, conv in bd[:3]:
+        kind = _action_kind(action)
+        kind_txt = f" ({kind})" if kind else ""
+        parts.append(f"{int(round(conv))} via '{_clean_action_label(action)}'{kind_txt}")
+    return f" Its conversions came through: {', '.join(parts)}." if parts else ""
+
+
 def _pretty_date(d):
     """'2026-06-05' -> '5 June'. Returns the input unchanged if unparseable."""
     from datetime import datetime
@@ -1135,7 +1162,9 @@ def score_targeting_keywords(data):
             f"lead{'s' if c90 != 1 else ''} over the LAST 90 DAYS, but in the LAST 30 DAYS it has spent "
             f"about £{f['spend_30d']:.0f} with no leads. A proven term going quiet like this usually means "
             "something changed - a page rename, a dropped bid, or a competitor moving in. Catching it needs "
-            f"exactly this 30 vs 90-day comparison, and it's where quietly dropped balls are recovered.{_quality_caveat}"
+            "exactly this 30 vs 90-day comparison, and it's where quietly dropped balls are recovered."
+            # Show what those 90-day "leads" actually were (form fills vs page scrolls), else caveat.
+            + (_term_breakdown_str(f["term"], data) or _quality_caveat)
         )
         if rag == "green":
             rag = "amber"

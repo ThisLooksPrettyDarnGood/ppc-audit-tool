@@ -753,6 +753,7 @@ The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
 Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{conversion_caveat}
 If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
+When you note Search impression share (SIS) is low, QUANTIFY what that means: state the approximate share of eligible searches being missed (roughly 100% minus the SIS%, e.g. SIS of 40% means about 60% of eligible searches are being missed) - do not leave "low" vague.
 End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened.
 Use British English. Be direct, not alarmist. You may write up to 4 sentences if needed to include the OCI caveat.
 {client_context}
