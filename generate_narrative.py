@@ -721,7 +721,8 @@ WEBSITE_URL: <full website URL or blank>
     }
 
 
-def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: str = "") -> str:
+def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: str = "",
+                               conversion_caveat: str = "") -> str:
     """
     Write 2 - 3 sentences interpreting the 30-day vs 12-month performance numbers.
     Flags whether trend is positive, negative, or mixed.
@@ -749,7 +750,7 @@ Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m
 You are writing 2 - 3 sentences for a Google Ads audit slide called "Performance Summary".
 The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
-Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).
+Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{conversion_caveat}
 If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
 End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened.
 Use British English. Be direct, not alarmist. You may write up to 4 sentences if needed to include the OCI caveat.
@@ -799,17 +800,22 @@ def _sensecheck_terms(client: OpenAI, terms: list, business_context: str = "") -
     (one line per term) for the narration to weave in, or '' on any failure. Best-effort:
     uses OpenAI web search and NEVER breaks the pipeline if it is unavailable.
     """
-    terms = [t for t in (terms or []) if t][:4]
+    terms = [t for t in (terms or []) if t][:6]
     if not terms:
         return ""
     listed = "; ".join(f"'{t}'" for t in terms)
-    ctx = f" ({business_context})" if business_context else ""
+    ctx = business_context.strip()[:400] if business_context else "(business context not provided)"
     prompt = (
-        f"A UK swimming-pool design & installation company{ctx} in East Sussex/Kent is paying for these "
-        f"Google search terms: {listed}. Use web search to identify, for EACH term, what the business or "
-        "place most likely is, and classify it as COMPETITOR (a rival pool/hot-tub/sauna company), PUBLIC "
-        "POOL/LEISURE CENTRE (somewhere people go to swim), or GENERIC demand. Reply with one line per term: "
-        "term - what it is - CLASSIFICATION. Under 20 words per line. If genuinely unsure, say so."
+        f"A business is running Google Ads and these search terms triggered its ads: {listed}.\n"
+        f"Business context (who THIS advertiser is): {ctx}\n"
+        "Use web search to identify, for EACH term, what the business / place / brand / institution it refers "
+        "to most likely is, then classify it relative to THIS advertiser as exactly one of:\n"
+        "- COMPETITOR (a direct rival offering the same thing)\n"
+        "- MISDIRECTED (a DIFFERENT organisation, brand, institution or place the searcher actually wants - "
+        "NOT demand for this advertiser; e.g. a well-known body, a publisher, a public venue)\n"
+        "- GENUINE DEMAND (a real prospective customer for this advertiser)\n"
+        "- UNSURE (if you genuinely cannot tell)\n"
+        "Reply with one line per term, exactly: term - what it is - CLASSIFICATION. Under 20 words per line."
     )
     try:
         global _total_tokens
@@ -854,21 +860,36 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
             "category": "Account Structure", "rag": "green", "severity": 1.0,
         }]
 
-    # ── Web sense-check the flagged competitor/odd terms so the slide can say what they
-    # ACTUALLY are (e.g. 'giles pools lewes' = Giles Leisure, a Lewes pool retailer + public
-    # pool). Inject the verified context into the competitor finding before it is narrated.
-    _comp_terms = [t.get("term") for t in
-                   (findings.get("targeting_keywords", {}) or {}).get("competitor_terms", [])
-                   if t.get("term")]
-    if _comp_terms and any("look like competitor business names" in (i.get("detail") or "") for i in selected):
-        print(f"  → Web sense-checking {len(_comp_terms[:4])} flagged search term(s)...")
-        _sc = _sensecheck_terms(client, _comp_terms, client_name)
+    # ── Web sense-check the flagged terms so the deck says what they ACTUALLY are (e.g.
+    # 'giles pools lewes' = Giles Leisure; 'british council' = a different institution, NOT
+    # this advertiser's demand). Runs on BOTH the competitor finding AND the converting-terms
+    # finding - so we never recommend a misdirected/other-brand term as a keyword, in ANY
+    # vertical. Verified context is injected into those findings before they are narrated.
+    _tk = findings.get("targeting_keywords", {}) or {}
+    _comp_terms = [t.get("term") for t in _tk.get("competitor_terms", []) if t.get("term")]
+    _conv_terms = list(_tk.get("converting_terms", []) or [])
+    _has_comp = any("look like competitor business names" in (i.get("detail") or "") for i in selected)
+    _has_conv = any("are NOT added as active keywords" in (i.get("detail") or "") for i in selected)
+    _terms_to_check = []
+    for _t in (_comp_terms + _conv_terms):
+        if _t and _t not in _terms_to_check:
+            _terms_to_check.append(_t)
+    if _terms_to_check and (_has_comp or _has_conv):
+        print(f"  → Web sense-checking {len(_terms_to_check[:6])} flagged search term(s)...")
+        _bizctx = f"{client_name}. {raw_questionnaire[:300]}".strip()
+        _sc = _sensecheck_terms(client, _terms_to_check, _bizctx)
         if _sc:
+            _sc_line = _sc.replace(chr(10), " | ")
             for _iss in selected:
-                if "look like competitor business names" in (_iss.get("detail") or ""):
-                    _iss["detail"] += (" WEB SENSE-CHECK (verified - weave the key facts in naturally, "
-                                       "naming what each term actually is): " + _sc.replace(chr(10), " | "))
-                    break
+                _d = _iss.get("detail") or ""
+                if "look like competitor business names" in _d:
+                    _iss["detail"] += (" WEB SENSE-CHECK (verified - weave key facts in, naming what each term "
+                                       "actually is): " + _sc_line)
+                elif "are NOT added as active keywords" in _d:
+                    _iss["detail"] += (" WEB SENSE-CHECK (verified): " + _sc_line + " Use this: recommend adding "
+                                       "ONLY the GENUINE DEMAND terms as keywords; for any MISDIRECTED term (a "
+                                       "different organisation or brand the searcher actually wants), do NOT "
+                                       "recommend adding it - say to add it as a negative keyword instead.")
 
     issues = []
     for n, iss in enumerate(selected, 1):
@@ -949,8 +970,21 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     perf = findings.get("performance_summary", {})
     if perf:
         print("  → Writing performance commentary...")
+        # If conversions are inflated (low-value primary actions firing, or double-counting),
+        # an "improved" CPA/volume is NOT real progress - tell the commentary not to celebrate it.
+        _ct_issues = " ".join((findings.get("conversion_tracking", {}) or {}).get("issues", [])).lower()
+        _conv_inflated = any(k in _ct_issues for k in
+                             ("actively recording conversions", "double-counting", "double counting"))
+        _conv_caveat = ""
+        if _conv_inflated:
+            _conv_caveat = ("\nIMPORTANT: the conversion COUNT is inflated (low-value page-view/engagement "
+                            "actions and/or double-counting are recording as 'conversions'), so any improvement "
+                            "in conversions or CPA is overstated and NOT proven lead growth. Do NOT say "
+                            "performance is 'improving' or 'trending up'; instead state that the reported gain is "
+                            "flattered by inflated conversion tracking and the true cost per genuine lead is "
+                            "higher, and cannot be trusted until tracking is corrected and OCI is in place.")
         perf_commentary = _retry(
-            lambda: _narrative_perf_commentary(client, perf, raw_questionnaire),
+            lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat),
             "Performance Commentary"
         )
     else:

@@ -1283,6 +1283,10 @@ def score_targeting_keywords(data):
         # (e.g. confirm 'giles pools lewes' is Giles Leisure, a Lewes pool retailer/public pool).
         "competitor_terms": [{"term": t.get("term"), "reason": t.get("reason")}
                              for t in competitor_terms],
+        # Converting-but-unkeyworded terms we'd otherwise recommend adding - the narrative layer
+        # sense-checks these too, so we never recommend a misdirected/other-brand term (e.g.
+        # 'british council', 'macmillan') as a keyword for an unrelated advertiser.
+        "converting_terms": [t.get("term") for t in converting_not_added if t.get("term")],
         "data_points": {
             "broad_clicks": broad_clicks,
             "phrase_clicks": phrase_clicks,
