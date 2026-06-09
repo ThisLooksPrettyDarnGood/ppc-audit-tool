@@ -1064,6 +1064,17 @@ def score_targeting_keywords(data):
     wasted_terms = [t for t in wasted_terms
                     if str(t.get("term", "")).strip().lower() not in _comp_names]
 
+    # If low-value actions are primary AND firing, ANY "converted/lead" count below may be page
+    # activity (scrolls, page views), not genuine enquiries - caveat it rather than overclaim.
+    _lv_primary_firing = any(
+        ca.get("status") == "ENABLED" and ca.get("include_in_conversions")
+        and ca.get("category") in {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD", "OUTBOUND_CLICK"}
+        and (ca.get("conversions_30d") or 0) > 0
+        for ca in (data.get("conversion_actions") or []))
+    _quality_caveat = (" Note: low-value actions (page views, scrolls, clicks) are currently counted as "
+                       "primary conversions, so some of these 'leads' may be page activity rather than "
+                       "genuine enquiries - confirm once tracking is corrected." if _lv_primary_firing else "")
+
     sqr_issues = []
     if competitor_terms:
         _ranked_ct = sorted(competitor_terms,
@@ -1119,7 +1130,7 @@ def score_targeting_keywords(data):
             f"lead{'s' if c90 != 1 else ''} over the LAST 90 DAYS, but in the LAST 30 DAYS it has spent "
             f"about £{f['spend_30d']:.0f} with no leads. A proven term going quiet like this usually means "
             "something changed - a page rename, a dropped bid, or a competitor moving in. Catching it needs "
-            "exactly this 30 vs 90-day comparison, and it's where quietly dropped balls are recovered."
+            f"exactly this 30 vs 90-day comparison, and it's where quietly dropped balls are recovered.{_quality_caveat}"
         )
         if rag == "green":
             rag = "amber"
@@ -1139,7 +1150,7 @@ def score_targeting_keywords(data):
             "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
             "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
             "cannot be added and are better captured by a closely related theme - to gain control over bids, "
-            "ad copy and landing pages."
+            f"ad copy and landing pages.{_quality_caveat}"
         )
         if rag == "green":
             rag = "amber"
@@ -1315,6 +1326,9 @@ def score_targeting_keywords(data):
         # sense-checks these too, so we never recommend a misdirected/other-brand term (e.g.
         # 'british council', 'macmillan') as a keyword for an unrelated advertiser.
         "converting_terms": [t.get("term") for t in converting_not_added if t.get("term")],
+        # Fading winners are sense-checked too: a competitor like 'astra ai' must be reframed as a
+        # rival, not presented as "lost demand to recover".
+        "fading_winner_terms": [f.get("term") for f in fading_winners if f.get("term")],
         "data_points": {
             "broad_clicks": broad_clicks,
             "phrase_clicks": phrase_clicks,

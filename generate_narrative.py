@@ -868,13 +868,15 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     _tk = findings.get("targeting_keywords", {}) or {}
     _comp_terms = [t.get("term") for t in _tk.get("competitor_terms", []) if t.get("term")]
     _conv_terms = list(_tk.get("converting_terms", []) or [])
+    _fade_terms = list(_tk.get("fading_winner_terms", []) or [])
     _has_comp = any("look like competitor business names" in (i.get("detail") or "") for i in selected)
     _has_conv = any("are NOT added as active keywords" in (i.get("detail") or "") for i in selected)
+    _has_fade = any("Fading winner spotted by comparing" in (i.get("detail") or "") for i in selected)
     _terms_to_check = []
-    for _t in (_comp_terms + _conv_terms):
+    for _t in (_comp_terms + _fade_terms + _conv_terms):
         if _t and _t not in _terms_to_check:
             _terms_to_check.append(_t)
-    if _terms_to_check and (_has_comp or _has_conv):
+    if _terms_to_check and (_has_comp or _has_conv or _has_fade):
         print(f"  → Web sense-checking {len(_terms_to_check[:6])} flagged search term(s)...")
         _bizctx = f"{client_name}. {raw_questionnaire[:300]}".strip()
         _sc = _sensecheck_terms(client, _terms_to_check, _bizctx)
@@ -890,6 +892,12 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                                        "ONLY the GENUINE DEMAND terms as keywords; for any MISDIRECTED term (a "
                                        "different organisation or brand the searcher actually wants), do NOT "
                                        "recommend adding it - say to add it as a negative keyword instead.")
+                elif "Fading winner spotted by comparing" in _d:
+                    _iss["detail"] += (" WEB SENSE-CHECK (verified): " + _sc_line + " IMPORTANT: if this term is a "
+                                       "COMPETITOR or MISDIRECTED (a rival or a different organisation, e.g. a rival "
+                                       "tutoring/AI brand), it is NOT lost demand to recover - reframe it as a "
+                                       "competitor/misdirected term (recommend a negative keyword or a deliberate "
+                                       "competitor campaign), and note any 'leads' may include low-value tracked actions.")
 
     issues = []
     for n, iss in enumerate(selected, 1):
