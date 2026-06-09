@@ -185,28 +185,29 @@ except Exception:
     pass
 
 with st.form("audit_form"):
-    client_name = st.text_input(
+    # Three fields share one row (thirds) to keep the form compact
+    fcol1, fcol2, fcol3 = st.columns(3)
+    client_name = fcol1.text_input(
         "Client Name",
         placeholder="e.g. Kents Premier Coins & Bullion",
     )
-    client_cid = st.text_input(
+    client_cid = fcol2.text_input(
         "Client CID",
         placeholder="e.g. 539-263-1535",
     )
-    runner_email = st.text_input(
+    runner_email = fcol3.text_input(
         "Your email",
         placeholder="e.g. you@ppcgeeks.co.uk",
         help="We'll send the completed audit summary to this address.",
     )
 
-    st.markdown("---")
     st.markdown("**Slide 3  -  Client context**")
     st.caption("Paste the completed market analysis questionnaire below. The AI will extract the key details automatically.")
 
     raw_questionnaire = st.text_area(
         "Market Analysis Questionnaire",
         placeholder="Paste the full questionnaire response here  -  objectives, spend, success metric, pain points, etc.",
-        height=220,
+        height=140,
     )
 
     submitted = st.form_submit_button("🚀 Run Audit", use_container_width=True)
