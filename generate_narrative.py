@@ -792,6 +792,41 @@ def _retry(fn, label: str, max_attempts: int = 3):
     return result
 
 
+def _sensecheck_terms(client: OpenAI, terms: list, business_context: str = "") -> str:
+    """Web-sense-check a few flagged search terms to confirm what they ACTUALLY are - a
+    competitor, a public pool/leisure centre, or generic demand (e.g. 'giles pools lewes'
+    is Giles Leisure, a Lewes pool retailer + public swim pool). Returns a short text block
+    (one line per term) for the narration to weave in, or '' on any failure. Best-effort:
+    uses OpenAI web search and NEVER breaks the pipeline if it is unavailable.
+    """
+    terms = [t for t in (terms or []) if t][:4]
+    if not terms:
+        return ""
+    listed = "; ".join(f"'{t}'" for t in terms)
+    ctx = f" ({business_context})" if business_context else ""
+    prompt = (
+        f"A UK swimming-pool design & installation company{ctx} in East Sussex/Kent is paying for these "
+        f"Google search terms: {listed}. Use web search to identify, for EACH term, what the business or "
+        "place most likely is, and classify it as COMPETITOR (a rival pool/hot-tub/sauna company), PUBLIC "
+        "POOL/LEISURE CENTRE (somewhere people go to swim), or GENERIC demand. Reply with one line per term: "
+        "term - what it is - CLASSIFICATION. Under 20 words per line. If genuinely unsure, say so."
+    )
+    try:
+        global _total_tokens
+        r = client.responses.create(model="gpt-5.5", tools=[{"type": "web_search"}], input=prompt)
+        try:
+            _total_tokens += r.usage.total_tokens
+        except Exception:
+            pass
+        text = (r.output_text or "").strip()
+        # Strip inline citation markup like "([domain](url))" so it doesn't leak into slide copy.
+        text = re.sub(r'\s*\(\[[^\]]+\]\([^)]+\)\)', '', text)
+        return text
+    except Exception as e:
+        print(f"  (search-term sense-check skipped: {e})")
+        return ""
+
+
 def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "", raw_questionnaire: str = "") -> dict:
     """
     Args:
@@ -818,6 +853,22 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
             "detail": "No material issues were detected  -  the account is in good health.",
             "category": "Account Structure", "rag": "green", "severity": 1.0,
         }]
+
+    # ── Web sense-check the flagged competitor/odd terms so the slide can say what they
+    # ACTUALLY are (e.g. 'giles pools lewes' = Giles Leisure, a Lewes pool retailer + public
+    # pool). Inject the verified context into the competitor finding before it is narrated.
+    _comp_terms = [t.get("term") for t in
+                   (findings.get("targeting_keywords", {}) or {}).get("competitor_terms", [])
+                   if t.get("term")]
+    if _comp_terms and any("look like competitor business names" in (i.get("detail") or "") for i in selected):
+        print(f"  → Web sense-checking {len(_comp_terms[:4])} flagged search term(s)...")
+        _sc = _sensecheck_terms(client, _comp_terms, client_name)
+        if _sc:
+            for _iss in selected:
+                if "look like competitor business names" in (_iss.get("detail") or ""):
+                    _iss["detail"] += (" WEB SENSE-CHECK (verified - weave the key facts in naturally, "
+                                       "naming what each term actually is): " + _sc.replace(chr(10), " | "))
+                    break
 
     issues = []
     for n, iss in enumerate(selected, 1):

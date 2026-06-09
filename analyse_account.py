@@ -144,6 +144,7 @@ _ISSUE_SIGNATURES = [
     # On the cusp
     ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
+    ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs
     ("paid some very expensive single clicks",     60, "amber",     "Bidding Strategy"),  # CPC spikes hidden by averages
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
@@ -405,6 +406,40 @@ def score_conversion_tracking(data):
         active_actions = [ca for ca in conversion_actions if ca.get("status") == "ENABLED"]
         # Count only PRIMARY actions (the ones bidding actually optimises towards).
         primary_actions = [ca for ca in active_actions if ca.get("include_in_conversions")]
+
+        # ── Possible double-counting: multiple PRIMARY actions of the same category, or an
+        # overlapping cluster of call/contact actions, can count one interaction several times -
+        # a classic cause of an artificially LOW CPA. It undermines every CPA/ROAS figure, so
+        # flag it clearly (and it directly explains "too cheap" historic numbers).
+        from collections import Counter as _Counter
+        _cat_pretty = {"PHONE_CALL_LEAD": "phone call", "CONTACT": "click-to-call/contact",
+                       "GET_DIRECTIONS": "get-directions", "SUBMIT_LEAD_FORM": "lead form",
+                       "REQUEST_QUOTE": "quote request", "BOOK_APPOINTMENT": "appointment"}
+        _primary_cats = _Counter(ca.get("category", "") for ca in primary_actions if ca.get("category"))
+        _dup_cats = {c: n for c, n in _primary_cats.items() if n >= 2}
+        _call_cluster = [ca for ca in primary_actions
+                         if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "GET_DIRECTIONS", "CALL"}]
+        if _dup_cats or len(_call_cluster) >= 2:
+            _dup_txt = "; ".join(
+                f"{n} separate primary '{_cat_pretty.get(c, c.replace('_', ' ').lower())}' actions"
+                for c, n in sorted(_dup_cats.items(), key=lambda x: -x[1]))
+            _call_note = ""
+            if len(_call_cluster) >= 2:
+                _cnames = ", ".join(f"'{ca.get('name')}'" for ca in _call_cluster[:3])
+                _call_note = (f" In particular, {len(_call_cluster)} call/contact actions are primary "
+                              f"({_cnames}), so a single phone enquiry can be counted several times.")
+            _lead_txt = (_dup_txt if _dup_txt else f"{len(_call_cluster)} overlapping call/contact actions")
+            issues.append(
+                f"Possible conversion double-counting: of {len(primary_actions)} primary actions there are "
+                f"{_lead_txt}, which can count the same lead more than once.{_call_note} Double-counting makes "
+                "cost per lead look artificially LOW, so historic figures (including the paused PMax CPAs) may "
+                "be around half the true cost. Consolidate to one clean primary action per genuine lead type "
+                "(ideally the form fill), move the rest to secondary, and reconcile against the back-end "
+                "enquiry count so there is a single source of truth."
+            )
+            if rag not in ("red",):
+                rag = "amber_red"
+
         if len(primary_actions) > 10:
             issues.append(
                 f"{len(primary_actions)} conversion actions are set as primary 'Conversions' that "
@@ -1244,6 +1279,10 @@ def score_targeting_keywords(data):
         "rag": rag,
         "headline": _tk_headline(rag),
         "issues": issues,
+        # Flagged competitor/odd term names so the narrative layer can web-sense-check them
+        # (e.g. confirm 'giles pools lewes' is Giles Leisure, a Lewes pool retailer/public pool).
+        "competitor_terms": [{"term": t.get("term"), "reason": t.get("reason")}
+                             for t in competitor_terms],
         "data_points": {
             "broad_clicks": broad_clicks,
             "phrase_clicks": phrase_clicks,
@@ -1544,10 +1583,23 @@ def score_bidding_strategy(data):
             verify = (" Worth confirming the conversion quality before reactivating - some of the apparent "
                       "efficiency leans on low-value actions (page views, engagement) rather than genuine enquiries.")
 
+        # If the conversion setup shows possible double-counting, those "cheap" historic CPAs
+        # may be ~half the true cost - caveat it rather than presenting them at face value.
+        _dup_caveat = ""
+        _primary = [ca for ca in (data.get("conversion_actions") or [])
+                    if ca.get("status") == "ENABLED" and ca.get("include_in_conversions")]
+        _call_cluster_n = sum(1 for ca in _primary
+                              if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "GET_DIRECTIONS", "CALL"})
+        from collections import Counter as _C
+        _dupcat = any(n >= 2 for n in _C(ca.get("category") for ca in _primary).values())
+        if _dupcat or _call_cluster_n >= 2:
+            _dup_caveat = (" Important: the conversion setup shows possible double-counting, so these historic "
+                           "CPAs may be roughly half the true cost - verify against the back-end enquiry count "
+                           "before trusting them.")
         issues.append(
             f"{len(efficient_paused)} paused campaign(s) historically delivered genuine leads below the "
-            f"account's current £{cpa:.0f} CPA: {names}.{verify} Worth reviewing whether lead quality, not "
-            "cost, drove the pause before deciding on reactivation."
+            f"account's current £{cpa:.0f} CPA: {names}.{verify}{_dup_caveat} Worth reviewing whether lead "
+            "quality, not cost, drove the pause before deciding on reactivation."
         )
         if rag == "green":
             rag = "amber"
