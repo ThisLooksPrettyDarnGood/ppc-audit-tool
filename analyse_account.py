@@ -161,7 +161,8 @@ _ISSUE_SIGNATURES = [
     ("using inconsistent bid strategies",          46, "amber",     "Bidding Strategy"),
     ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
     # Efficiency / coverage / settings (expert checks)
-    ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak
+    ("set to 'Presence or interest' on low-spend", 34, "amber",     "Budget & Coverage"),  # small leak -> Observations
+    ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak (material)
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("losing a large share of impressions to Ad Rank", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank
@@ -513,9 +514,13 @@ def score_conversion_tracking(data):
                 if _genuine:
                     _g = max(_genuine, key=lambda ca: ca.get("conversions_30d") or 0)
                     _gv = int(round(_g.get("conversions_30d") or 0))
+                    # Add a plain-English descriptor so a foreign-language action name is still clear.
+                    _cat_desc = {"SUBMIT_LEAD_FORM": "a contact-form submission", "LEAD": "a lead",
+                                 "REQUEST_QUOTE": "a quote request",
+                                 "BOOK_APPOINTMENT": "an appointment booking"}.get(_g.get("category"), "an enquiry")
                     _inv = (f" Worse, your genuine enquiry action ('{_clean_action_label(_g.get('name'))}', "
-                            f"{_gv} in 30 days) is NOT set as a primary conversion - so the real lead is not "
-                            "even what bidding optimises towards.")
+                            f"{_cat_desc}, {_gv} in 30 days) is NOT set as a primary conversion - so the real "
+                            "lead is not even what bidding optimises towards.")
                 issues.append(
                     f"Your PRIMARY conversions are dominated by low-value website activity, not real enquiries: "
                     f"{_egs} recorded about {_total_low} 'conversions' in the last 30 days - these are page "
@@ -1747,15 +1752,34 @@ def score_efficiency(data):
     poi = [c for c in loc if c.get("geo") == "PRESENCE_OR_INTEREST" and c.get("type") not in AWARENESS]
     if poi:
         names = ", ".join(f"'{c['campaign']}'" for c in poi[:3])
-        local_note = (" For a local business this is a major silent leak."
-                      if account_type in ("lead_gen", "unknown") else "")
-        issues.append(
-            f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
-            f"{names}. This shows your ads to people merely INTERESTED in your area, including those who "
-            f"are nowhere near it (e.g. someone who once searched your town).{local_note} Switching to "
-            "'Presence (people in, or regularly in, your locations)' is one of the highest-ROI fixes there "
-            "is - it typically cuts wasted spend and lowers cost per lead."
-        )
+        # Magnitude: how much do these campaigns actually spend? A leak on a £20/mo campaign is
+        # a footnote; on the account's main campaigns it's a headline. Severity follows the money.
+        _camps = data.get("campaigns", [])
+        _poi_names = {c.get("campaign") for c in poi}
+        _poi_spend = sum((c.get("spend_30d") or 0) for c in _camps
+                         if c.get("name") in _poi_names and c.get("status") == "ENABLED")
+        _acct_spend = (data.get("account_summary_30d") or {}).get("spend") or sum(
+            (c.get("spend_30d") or 0) for c in _camps if c.get("status") == "ENABLED")
+        _pct = (_poi_spend / _acct_spend) if _acct_spend else 0
+        _mag = (f" These campaigns spent about £{_poi_spend:.0f} in the last 30 days"
+                + (f" ({_pct:.0%} of account spend)" if _acct_spend else "") + ".")
+        material = _poi_spend >= max(100.0, 0.10 * (_acct_spend or 0))
+        if material:
+            local_note = (" For a local business this is a major silent leak."
+                          if account_type in ("lead_gen", "unknown") else "")
+            issues.append(
+                f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
+                f"{names}.{_mag} This shows your ads to people merely INTERESTED in your area, including those "
+                f"who are nowhere near it (e.g. someone who once searched your town).{local_note} Switching to "
+                "'Presence (people in, or regularly in, your locations)' is one of the highest-ROI fixes there "
+                "is - it typically cuts wasted spend and lowers cost per lead."
+            )
+        else:
+            issues.append(
+                f"Location targeting is set to 'Presence or interest' on low-spend campaigns: {names}.{_mag} "
+                "The leak is small for now, but worth switching to 'Presence (people in, or regularly in, your "
+                "locations)' as a tidy-up - and revisit it if you scale these budgets."
+            )
         rag = "amber"
 
     # ── Search Partners / Display opt-in (classic budget leak) ────────────────

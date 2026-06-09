@@ -529,9 +529,10 @@ Rules:
 - IMPORTANT: do NOT just restate the issue slides word-for-word. REMIX them into fresh, forward-looking value statements  -  the same substance framed as the upside/prize, so the closing slide doesn't feel repetitive after the audit.
 - Be punchy and specific  -  these are punchy value statements, not generic descriptions. Under 18 words each.
 - TERMINOLOGY: if referencing importing real lead outcomes back into Google Ads, call it "offline conversion import (OCI)", not "sales outcomes".
+- GROUP each opportunity under a THEME so the slide reads in clear buckets. Start every line with ONE theme word from this set, then " - ", then the value statement: Tracking, Structure, Targeting, Bidding, Strategy. (Tracking = conversion setup/OCI; Structure = campaign/keyword build; Targeting = location/audience/search terms; Bidding = bid strategy/CPC; Strategy = budget/scaling/competitor decisions.) Order lines so the same theme sits together. E.g. "Tracking - Make the 20 real form fills primary so bidding optimises for enquiries."
 - Use British English spelling.
 
-Respond with just the 5 opportunities, one per line, no bullet points or numbering.
+Respond with just the 5 opportunities, one per line, no bullet points or numbering. Each line MUST begin with its theme word and " - ".
 """.strip()
 
     prompt += "\n\n" + OPPORTUNITIES_EXAMPLE
