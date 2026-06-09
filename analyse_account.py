@@ -143,6 +143,7 @@ _ISSUE_SIGNATURES = [
     ("should be treated as urgent",              112, "red",       "Targeting & Keywords"),  # broad + weak negatives combo
     # On the cusp
     ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
+    ("PRIMARY conversions are dominated by low-value", 84, "amber_red", "Conversion Tracking"),  # quantified inflation - root cause
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs
     ("paid some very expensive single clicks",     60, "amber",     "Bidding Strategy"),  # CPC spikes hidden by averages
@@ -271,6 +272,13 @@ def _campaign_age_phrase(start_date):
         yrs = days / 365.0
         rough = "about a year ago" if yrs < 1.5 else f"about {yrs:.0f} years ago"
     return f"in {d.strftime('%B %Y')} ({rough})"
+
+
+def _clean_action_label(name, fallback=""):
+    """'(GA4) scroll_75' -> 'scroll 75'. Readable conversion-action label for the deck."""
+    import re as _r
+    n = _r.sub(r'^\(GA4\)\s*', '', str(name or "")).replace('_', ' ').strip()
+    return n or fallback
 
 
 def _pretty_date(d):
@@ -472,9 +480,9 @@ def score_conversion_tracking(data):
                 rag = "amber"
 
         # Spammable/low-value categories set as primary optimisation goal
-        spammable_categories = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD"}
+        spammable_categories = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD", "OUTBOUND_CLICK"}
         _lowval_plain = {"PAGE_VIEW": "a page-view action", "ENGAGEMENT": "an engagement action",
-                         "DOWNLOAD": "a download action"}
+                         "DOWNLOAD": "a download action", "OUTBOUND_CLICK": "an outbound-click action"}
         primary_spammable = [
             (ca.get("name", "Unknown"), ca.get("category", ""), ca.get("conversions_30d"))
             for ca in active_actions
@@ -487,13 +495,33 @@ def score_conversion_tracking(data):
             recording = any((v is not None and v > 0) for v in vols)
             all_known_zero = bool(vols) and all((v is not None and v == 0) for v in vols)
             if recording:
-                # It's primary AND actually firing → it genuinely is skewing bidding.
+                # QUANTIFY it - "scroll 75% recorded 71 conversions" is a completely different
+                # story to "2", and the volume is the whole point (per practitioner feedback).
+                _named = sorted(
+                    [(_clean_action_label(n, _lowval_plain.get(c, "a low-value action")), v or 0)
+                     for n, c, v in primary_spammable if (v or 0) > 0],
+                    key=lambda x: x[1], reverse=True)
+                _total_low = int(round(sum(v for _, v in _named)))
+                _egs = ", ".join(f"'{lbl}' ({int(round(v))})" for lbl, v in _named[:3])
+                # Inversion: a GENUINE lead action that is NOT primary while these low-value ones are.
+                _genuine = [ca for ca in active_actions
+                            if not ca.get("include_in_conversions")
+                            and ca.get("category", "") in {"SUBMIT_LEAD_FORM", "LEAD", "REQUEST_QUOTE",
+                                                           "BOOK_APPOINTMENT"}
+                            and (ca.get("conversions_30d") or 0) > 0]
+                _inv = ""
+                if _genuine:
+                    _g = max(_genuine, key=lambda ca: ca.get("conversions_30d") or 0)
+                    _gv = int(round(_g.get("conversions_30d") or 0))
+                    _inv = (f" Worse, your genuine enquiry action ('{_clean_action_label(_g.get('name'))}', "
+                            f"{_gv} in 30 days) is NOT set as a primary conversion - so the real lead is not "
+                            "even what bidding optimises towards.")
                 issues.append(
-                    f"Low-value conversion action set as a primary 'Conversions' goal that bidding optimises "
-                    f"towards, and it is actively recording conversions: {plain}. In plain terms, Google is "
-                    "counting low-value website activity - someone simply viewing a page, not making an "
-                    "enquiry - as a 'lead', so budget is steered towards activity rather than the genuine "
-                    "enquiries that create revenue."
+                    f"Your PRIMARY conversions are dominated by low-value website activity, not real enquiries: "
+                    f"{_egs} recorded about {_total_low} 'conversions' in the last 30 days - these are page "
+                    f"scrolls, clicks and page views, not genuine leads.{_inv} Google therefore optimises towards "
+                    "low-value activity and your reported conversion numbers are heavily inflated. Move these to "
+                    "secondary and make the genuine enquiry (form submission) the single primary conversion."
                 )
                 if rag != "red":
                     rag = "amber_red"
