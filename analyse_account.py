@@ -1792,16 +1792,38 @@ def score_efficiency(data):
         _pct = (_poi_spend / _acct_spend) if _acct_spend else 0
         _mag = (f" These campaigns carry about £{_poi_spend:.0f} of spend in the last 30 days"
                 + (f" - {_pct:.0%} of the account" if _acct_spend else "") + ".")
+        # The REAL out-of-area figure from user_location_view (targeting_location=False = users
+        # not physically in a targeted location). Turns the old "exposure, can't confirm" caveat
+        # into a measured number - either a hard leak to quantify, or honest reassurance.
+        _geo = data.get("geo_user_location") or {}
+        _ooa_spend = _geo.get("out_of_area_spend")
+        _ooa_pct = _geo.get("out_of_area_pct") or 0
+        if _ooa_spend is not None and _geo.get("total_spend"):
+            if _ooa_spend >= max(20.0, 0.02 * _geo["total_spend"]):
+                _real = (f" The geographic report confirms the leak is real: in the last 30 days "
+                         f"£{_ooa_spend:.0f} ({_ooa_pct:.0%} of spend) went to clicks from people "
+                         f"NOT physically in your targeted area.")
+            elif _ooa_spend < 1:
+                _real = (" Encouragingly, the geographic report shows this exposure has not turned "
+                         "into waste yet - effectively none of your spend reached people outside "
+                         "your targeted area in the last 30 days. The risk is live, though, so it is "
+                         "still worth closing.")
+            else:
+                _real = (f" Encouragingly, the geographic report shows this exposure has barely "
+                         f"converted into waste so far - only about £{_ooa_spend:.0f} "
+                         f"({_ooa_pct:.0%} of spend) came from people outside your targeted area in "
+                         f"the last 30 days. The risk is live, though, so it is still worth closing.")
+        else:
+            _real = (" (The exact out-of-area share needs a geographic report to confirm.)")
         material = _poi_spend >= max(100.0, 0.10 * (_acct_spend or 0))
         if material:
-            local_note = (" For a local business this is a major silent leak."
+            local_note = (" For a local business this is a silent leak worth closing."
                           if account_type in ("lead_gen", "unknown") else "")
             issues.append(
                 f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
                 f"{names}.{_mag} The setting shows your ads to people merely INTERESTED in your area, not only "
-                f"those actually in it - so with it active across {_pct:.0%} of your spend, effectively your "
-                "whole budget is EXPOSED to out-of-area clicks. (This is exposure, NOT proof that all of it was "
-                "wasted - the exact out-of-area share needs a location/geographic report to confirm.)"
+                f"those actually in it - so with it active across {_pct:.0%} of your spend, your whole budget is "
+                f"EXPOSED to out-of-area clicks.{_real}"
                 f"{local_note} Switching to 'Presence (people in, or regularly in, your locations)' is one of "
                 "the highest-ROI fixes there is - it typically cuts wasted spend and lowers cost per lead."
             )
@@ -1812,6 +1834,25 @@ def score_efficiency(data):
                 "locations)' as a tidy-up - and revisit it if you scale these budgets."
             )
         rag = "amber"
+
+    # ── Cross-border spend (users physically in a DIFFERENT country) ──────────
+    # Distinct from the in-country interest leak above: this is budget reaching people in
+    # an entirely different country. Only flag when it's material and named.
+    _geo = data.get("geo_user_location") or {}
+    _foreign = _geo.get("foreign_country_spend") or 0
+    _total = _geo.get("total_spend") or 0
+    if _total and _foreign >= max(30.0, 0.03 * _total) and _geo.get("top_foreign_countries"):
+        _fc = _geo["top_foreign_countries"]
+        _named = ", ".join(f"{c['country']} (£{c['spend']:.0f})" for c in _fc[:3])
+        _fpct = _geo.get("foreign_country_pct") or 0
+        issues.append(
+            f"£{_foreign:.0f} ({_fpct:.0%} of spend) in the last 30 days reached people physically located "
+            f"OUTSIDE {_geo.get('target_country') or 'your target country'} - top sources: {_named}. Unless you "
+            "knowingly sell abroad, this is wasted reach. Tighten location targeting to your service country and "
+            "add the worst offenders as negative locations."
+        )
+        if rag == "green":
+            rag = "amber"
 
     # ── Search Partners / Display opt-in (classic budget leak) ────────────────
     nets = data.get("network_settings") or []

@@ -686,6 +686,100 @@ def get_location_target_types(client, cid):
     return out
 
 
+def _resolve_geo_names(client, cid, ids):
+    """Map geo_target_constant IDs -> readable names (e.g. 2826 -> 'United Kingdom')."""
+    ids = [str(i) for i in ids if str(i).strip() and str(i) != "0"]
+    if not ids:
+        return {}
+    gaql = ("SELECT geo_target_constant.id, geo_target_constant.name, "
+            "geo_target_constant.country_code FROM geo_target_constant "
+            f"WHERE geo_target_constant.id IN ({','.join(ids)})")
+    out = {}
+    for r in run_query(client, cid, gaql):
+        out[str(r.geo_target_constant.id)] = {
+            "name": r.geo_target_constant.name,
+            "country_code": r.geo_target_constant.country_code,
+        }
+    return out
+
+
+def get_geo_user_location_spend(client, cid):
+    """
+    The REAL out-of-area number (was previously only inferable). user_location_view reports
+    metrics by where the user was PHYSICALLY located, split by `targeting_location`:
+      • targeting_location = True  -> user was inside a targeted location (legitimate).
+      • targeting_location = False -> user was NOT in a targeted location; the ad showed
+        because Google judged them *interested* in the area. This is the exact spend the
+        'Presence or interest' setting leaks - now a hard figure, not an estimate.
+    Also splits by country so genuine cross-border spend (outside the target country) is named.
+    Caller wraps in try/except.
+    """
+    gaql = """
+        SELECT user_location_view.country_criterion_id,
+               user_location_view.targeting_location,
+               metrics.cost_micros, metrics.clicks, metrics.conversions
+        FROM user_location_view
+        WHERE segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    if not rows:
+        return None
+
+    by_country = {}
+    total = out_area = in_area = 0.0
+    out_clicks = 0
+    out_conv = 0.0
+    for r in rows:
+        cost = r.metrics.cost_micros / 1_000_000
+        country_id = r.user_location_view.country_criterion_id
+        in_target = r.user_location_view.targeting_location
+        total += cost
+        d = by_country.setdefault(country_id, {"country_id": country_id, "spend": 0.0,
+                                               "clicks": 0, "conversions": 0.0})
+        d["spend"] += cost
+        d["clicks"] += r.metrics.clicks
+        d["conversions"] += r.metrics.conversions
+        if in_target:
+            in_area += cost
+        else:
+            out_area += cost
+            out_clicks += r.metrics.clicks
+            out_conv += r.metrics.conversions
+
+    names = _resolve_geo_names(client, cid, list(by_country.keys()))
+    countries = []
+    for k, v in by_country.items():
+        info = names.get(str(k), {})
+        countries.append({**v, "country": info.get("name", f"geo {k}"),
+                          "country_code": info.get("country_code", "")})
+    countries.sort(key=lambda x: x["spend"], reverse=True)
+
+    # Target country = the highest-spend country physically observed (the home market).
+    target = countries[0] if countries else None
+    target_id = target["country_id"] if target else None
+    foreign = [c for c in countries if c["country_id"] != target_id]
+    foreign_spend = sum(c["spend"] for c in foreign)
+
+    return {
+        "total_spend": round(total, 2),
+        # interest-based leak: users NOT physically in a targeted location
+        "out_of_area_spend": round(out_area, 2),
+        "out_of_area_pct": round(out_area / total, 4) if total else 0.0,
+        "out_of_area_clicks": out_clicks,
+        "out_of_area_conversions": round(out_conv, 2),
+        "in_area_spend": round(in_area, 2),
+        # cross-border: users physically in a DIFFERENT country than the home market
+        "target_country": target["country"] if target else None,
+        "foreign_country_spend": round(foreign_spend, 2),
+        "foreign_country_pct": round(foreign_spend / total, 4) if total else 0.0,
+        "top_foreign_countries": [
+            {"country": c["country"], "spend": round(c["spend"], 2),
+             "clicks": c["clicks"], "conversions": round(c["conversions"], 2)}
+            for c in foreign[:5]
+        ],
+    }
+
+
 def _brand_tokens_from(name):
     generic = {"ltd", "limited", "pool", "pools", "leisure", "group", "services", "company",
                "uk", "the", "ads", "account", "marketing", "co", "and"}
@@ -1062,6 +1156,16 @@ def fetch_account_data(client_cid: str) -> dict:
     except Exception as e:
         print(f"    (location-type query failed: {e})"); location_target_types = None
 
+    print("  → Geo user-location split (real out-of-area spend)...")
+    try:
+        geo_user_location = get_geo_user_location_spend(client, cid)
+        if geo_user_location:
+            print(f"    out-of-area £{geo_user_location['out_of_area_spend']:.0f} "
+                  f"({geo_user_location['out_of_area_pct']:.0%}); "
+                  f"cross-border £{geo_user_location['foreign_country_spend']:.0f}")
+    except Exception as e:
+        print(f"    (geo user-location query failed: {e})"); geo_user_location = None
+
     print("  → Ad assets / extensions...")
     try:
         ad_assets = get_ad_assets(client, cid)
@@ -1133,6 +1237,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "quality_scores": quality_scores,
         "impression_share_lost": impression_share_lost,
         "location_target_types": location_target_types,
+        "geo_user_location": geo_user_location,
         "ad_assets": ad_assets,
         "network_settings": network_settings,
         "brand_leakage": brand_leakage,
