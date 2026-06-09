@@ -83,11 +83,31 @@ def parse_competitors_from_questionnaire(text):
     return []
 
 
+def parse_ltv_note(text):
+    """Pull a customer lifetime / project value figure from the questionnaire, e.g.
+    'LTV £: a pool lead would be £150k+' -> '£150k+'. Returns '' if not found. Used to
+    judge CPA against value (a high CPA is fine for a high-LTV product IF quality is there).
+    """
+    if not text:
+        return ""
+    import re
+    for line in str(text).splitlines():
+        if re.search(r'\b(ltv|lifetime|deal value|project value|order value|customer value|aov)\b',
+                     line, re.IGNORECASE):
+            m = re.search(r'£\s?\d[\d,]*\s?k?\+?', line, re.IGNORECASE)
+            if m:
+                return m.group(0).replace(' ', '')
+    return ""
+
+
 def analyse_account(data, raw_questionnaire=""):
-    # The questionnaire carries the client's stated competitors; the analyser needs them
-    # to flag competitor search terms (don't sell a rival's brand name as "new demand").
+    # The questionnaire carries the client's stated competitors + product value; the analyser
+    # needs both - competitors to flag rival search terms (don't sell a rival's name as "new
+    # demand"), and LTV to judge CPA against value rather than as a number in isolation.
     if "competitors" not in data:
         data["competitors"] = parse_competitors_from_questionnaire(raw_questionnaire)
+    if "ltv_note" not in data:
+        data["ltv_note"] = parse_ltv_note(raw_questionnaire)
     account_type = detect_account_type(data)
     findings = {
         "conversion_tracking": score_conversion_tracking(data),
@@ -124,6 +144,7 @@ _ISSUE_SIGNATURES = [
     # On the cusp
     ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
+    ("paid some very expensive single clicks",     60, "amber",     "Bidding Strategy"),  # CPC spikes hidden by averages
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
     ("uses Maximise Clicks (optimising for traffic",  60, "amber",  "Bidding Strategy"),  # material spend, capped, wrong strategy
@@ -147,7 +168,8 @@ _ISSUE_SIGNATURES = [
     # Targeting & keywords
     ("look like competitor business names",         63, "amber",     "Targeting & Keywords"),  # competitor terms (reframe)
     ("Fading winner spotted by comparing",         72, "amber",     "Targeting & Keywords"),  # cross-window pattern (high value)
-    ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend
+    ("A small amount of non-converting spend",     34, "amber",     "Targeting & Keywords"),  # tiny leak -> Observations
+    ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend (material)
     ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries (high-value "dropped ball")
     ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
     ("targeting the whole UK",                     55, "amber",     "Targeting & Keywords"),
@@ -248,6 +270,27 @@ def _campaign_age_phrase(start_date):
         yrs = days / 365.0
         rough = "about a year ago" if yrs < 1.5 else f"about {yrs:.0f} years ago"
     return f"in {d.strftime('%B %Y')} ({rough})"
+
+
+def _pretty_date(d):
+    """'2026-06-05' -> '5 June'. Returns the input unchanged if unparseable."""
+    from datetime import datetime
+    try:
+        return datetime.strptime(str(d), "%Y-%m-%d").strftime("%-d %B")
+    except (ValueError, TypeError):
+        return str(d)
+
+
+def _account_search_cpc(campaigns):
+    """One consistent 'typical click cost' for the whole deck: the blended CPC across
+    ENABLED Search campaigns (spend / clicks). Search-only so cheap Display/PMax clicks
+    don't distort it. Returns None if there are no Search clicks."""
+    spend = clicks = 0.0
+    for c in campaigns:
+        if c.get("status") == "ENABLED" and c.get("type") == "SEARCH":
+            spend += c.get("spend_30d") or 0
+            clicks += c.get("clicks_30d") or 0
+    return (spend / clicks) if clicks else None
 
 
 def _classify_issue(detail, section_name, section_rag):
@@ -424,8 +467,8 @@ def score_conversion_tracking(data):
                 # Don't over-claim that Google "is" optimising towards it.
                 issues.append(
                     f"A low-value action is set as a primary conversion but is recording no conversions in the "
-                    f"last 30 days: {plain}. It isn't skewing bidding right now, but it should be moved to "
-                    "secondary so it never can - and a low-value action sitting in the primary 'Conversions' "
+                    f"last 30 days: {plain}. It isn't skewing bidding right now, but it should be removed or set "
+                    "to secondary so it never can - and a low-value action sitting in the primary 'Conversions' "
                     "column is a sign the conversion setup needs a tidy-up."
                 )
                 if rag == "green":
@@ -893,10 +936,11 @@ def score_targeting_keywords(data):
             if not k:
                 continue
             a = agg.setdefault(k, {"term": t.get("term"), "spend": 0.0, "conversions": 0.0,
-                                   "status": t.get("status", "NONE"),
+                                   "clicks": 0, "status": t.get("status", "NONE"),
                                    "campaign_name": t.get("campaign_name", "")})
             a["spend"] += t.get("spend", 0) or 0
             a["conversions"] += t.get("conversions", 0) or 0
+            a["clicks"] += t.get("clicks", 0) or 0
         return list(agg.values())
 
     converting_not_added = _agg_by_term(converting_not_added)
@@ -977,14 +1021,30 @@ def score_targeting_keywords(data):
         noncomp = sorted(c for c in camps if "competitor" not in c.lower() and "comp" not in c.lower())
         camp_note = (f" These are firing inside non-competitor campaigns (e.g. '{noncomp[0]}'), "
                      "where they should not be." if noncomp else "")
+        # Tot up the last-30-days spend on competitor terms (a clean 30d figure: prefer the
+        # 30d top-terms total per term, else sum the daily priciest-click rows for that term).
+        _spend30 = {}
+        for _t in (data.get("top_search_terms") or []):
+            _k = str(_t.get("term", "")).strip().lower()
+            _spend30[_k] = _spend30.get(_k, 0) + (_t.get("spend", 0) or 0)   # SUM dup ad-group rows
+        _priciest_by_term = {}
+        for _p in (data.get("priciest_clicks") or []):
+            _k = str(_p.get("term", "")).strip().lower()
+            _priciest_by_term[_k] = _priciest_by_term.get(_k, 0) + (_p.get("spend", 0) or 0)
+        _comp_30d = 0.0
+        for _ct in competitor_terms:
+            _k = str(_ct.get("term", "")).strip().lower()
+            _comp_30d += _spend30.get(_k, _priciest_by_term.get(_k, 0))
+        tally_note = (f" In total, about £{_comp_30d:.0f} has gone on these competitor-name searches in the "
+                      "last 30 days." if _comp_30d >= 1 else "")
         sqr_issues.append(
             f"{len(competitor_terms)} search term(s) look like competitor business names rather than new "
-            f"demand: {eg_text}.{camp_note} A competitor-name search that 'converts' in a normal campaign "
-            "is usually a low-value accidental contact  -  someone trying to reach the other company  -  not "
-            "a genuine enquiry, and without offline conversion import (OCI) you cannot tell which (if any) "
-            "became real jobs. Rather than adding these as keywords, decide deliberately: target competitors "
-            "only in a dedicated campaign with tailored messaging and landing pages, or add them as negative "
-            "keywords to stop paying for misdirected clicks."
+            f"demand: {eg_text}.{camp_note}{tally_note} A competitor-name search that 'converts' in a normal "
+            "campaign is usually a low-value accidental contact  -  someone trying to reach the other company  "
+            "-  not a genuine enquiry, and without offline conversion import (OCI) you cannot tell which (if "
+            "any) became real jobs. Rather than adding these as keywords, decide deliberately: target "
+            "competitors only in a dedicated campaign with tailored messaging and landing pages, or add them "
+            "as negative keywords to stop paying for misdirected clicks."
         )
         if rag == "green":
             rag = "amber"
@@ -1013,22 +1073,46 @@ def score_targeting_keywords(data):
         sqr_issues.append(
             f"{len(converting_not_added)} search terms have generated conversions over the last 90 days "
             f"but are NOT added as active keywords.{eg_text} Proven, money-making demand is being captured "
-            "loosely (or not at all) rather than controlled directly. Promoting these into dedicated "
-            "keywords gives control over bids, ad copy and landing pages."
+            "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
+            "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
+            "cannot be added and are better captured by a closely related theme - to gain control over bids, "
+            "ad copy and landing pages."
         )
         if rag == "green":
             rag = "amber"
     if wasted_terms:
         wasted_spend = round(sum((t.get("spend", 0) or 0) for t in wasted_terms), 2)
+        # Always judge a leak in PROPORTION to account spend - £64 on a £2.5k account is a
+        # minor tidy-up, not a headline. Small leaks get softened wording AND a low severity
+        # so they fall to Additional Observations rather than leading the deck.
+        _acct_spend = (data.get("account_summary_30d") or {}).get("spend") or sum(
+            (c.get("spend_30d") or 0) for c in campaigns if c.get("status") == "ENABLED")
+        _pct = (wasted_spend / _acct_spend) if _acct_spend else 0
+        _pct_txt = f" - about {_pct:.0%} of the account's £{_acct_spend:,.0f} monthly spend" if _acct_spend else ""
         _top_waste = sorted(wasted_terms, key=lambda t: (t.get("spend", 0) or 0), reverse=True)[:3]
-        _weg = ", ".join(f"'{t.get('term', '?')}' (£{round(t.get('spend', 0) or 0)})" for t in _top_waste)
-        _weg_text = (f" The biggest are {_weg}.") if _weg else ""
-        sqr_issues.append(
-            f"{len(wasted_terms)} high-traffic search terms have spent about £{wasted_spend:.2f} "
-            f"in the last 30 days without converting.{_weg_text} Reviewing these for negative keywords "
-            "would cut wasted spend - and some may be competitor or brand names being matched by broad "
-            "keywords without you realising, which is a common and costly leak."
-        )
+        # Show click count so 1 click at £64 is never confused with 64 clicks at £1.
+        def _waste_eg(t):
+            clk = t.get("clicks") or 0
+            clk_txt = f", {clk} click{'s' if clk != 1 else ''}" if clk else ""
+            return f"'{t.get('term', '?')}' (£{round(t.get('spend', 0) or 0)}{clk_txt}, no conversions)"
+        _weg = "; ".join(_waste_eg(t) for t in _top_waste)
+        _weg_text = (f" The biggest: {_weg}.") if _weg else ""
+        material = wasted_spend >= max(150.0, 0.05 * (_acct_spend or 0))
+        if material:
+            sqr_issues.append(
+                f"{len(wasted_terms)} search term(s) have spent about £{wasted_spend:.0f} "
+                f"in the last 30 days without converting{_pct_txt}.{_weg_text} Reviewing these for negative "
+                "keywords would cut wasted spend - and some may be competitor or brand names being matched by "
+                "broad keywords without you realising, which is a common and costly leak."
+            )
+        else:
+            sqr_issues.append(
+                f"A small amount of non-converting spend: about £{wasted_spend:.0f} across "
+                f"{len(wasted_terms)} search term(s) in the last 30 days{_pct_txt}.{_weg_text} It is minor in "
+                "the context of total spend, but worth a quick check - confirm the term is statistically "
+                "meaningful (not just a click or two) before adding a negative, and watch that similar terms "
+                "do not quietly scale."
+            )
         if rag == "green":
             rag = "amber"
     # ── Quality Score (we already fetch it  -  now we use it) ───────────────────
@@ -1239,14 +1323,8 @@ def score_bidding_strategy(data):
 
     if max_clicks_campaigns:
         rag = "amber"
-        mc_ids = {c.get("id") for c in max_clicks_campaigns}
-        # Account-typical CPC = median avg CPC across the OTHER enabled campaigns with clicks.
-        other_cpcs = sorted(
-            c["avg_cpc_gbp"] for c in campaigns
-            if c.get("status") == "ENABLED" and c.get("avg_cpc_gbp")
-            and c.get("id") not in mc_ids
-        )
-        typical_cpc = other_cpcs[len(other_cpcs) // 2] if other_cpcs else None
+        # Account-typical CPC = blended Search CPC (consistent across the whole deck).
+        typical_cpc = _account_search_cpc(campaigns)
         account_spend = total_cost or sum((c.get("spend_30d") or 0) for c in campaigns)
         costly_terms = data.get("max_clicks_costly_terms", {}) or {}
 
@@ -1309,6 +1387,37 @@ def score_bidding_strategy(data):
                     "to Maximise Conversions once tracking is solid, so spend follows leads rather than visits."
                 )
 
+    # ── Priciest single clicks: averages hide the spikes. The SQR shows only an average
+    # CPC per term, so a one-off very expensive click sits unnoticed next to cheap ones.
+    # By segmenting daily, a term-day with one click reveals the TRUE single-click cost.
+    # We surface the biggest single clicks that are a large MULTIPLE of the account's
+    # average CPC - a concrete illustration of how automated bidding quietly spends budget.
+    priciest = data.get("priciest_clicks") or []
+    _acct_cpc = _account_search_cpc(campaigns)
+    if priciest and _acct_cpc and _acct_cpc > 0:
+        spikes = [p for p in priciest
+                  if (p.get("cpc", 0) or 0) >= 3 * _acct_cpc and (p.get("clicks") or 0) <= 3]
+        spikes = sorted(spikes, key=lambda x: x.get("cpc", 0) or 0, reverse=True)[:3]
+        if spikes:
+            egs = []
+            for p in spikes:
+                mult = (p["cpc"] / _acct_cpc) if _acct_cpc else 0
+                single = "a single click" if (p.get("clicks") or 0) == 1 else f"{p.get('clicks')} clicks"
+                conv_note = " and produced no conversions" if (p.get("conversions") or 0) == 0 else ""
+                egs.append(
+                    f"'{p['term']}' paid £{p['cpc']:.0f} for {single} on {_pretty_date(p.get('date'))} "
+                    f"({mult:.0f}x the account's ~£{_acct_cpc:.0f} average CPC){conv_note}"
+                )
+            issues.append(
+                "Automated bidding paid some very expensive single clicks last month that the average CPC "
+                "hides: " + "; ".join(egs) + ". The search term report only shows an average CPC per term, so "
+                f"a one-off £{spikes[0]['cpc']:.0f} click sits unnoticed beside cheaper ones. This is how smart "
+                "bidding can quietly spend budget - worth a maximum-CPC sense-check and tighter negatives so the "
+                "algorithm cannot overpay for low-intent or competitor clicks."
+            )
+            if rag == "green":
+                rag = "amber"
+
     if true_manual:
         if total_conversions >= 30:
             issues.append(
@@ -1366,11 +1475,25 @@ def score_bidding_strategy(data):
                 if rag == "green":
                     rag = "amber"
 
-    # CPA check (cpa is None when there are 0 conversions  -  guard against it)
+    # CPA check (cpa is None when there are 0 conversions  -  guard against it).
+    # Reframe: for a high-LTV product, cost-per-lead in isolation is the wrong lens. The
+    # client already states the goal is a lower CPL, so don't just say "confirm it aligns" -
+    # make the QUALITY point: tightening the account may RAISE CPA while improving the
+    # enquiries that become revenue, and without OCI quality is invisible.
     if cpa and cpa > 150:
+        _ltv = data.get("ltv_note", "")
+        _ltv_clause = (f"Given the product's lifetime value ({_ltv} per customer), a higher cost "
+                       "per lead is justified IF the enquiries are genuine"
+                       if _ltv else
+                       "For a high-value product a higher cost per lead can be justified IF the "
+                       "enquiries are genuine")
         issues.append(
-            f"Cost per conversion is £{cpa:.2f}. "
-            "Verify this aligns with the client's target CPA."
+            f"Cost per conversion is £{cpa:.0f}. The stated goal is a lower cost per lead, but cost "
+            f"alone is the wrong lens. {_ltv_clause}  -  so the priority is lead QUALITY, not just a "
+            "lower number. Without offline conversion import (OCI) that quality is invisible. Tightening "
+            "the account (lifting Quality Score, removing non-converting competitor terms) may even RAISE "
+            f"the cost per lead while improving the enquiries that become revenue  -  paying around £{cpa:.0f} "
+            "for a misdirected competitor enquiry is the real waste, not the headline number."
         )
         if rag == "green":
             rag = "amber"
@@ -1489,13 +1612,20 @@ def score_efficiency(data):
     budget_capped = [c for c in isl if (c.get("lost_budget", 0) or 0) >= 10]
     if budget_capped:
         budget_capped.sort(key=lambda c: c.get("lost_budget", 0), reverse=True)
-        names = ", ".join(f"'{c['campaign']}' (losing {c['lost_budget']:.0f}% to budget)"
-                          for c in budget_capped[:3])
+        # Pair each capped campaign with its Ad Rank loss too, so we never imply budget is the
+        # only lever - a campaign also losing share to rank needs Quality Score work, not just money.
+        def _cap_eg(c):
+            b = c.get("lost_budget", 0) or 0
+            r = c.get("lost_rank", 0) or 0
+            rank_bit = f", and {r:.0f}% to Ad Rank" if r >= 10 else ""
+            return f"'{c['campaign']}' (lost {b:.0f}% to budget{rank_bit})"
+        names = ", ".join(_cap_eg(c) for c in budget_capped[:3])
         issues.append(
-            f"{len(budget_capped)} Search campaign(s) are capped by budget - they stop showing because "
-            f"the budget runs out, not because demand dries up: {names}. Where these convert efficiently, "
-            "you are leaving leads on the table every day; raise their budget or reallocate from weaker "
-            "activity to capture more of the searches you already win."
+            f"{len(budget_capped)} Search campaign(s) lost impressions to budget - they stop showing because "
+            f"the budget runs out, not because demand dries up: {names}. Where these convert efficiently you "
+            "are leaving leads on the table every day; raise their budget or reallocate from weaker activity. "
+            "Where a campaign is ALSO losing share to Ad Rank, budget alone will not fix it - improving Quality "
+            "Score and ad relevance matters there too."
         )
         if rag == "green":
             rag = "amber"

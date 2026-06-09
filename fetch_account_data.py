@@ -335,6 +335,44 @@ def get_max_clicks_costly_terms(client, cid, campaign_ids):
     return out
 
 
+def get_priciest_clicks(client, cid, limit=25):
+    """Daily-segmented search-term costs over the last 30 days. The SQR normally only
+    shows an AVERAGE CPC per term, hiding spikes; segmenting by day means a term-day with
+    exactly 1 click reveals the TRUE single-click cost. Returns the priciest term-days
+    (term, date, campaign, clicks, spend, cpc, conversions) for the analyser to compare
+    against the account's average CPC. Read-only; caller wraps in try/except.
+    """
+    gaql = f"""
+        SELECT
+            search_term_view.search_term,
+            campaign.name,
+            segments.date,
+            metrics.clicks,
+            metrics.cost_micros,
+            metrics.conversions,
+            metrics.average_cpc
+        FROM search_term_view
+        WHERE segments.date DURING LAST_30_DAYS
+          AND metrics.clicks > 0
+        ORDER BY metrics.average_cpc DESC
+        LIMIT {limit}
+    """
+    rows = run_query(client, cid, gaql)
+    out = []
+    for r in rows:
+        m = r.metrics
+        out.append({
+            "term": r.search_term_view.search_term,
+            "campaign_name": r.campaign.name,
+            "date": r.segments.date,
+            "clicks": m.clicks,
+            "spend": round(m.cost_micros / 1_000_000, 2),
+            "cpc": round(m.average_cpc / 1_000_000, 2) if m.average_cpc else 0.0,
+            "conversions": round(m.conversions, 2),
+        })
+    return out
+
+
 def get_location_targeting(client, cid):
     gaql = """
         SELECT
@@ -955,6 +993,12 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → Top search terms...")
     top_search_terms = get_top_search_terms(client, cid)
 
+    print("  → Priciest single clicks (daily-segmented)...")
+    try:
+        priciest_clicks = get_priciest_clicks(client, cid)
+    except Exception as e:
+        print(f"    (priciest-clicks query failed: {e})"); priciest_clicks = None
+
     print("  → Converting search terms not added as keywords (90d)...")
     try:
         converting_unkeyworded_terms = get_converting_unkeyworded_terms(client, cid)
@@ -1048,6 +1092,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "conversion_actions": conversion_actions,
         "keyword_match_breakdown": keyword_match_breakdown,
         "top_search_terms": top_search_terms,
+        "priciest_clicks": priciest_clicks,
         "converting_unkeyworded_terms": converting_unkeyworded_terms,
         "location_targeting": location_targeting,
         "audience_signals": audience_signals,
