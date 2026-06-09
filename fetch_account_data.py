@@ -989,21 +989,24 @@ def get_performance_summary(client, cid):
 
     return {
         # 30 days  (money shown in whole pounds, no pence)
-        "spend_30d":  f"£{int(t30['spend']):,}",
+        # Round (not truncate) money to the nearest whole pound, so these match the rounded
+        # CPA figures used in the overall-RAG escalation note (avoids £240 here vs £241 there).
+        "spend_30d":  f"£{int(round(t30['spend'])):,}",
         "impr_30d":   f"{t30['impressions']:,}",
         "clicks_30d": f"{t30['clicks']:,}",
         "convs_30d":  f"{int(round(t30['conversions'])):,}",
         "cvr_30d":    f"{t30['cvr']}%" if t30["cvr"] is not None else "N/A",
-        "cpa_30d":    f"£{int(t30['cpa']):,}" if t30["cpa"] else "N/A",
-        "sis_30d":    f"{t30['sis']}%" if t30["sis"] else "N/A",
+        "cpa_30d":    f"£{int(round(t30['cpa'])):,}" if t30["cpa"] else "N/A",
+        # Whole-number percent for the deck (e.g. 59%, not 59.0%) - matches every other % shown.
+        "sis_30d":    f"{int(round(t30['sis']))}%" if t30["sis"] else "N/A",
         # 12 months
-        "spend_12m":  f"£{int(t12['spend']):,}",
+        "spend_12m":  f"£{int(round(t12['spend'])):,}",
         "impr_12m":   f"{t12['impressions']:,}",
         "clicks_12m": f"{t12['clicks']:,}",
         "convs_12m":  f"{int(round(t12['conversions'])):,}",
         "cvr_12m":    f"{t12['cvr']}%" if t12["cvr"] is not None else "N/A",
-        "cpa_12m":    f"£{int(t12['cpa']):,}" if t12["cpa"] else "N/A",
-        "sis_12m":    f"{t12['sis']}%" if t12["sis"] else "N/A",
+        "cpa_12m":    f"£{int(round(t12['cpa'])):,}" if t12["cpa"] else "N/A",
+        "sis_12m":    f"{int(round(t12['sis']))}%" if t12["sis"] else "N/A",
         # Raw numbers for GPT commentary
         "_raw": {"t30": t30, "t12": t12},
     }

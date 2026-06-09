@@ -453,8 +453,10 @@ def score_conversion_tracking(data):
                        "REQUEST_QUOTE": "quote request", "BOOK_APPOINTMENT": "appointment"}
         _primary_cats = _Counter(ca.get("category", "") for ca in primary_actions if ca.get("category"))
         _dup_cats = {c: n for c, n in _primary_cats.items() if n >= 2}
+        # True call/contact actions only - GET_DIRECTIONS is deliberately excluded: a directions
+        # tap isn't a phone enquiry, so counting it here would overstate the call double-counting.
         _call_cluster = [ca for ca in primary_actions
-                         if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "GET_DIRECTIONS", "CALL"}]
+                         if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "CALL"}]
         if _dup_cats or len(_call_cluster) >= 2:
             _dup_txt = "; ".join(
                 f"{n} separate primary '{_cat_pretty.get(c, c.replace('_', ' ').lower())}' actions"
@@ -462,8 +464,9 @@ def score_conversion_tracking(data):
             _call_note = ""
             if len(_call_cluster) >= 2:
                 _cnames = ", ".join(f"'{ca.get('name')}'" for ca in _call_cluster[:3])
+                _more = "" if len(_call_cluster) <= 3 else " among others"
                 _call_note = (f" In particular, {len(_call_cluster)} call/contact actions are primary "
-                              f"({_cnames}), so a single phone enquiry can be counted several times.")
+                              f"({_cnames}{_more}), so a single phone enquiry can be counted several times.")
             _lead_txt = (_dup_txt if _dup_txt else f"{len(_call_cluster)} overlapping call/contact actions")
             issues.append(
                 f"Possible conversion double-counting: of {len(primary_actions)} primary actions there are "
@@ -663,7 +666,7 @@ def score_conversion_tracking(data):
         c_type = c.get("type", "")
         if c_status == "ENABLED" and c_cost > 50 and c_conv == 0 and c_type not in AWARENESS_TYPES:
             issues.append(
-                f"Campaign '{c_name}' spent £{c_cost:.2f} with 0 conversions recorded  -  "
+                f"Campaign '{c_name}' spent £{c_cost:,.0f} with 0 conversions recorded  -  "
                 "worth confirming it isn't an awareness or brand campaign before treating this as wasted spend."
             )
             if rag == "green":
@@ -772,14 +775,14 @@ def score_account_structure(data):
             avg_budget = total_budget / len(budgets)
             if len(enabled_campaigns) > 2 and avg_budget < 10:
                 issues.append(
-                    f"£{total_budget:.2f}/day total budget is split across {len(enabled_campaigns)} campaigns "
-                    f"(avg £{avg_budget:.2f} each). Campaigns need sufficient budget to gather data and learn  -  "
+                    f"£{total_budget:,.0f}/day total budget is split across {len(enabled_campaigns)} campaigns "
+                    f"(avg £{avg_budget:,.0f} each). Campaigns need sufficient budget to gather data and learn  -  "
                     "consider consolidating into fewer campaigns."
                 )
                 rag = "amber"
             elif avg_budget < 5 and len(enabled_campaigns) > 1:
                 issues.append(
-                    f"Average daily budget per campaign is just £{avg_budget:.2f}. "
+                    f"Average daily budget per campaign is just £{avg_budget:,.0f}. "
                     "At this level smart bidding cannot learn effectively."
                 )
                 if rag == "green":
@@ -805,6 +808,10 @@ def score_account_structure(data):
     # of low-risk AAR types; flag only types enabled OUTSIDE that approved set.
     auto_apply = data.get("auto_apply_recommendations", None)
     auto_apply_types = data.get("auto_apply_types") or []
+    # Drop UNKNOWN/UNSPECIFIED enum values - they'd render as a bare "Unknown" on the client
+    # deck (a recommendation type newer than the API client's enum). No actionable meaning.
+    auto_apply_types = [t for t in auto_apply_types
+                        if str(t).upper() not in ("UNKNOWN", "UNSPECIFIED")]
     if auto_apply_types:
         labelled = ", ".join(_aar_label(t) for t in auto_apply_types)
         non_approved = [t for t in auto_apply_types if t not in APPROVED_AAR_TYPES]
@@ -934,7 +941,7 @@ def score_targeting_keywords(data):
             if broad_spend_pct > 0.7:
                 issues.append(
                     f"{broad_spend_pct:.0%} of keyword spend is on Broad Match "
-                    f"(£{broad_spend:.2f}). Consider shifting budget to more controlled match types."
+                    f"(£{broad_spend:,.0f}). Consider shifting budget to more controlled match types."
                 )
                 if rag == "green":
                     rag = "amber"
@@ -1287,14 +1294,23 @@ def score_targeting_keywords(data):
             examples = rsa.get("low_strength_examples", [])
             eg = ""
             if examples:
-                names = ", ".join(f"the '{e['ad_group']}' ad group ({e['strength']})" for e in examples[:2])
+                # Dedupe by ad group so we never list the same ad group twice (two weak RSAs
+                # in one ad group would otherwise read as a repeated example).
+                seen_ag, uniq = set(), []
+                for e in examples:
+                    ag = e.get("ad_group")
+                    if ag in seen_ag:
+                        continue
+                    seen_ag.add(ag)
+                    uniq.append(e)
+                names = ", ".join(f"the '{e['ad_group']}' ad group ({e['strength']})" for e in uniq[:2])
                 eg = f" For example {names}."
             # Show the weak-ad spend as a share of total spend so it's easy to weigh.
             total_spend = (data.get("account_summary_30d", {}) or {}).get("spend", 0) or 0
             pct = f" - around {round(rsa_low_spend / total_spend * 100)}% of total account spend" if total_spend else ""
             issues.append(
                 f"{rsa_low} of {rsa_total} live responsive search ads are rated Poor or Average "
-                f"ad strength, carrying about £{rsa_low_spend:.2f} of spend{pct}.{eg} "
+                f"ad strength, carrying about £{rsa_low_spend:,.0f} of spend{pct}.{eg} "
                 "Ad strength reflects how distinct and relevant the headlines and descriptions are - "
                 "improving it tends to lift CTR and Quality Score."
             )
@@ -1586,7 +1602,7 @@ def score_bidding_strategy(data):
             tcpa = c.get("target_cpa_gbp")
             if tcpa and tcpa > 0 and cpa > tcpa * 1.5:
                 issues.append(
-                    f"Campaign '{c.get('name')}' has a target CPA of £{tcpa:.2f} but actual CPA is £{cpa:.2f}. "
+                    f"Campaign '{c.get('name')}' has a target CPA of £{tcpa:,.0f} but actual CPA is £{cpa:,.0f}. "
                     "When the target is set much lower than actual performance, Google throttles spend "
                     "chasing an unachievable goal  -  raise the target CPA closer to actual performance, "
                     "then reduce it incrementally once volume is stable."
@@ -1650,7 +1666,7 @@ def score_bidding_strategy(data):
                           f"headline CPA of £{p.get('cpa', 0):.0f} flatters it")
                 d += ")"
             else:
-                d = f"the '{p['name']}' campaign (historic CPA £{p.get('cpa', 0):.2f}, {int(round(p.get('conversions', 0)))} conv)"
+                d = f"the '{p['name']}' campaign (historic CPA £{p.get('cpa', 0):,.0f}, {int(round(p.get('conversions', 0)))} conv)"
             descs.append(d)
         names = ", ".join(descs)
 
@@ -1687,13 +1703,13 @@ def score_bidding_strategy(data):
     # Zero conversions with spend
     if total_conversions == 0 and total_cost > 50:
         issues.append(
-            f"£{total_cost:.2f} spent with 0 conversions. "
+            f"£{total_cost:,.0f} spent with 0 conversions. "
             "Resolve conversion tracking before optimising bidding strategy."
         )
         rag = "red"
 
     if not issues:
-        cpa_note = f", CPA £{cpa:.2f}" if cpa else ""
+        cpa_note = f", CPA £{cpa:,.0f}" if cpa else ""
         issues.append(
             f"Bidding strategy is appropriate  -  {len(smart_campaigns)} smart bidding campaign(s)"
             f"{cpa_note}."

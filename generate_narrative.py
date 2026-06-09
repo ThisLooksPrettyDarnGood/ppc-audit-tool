@@ -42,8 +42,10 @@ def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
     # Unicode escapes so a source-wide dash scrub can't accidentally neutralise this.
     text = text.replace("\u2014", " - ").replace("\u2013", " - ")
     # Money is shown in whole pounds (no pence)  -  drop the decimals: £239.58 -> £239.
-    # Safety net in case the model still writes pence despite the style rule.
-    text = re.sub(r'(£\d[\d,]*)\.\d{1,2}\b', r'\1', text)
+    # Safety net in case the model still writes pence despite the style rule. The leading
+    # [1-9] is deliberate: sub-pound values (e.g. a £0.50 max-CPC cap) must KEEP their pence,
+    # or we'd corrupt them to a nonsensical "£0". Only strip pence when pounds are non-zero.
+    text = re.sub(r'(£[1-9][\d,]*)\.\d{1,2}\b', r'\1', text)
     return text
 
 
