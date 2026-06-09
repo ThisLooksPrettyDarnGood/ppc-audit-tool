@@ -470,6 +470,7 @@ Rules:
 - COMMERCIAL_IMPACT: 1 - 2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). TENSE: for things that are demonstrably happening NOW per the findings (e.g. budget spent on named non-converting terms), use direct present tense - "budget is leaking into low-quality clicks", NOT "can leak" or "could leak". Reserve "risks"/"could" only for FUTURE projections of what happens if nothing changes. Say "genuine lead demand" rather than just "demand".
 - If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK or STRANGLED by the issues - e.g. solid groundwork is being throttled while budget is capped on winning campaigns and leaks into non-converting searches. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
+- TERMINOLOGY: when referring to importing real lead outcomes (booked jobs / sales) back into Google Ads, name it "offline conversion import (OCI)" - not vague wording like "sales outcomes are not imported".
 - Use British English spelling.{escalation_note}
 
 Respond in EXACTLY this format (no extra text, no markdown):
@@ -527,6 +528,7 @@ Rules:
 - Focus on tangible business outcomes: more leads, lower CPA, recovered wasted spend, scalable growth.
 - IMPORTANT: do NOT just restate the issue slides word-for-word. REMIX them into fresh, forward-looking value statements  -  the same substance framed as the upside/prize, so the closing slide doesn't feel repetitive after the audit.
 - Be punchy and specific  -  these are punchy value statements, not generic descriptions. Under 18 words each.
+- TERMINOLOGY: if referencing importing real lead outcomes back into Google Ads, call it "offline conversion import (OCI)", not "sales outcomes".
 - Use British English spelling.
 
 Respond with just the 5 opportunities, one per line, no bullet points or numbering.
@@ -622,6 +624,7 @@ Rules:
 - Current State: describe the specific problem in plain English. Reference real details (numbers, percentages, specific issues). Under 20 words.
 - Changes Needed: one concrete action starting with a verb. Under 15 words.
 - Future State: the specific business benefit that unlocks. Under 15 words.
+- TERMINOLOGY: if a row is about importing real lead outcomes back into Google Ads, call it "offline conversion import (OCI)", not "sales outcomes are not imported".
 - Use British English spelling.
 - Do NOT just repeat the section name  -  describe the actual situation.
 

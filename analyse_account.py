@@ -66,7 +66,28 @@ def detect_account_type(data):
     return "unknown"
 
 
-def analyse_account(data):
+def parse_competitors_from_questionnaire(text):
+    """Pull named competitors from the questionnaire's 'Competition:' line, e.g.
+    'Competition: XL Pools, Tanby Pools, Compass Pools' -> ['xl pools', 'tanby pools', ...].
+    Returns a list of lowercased competitor names, or [] if the line is absent/blank.
+    """
+    if not text:
+        return []
+    import re
+    for line in str(text).splitlines():
+        if re.match(r'\s*competit', line, re.IGNORECASE) and ':' in line:
+            after = line.split(':', 1)[1]
+            parts = re.split(r'[,;/]|\band\b|\bor\b', after, flags=re.IGNORECASE)
+            names = [p.strip().strip('.').strip().lower() for p in parts]
+            return [n for n in names if len(n) >= 3 and n not in ("n/a", "none", "na")]
+    return []
+
+
+def analyse_account(data, raw_questionnaire=""):
+    # The questionnaire carries the client's stated competitors; the analyser needs them
+    # to flag competitor search terms (don't sell a rival's brand name as "new demand").
+    if "competitors" not in data:
+        data["competitors"] = parse_competitors_from_questionnaire(raw_questionnaire)
     account_type = detect_account_type(data)
     findings = {
         "conversion_tracking": score_conversion_tracking(data),
@@ -103,7 +124,11 @@ _ISSUE_SIGNATURES = [
     # On the cusp
     ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
-    # Bidding
+    # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
+    ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
+    ("uses Maximise Clicks (optimising for traffic",  60, "amber",  "Bidding Strategy"),  # material spend, capped, wrong strategy
+    ("uses Maximise Clicks but is a small",           33, "amber",  "Bidding Strategy"),  # tiny/starved -> Additional Observations
+    ("is new, so Maximise Clicks is sensible",        30, "amber",  "Bidding Strategy"),  # new/low-data -> not a problem yet
     ("on Maximise Clicks",                         78, "amber",     "Bidding Strategy"),
     ("paused campaign(s) historically delivered",  66, "amber",     "Bidding Strategy"),
     ("still on Manual CPC despite",                62, "amber",     "Bidding Strategy"),
@@ -120,6 +145,7 @@ _ISSUE_SIGNATURES = [
     ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions
     ("have a LOW score (4 or below)",              54, "amber",     "Ad Rank & Quality"),  # low Quality Score
     # Targeting & keywords
+    ("look like competitor business names",         63, "amber",     "Targeting & Keywords"),  # competitor terms (reframe)
     ("Fading winner spotted by comparing",         72, "amber",     "Targeting & Keywords"),  # cross-window pattern (high value)
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend
     ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries (high-value "dropped ball")
@@ -190,6 +216,38 @@ def _largest_pound(text):
         except ValueError:
             pass
     return max(vals) if vals else 0.0
+
+
+def _campaign_age_days(start_date):
+    """Days since a campaign's start_date ('YYYY-MM-DD'), or None if unparseable."""
+    if not start_date:
+        return None
+    from datetime import datetime
+    try:
+        return (datetime.today() - datetime.strptime(str(start_date), "%Y-%m-%d")).days
+    except (ValueError, TypeError):
+        return None
+
+
+def _campaign_age_phrase(start_date):
+    """Human phrase for a campaign's age, e.g. 'in July 2025 (about 11 months ago)'."""
+    days = _campaign_age_days(start_date)
+    if days is None:
+        return ""
+    from datetime import datetime
+    try:
+        d = datetime.strptime(str(start_date), "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return ""
+    months = round(days / 30.4)
+    if days < 60:
+        rough = f"about {days} days ago"
+    elif months < 12:
+        rough = f"about {months} months ago"
+    else:
+        yrs = days / 365.0
+        rough = "about a year ago" if yrs < 1.5 else f"about {yrs:.0f} years ago"
+    return f"in {d.strftime('%B %Y')} ({rough})"
 
 
 def _classify_issue(detail, section_name, section_rag):
@@ -835,7 +893,8 @@ def score_targeting_keywords(data):
             if not k:
                 continue
             a = agg.setdefault(k, {"term": t.get("term"), "spend": 0.0, "conversions": 0.0,
-                                   "status": t.get("status", "NONE")})
+                                   "status": t.get("status", "NONE"),
+                                   "campaign_name": t.get("campaign_name", "")})
             a["spend"] += t.get("spend", 0) or 0
             a["conversions"] += t.get("conversions", 0) or 0
         return list(agg.values())
@@ -843,7 +902,92 @@ def score_targeting_keywords(data):
     converting_not_added = _agg_by_term(converting_not_added)
     wasted_terms = _agg_by_term(wasted_terms)
 
+    # ── Competitor terms: a rival's business name is NOT new demand. A competitor-name
+    # search that "converts" in a normal (non-competitor) campaign is usually a low-value
+    # accidental contact - someone trying to reach the other company - so it must not be
+    # sold as a keyword to add. We classify from the client's stated competitor list
+    # (questionnaire) for certainty, plus a hedged "Name + pool(s)" heuristic for unlisted
+    # ones, then pull these out of the converting/wasted lists into their own finding.
+    competitors = data.get("competitors", []) or []
+    _comp_generic = {"pool", "pools", "swimming", "ltd", "limited", "leisure", "company",
+                     "services", "group", "uk", "the", "and", "spas", "spa", "covers", "saunas"}
+    _comp_full = [c for c in competitors if c]
+    _comp_tokens = {tok for c in competitors for tok in c.split()
+                    if len(tok) >= 4 and tok not in _comp_generic}
+    # Product head-nouns for the "Name + <noun>" heuristic, taken from the client's own
+    # account name generics (pool/pools here) so it stays vertical-aware without a hard list.
+    _product_nouns = {g for g in _comp_generic if g in str(data.get("account_name", "")).lower()
+                      or g in {"pool", "pools"}}
+    _generic_mods = {"swimming", "indoor", "outdoor", "luxury", "fibreglass", "fiberglass",
+                     "concrete", "near", "best", "cheap", "local", "new", "used", "small",
+                     "large", "above", "ground", "inground", "infinity", "plunge", "natural",
+                     "heated", "endless", "lap", "garden", "home", "domestic", "commercial",
+                     "residential", "portable", "plastic", "mini", "kids", "childrens", "my",
+                     "bespoke", "custom", "modern", "traditional", "cost", "price", "prices"}
+
+    def _competitor_reason(term):
+        """Return 'listed' (named competitor), 'possible' (heuristic), or None."""
+        t = str(term).lower()
+        if _is_brand(t):
+            return None
+        for full in _comp_full:
+            if full in t:
+                return "listed"
+        toks = t.split()
+        if any(tok in _comp_tokens for tok in toks):
+            return "listed"
+        # Heuristic: "<proper-noun-ish modifier> pool(s) ..." (e.g. 'southern pools heathfield')
+        for i, w in enumerate(toks):
+            if w in _product_nouns and i > 0:
+                mod = toks[i - 1]
+                if (len(mod) >= 4 and mod not in _generic_mods
+                        and mod not in _product_nouns and mod not in brand_tokens):
+                    return "possible"
+        return None
+
+    competitor_terms = []
+    for src in (converting_not_added, wasted_terms):
+        for t in src:
+            reason = _competitor_reason(t.get("term", ""))
+            if reason:
+                competitor_terms.append({**t, "reason": reason})
+    _comp_names = {str(t.get("term", "")).strip().lower() for t in competitor_terms}
+    converting_not_added = [t for t in converting_not_added
+                            if str(t.get("term", "")).strip().lower() not in _comp_names]
+    wasted_terms = [t for t in wasted_terms
+                    if str(t.get("term", "")).strip().lower() not in _comp_names]
+
     sqr_issues = []
+    if competitor_terms:
+        _ranked_ct = sorted(competitor_terms,
+                            key=lambda x: (x.get("conversions", 0) or 0, x.get("spend", 0) or 0),
+                            reverse=True)
+        egs = []
+        for t in _ranked_ct[:3]:
+            conv = t.get("conversions", 0) or 0
+            spend = t.get("spend", 0) or 0
+            tag = "a named competitor" if t.get("reason") == "listed" else "likely a competitor"
+            if conv:
+                egs.append(f"'{t['term']}' ({int(round(conv))} 'conversion{'s' if round(conv) != 1 else ''}'"
+                           f" at ~£{round(spend / conv)}, {tag})")
+            else:
+                egs.append(f"'{t['term']}' (£{round(spend)} spent, no conversions, {tag})")
+        eg_text = "; ".join(egs)
+        camps = {t.get("campaign_name", "") for t in competitor_terms if t.get("campaign_name")}
+        noncomp = sorted(c for c in camps if "competitor" not in c.lower() and "comp" not in c.lower())
+        camp_note = (f" These are firing inside non-competitor campaigns (e.g. '{noncomp[0]}'), "
+                     "where they should not be." if noncomp else "")
+        sqr_issues.append(
+            f"{len(competitor_terms)} search term(s) look like competitor business names rather than new "
+            f"demand: {eg_text}.{camp_note} A competitor-name search that 'converts' in a normal campaign "
+            "is usually a low-value accidental contact  -  someone trying to reach the other company  -  not "
+            "a genuine enquiry, and without offline conversion import (OCI) you cannot tell which (if any) "
+            "became real jobs. Rather than adding these as keywords, decide deliberately: target competitors "
+            "only in a dedicated campaign with tailored messaging and landing pages, or add them as negative "
+            "keywords to stop paying for misdirected clicks."
+        )
+        if rag == "green":
+            rag = "amber"
     if fading_winners:
         f = max(fading_winners, key=lambda x: x["spend_30d"])
         c90 = int(round(f["conv_90d"]))
@@ -1079,19 +1223,91 @@ def score_bidding_strategy(data):
         elif strategy in manual_strategies:
             manual_campaigns.append((name, strategy))
 
-    # Max Clicks / Manual CPC check
-    max_clicks = [n for n, s in manual_campaigns if s in ("MAXIMIZE_CLICKS", "TARGET_SPEND")]
+    # ── Max Clicks: explain the WHY with hard facts, and rank by spend ──────────
+    # "Maximise Clicks" is reported as TARGET_SPEND in the API. A human auditor judges it
+    # on the campaign's own facts, not as a blanket red flag: a tiny or low-cap campaign is
+    # a minor note (it belongs in Additional Observations); a big-budget UNCAPPED one is a
+    # genuine money leak that leads the deck; a brand-new campaign is fine for now. We branch
+    # on age, spend, and the CPC ceiling vs the account's typical CPC so severity follows the
+    # money (the per-case detail strings map to different severities in _ISSUE_SIGNATURES).
+    max_clicks_campaigns = [
+        c for c in campaigns
+        if c.get("status") == "ENABLED"
+        and c.get("bid_strategy", "").upper() in ("MAXIMIZE_CLICKS", "TARGET_SPEND")
+    ]
     true_manual = [n for n, s in manual_campaigns if s not in ("MAXIMIZE_CLICKS", "TARGET_SPEND")]
 
-    if max_clicks:
-        issues.append(
-            f"{len(max_clicks)} campaign(s) on Maximise Clicks  -  this optimises for traffic, not conversions. "
-            "Two things worth checking: whether it's a newer or low-data campaign that hasn't moved on yet, "
-            "and - importantly - whether a maximum CPC bid limit is set. Without a sensible CPC ceiling, "
-            "Maximise Clicks can pay far more per click than needed. Once there is enough conversion data, "
-            "move it to Maximise Conversions so spend is aligned with leads, not visits."
-        )
+    if max_clicks_campaigns:
         rag = "amber"
+        mc_ids = {c.get("id") for c in max_clicks_campaigns}
+        # Account-typical CPC = median avg CPC across the OTHER enabled campaigns with clicks.
+        other_cpcs = sorted(
+            c["avg_cpc_gbp"] for c in campaigns
+            if c.get("status") == "ENABLED" and c.get("avg_cpc_gbp")
+            and c.get("id") not in mc_ids
+        )
+        typical_cpc = other_cpcs[len(other_cpcs) // 2] if other_cpcs else None
+        account_spend = total_cost or sum((c.get("spend_30d") or 0) for c in campaigns)
+        costly_terms = data.get("max_clicks_costly_terms", {}) or {}
+
+        for c in max_clicks_campaigns:
+            name = c.get("name", "Unknown")
+            spend = c.get("spend_30d") or 0
+            conv = c.get("conversions_30d") or 0
+            clicks = c.get("clicks_30d") or 0
+            ceiling = c.get("cpc_ceiling_gbp")
+            age_phrase = _campaign_age_phrase(c.get("start_date"))
+            age_days = _campaign_age_days(c.get("start_date"))
+            is_new = age_days is not None and age_days < 90
+            small = spend < max(100.0, 0.05 * (account_spend or 0))
+            cap_low = (ceiling and typical_cpc and ceiling < 0.5 * typical_cpc)
+
+            if is_new and conv < 15:
+                issues.append(
+                    f"The '{name}' campaign is new, so Maximise Clicks is sensible for now: it started "
+                    f"{age_phrase} and has only {clicks} clicks and {conv:.0f} conversions  -  too little data "
+                    "for conversion-based bidding yet. Leave it on Maximise Clicks (ideally with a sensible "
+                    "maximum CPC) and move it to Maximise Conversions once it has steady conversion data. "
+                    "This is not a current problem."
+                )
+            elif small:
+                cap_clause = (f", with a £{ceiling:.2f} maximum CPC" if ceiling
+                              else ", with no maximum CPC set")
+                age_clause = f" It started {age_phrase}." if age_phrase else ""
+                if cap_low:
+                    market_clause = (f" That £{ceiling:.2f} cap sits well below the account's typical click "
+                                     f"cost of about £{typical_cpc:.0f}, so it only wins the cheapest, "
+                                     "lowest-intent clicks.")
+                    fix = "raise or remove the low CPC cap so it can compete, or pause it"
+                else:
+                    market_clause = ""
+                    fix = "review whether it earns its place, or move it to Maximise Conversions later"
+                issues.append(
+                    f"The '{name}' campaign uses Maximise Clicks but is a small, low-spend campaign: "
+                    f"£{spend:.0f} spent and {conv:.0f} conversions in the last 30 days{cap_clause}."
+                    f"{age_clause}{market_clause} It is a minor campaign rather than a core issue  -  {fix}  -  "
+                    "but it is not where the account's budget is being lost."
+                )
+            elif not ceiling:
+                ct = costly_terms.get(c.get("id")) or {}
+                costly_clause = ""
+                if ct.get("cpc"):
+                    term_bit = f" on the search term '{ct['term']}'" if ct.get("term") else ""
+                    costly_clause = (f"  -  the priciest click in the last 30 days cost about "
+                                     f"£{ct['cpc']:.0f}{term_bit}")
+                issues.append(
+                    f"The '{name}' campaign uses Maximise Clicks with no maximum CPC limit set, and has spent "
+                    f"£{spend:.0f} in the last 30 days. Without a CPC ceiling Google can pay far more per click "
+                    f"than a lead is worth{costly_clause}. Set a sensible maximum CPC now, then move to "
+                    "Maximise Conversions once conversion data is solid so spend follows leads, not visits."
+                )
+            else:
+                issues.append(
+                    f"The '{name}' campaign uses Maximise Clicks (optimising for traffic, not leads) and has "
+                    f"spent £{spend:.0f} with {conv:.0f} conversions in the last 30 days; it started {age_phrase}, "
+                    f"with a £{ceiling:.2f} maximum CPC. With this much history it is established enough to move "
+                    "to Maximise Conversions once tracking is solid, so spend follows leads rather than visits."
+                )
 
     if true_manual:
         if total_conversions >= 30:

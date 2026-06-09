@@ -33,6 +33,11 @@ HOUSE STYLE  -  how our audit team actually writes. Match this voice closely:
 MONEY: always show money in whole pounds, no pence. Write £239, not £239.58; £1,620, not
 £1,620.55. Drop the decimals entirely - never round up to the next pound.
 
+TERMINOLOGY: when you mean importing real lead outcomes (booked jobs / sales) back into
+Google Ads, name it "offline conversion import (OCI)" - use that phrase, not vague wording
+like "sales outcomes are not imported". After the first mention "OCI" alone is fine. This is
+the single biggest lever for a lead-gen account, so name it precisely.
+
 BE CONCISE  -  this is the biggest thing that separates us from generic AI copy:
 - ONE idea per bullet. Aim for 12-18 words; never pad a bullet to fit two thoughts.
 - Cut hedging words (currently, likely, may, can, potentially) unless they genuinely

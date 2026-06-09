@@ -285,7 +285,7 @@ if submitted:
         # ── Step 2: analyse ───────────────────────────────────────────────
         update("Analysing account…", 35)
         from analyse_account import analyse_account
-        findings = analyse_account(account_data)
+        findings = analyse_account(account_data, raw_questionnaire=raw_questionnaire.strip())
         findings["account_cid"] = cid_clean
 
         # ── Step 3: generate narrative ────────────────────────────────────

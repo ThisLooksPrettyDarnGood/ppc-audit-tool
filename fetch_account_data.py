@@ -123,16 +123,19 @@ def get_campaigns(client, cid):
             campaign.id,
             campaign.name,
             campaign.status,
+            campaign.start_date,
             campaign.advertising_channel_type,
             campaign.bidding_strategy_type,
             campaign.target_cpa.target_cpa_micros,
             campaign.target_roas.target_roas,
+            campaign.target_spend.cpc_bid_ceiling_micros,
             campaign_budget.amount_micros,
             campaign_budget.delivery_method,
             metrics.cost_micros,
             metrics.clicks,
             metrics.conversions,
-            metrics.impressions
+            metrics.impressions,
+            metrics.average_cpc
         FROM campaign
         WHERE campaign.status != 'REMOVED'
           AND segments.date DURING LAST_30_DAYS
@@ -150,10 +153,15 @@ def get_campaigns(client, cid):
         troas = c.target_roas.target_roas
         target_roas = round(troas, 3) if troas else None
 
+        # Maximise Clicks (TARGET_SPEND) can carry an optional max-CPC ceiling.
+        ceiling_micros = c.target_spend.cpc_bid_ceiling_micros
+        cpc_ceiling_gbp = round(ceiling_micros / 1_000_000, 2) if ceiling_micros else None
+
         campaigns.append({
             "id": str(c.id),
             "name": c.name,
             "status": c.status.name,
+            "start_date": c.start_date,                # e.g. "2025-07-16" (campaign age)
             "type": c.advertising_channel_type.name,
             "bid_strategy": c.bidding_strategy_type.name,
             "daily_budget_gbp": round(b.amount_micros / 1_000_000, 2),
@@ -161,6 +169,8 @@ def get_campaigns(client, cid):
             "clicks_30d": m.clicks,
             "conversions_30d": round(m.conversions, 2),
             "impressions_30d": m.impressions,
+            "avg_cpc_gbp": round(m.average_cpc / 1_000_000, 2) if m.average_cpc else None,
+            "cpc_ceiling_gbp": cpc_ceiling_gbp,        # Max-Clicks CPC cap, or None if unset
             "target_cpa_gbp": target_cpa_gbp,
             "target_roas": target_roas,
         })
@@ -224,6 +234,7 @@ def get_top_search_terms(client, cid, limit=30):
         SELECT
             search_term_view.search_term,
             search_term_view.status,
+            campaign.name,
             metrics.clicks,
             metrics.cost_micros,
             metrics.conversions,
@@ -239,6 +250,7 @@ def get_top_search_terms(client, cid, limit=30):
         st = row.search_term_view
         m = row.metrics
         terms.append({
+            "campaign_name": row.campaign.name,
             "term": st.search_term,
             "status": st.status.name,
             "clicks": m.clicks,
@@ -266,6 +278,7 @@ def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
         SELECT
             search_term_view.search_term,
             search_term_view.status,
+            campaign.name,
             metrics.clicks,
             metrics.cost_micros,
             metrics.conversions
@@ -285,11 +298,41 @@ def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
         terms.append({
             "term": st.search_term,
             "status": st.status.name,
+            "campaign_name": row.campaign.name,
             "clicks": m.clicks,
             "spend": round(m.cost_micros / 1_000_000, 2),
             "conversions": round(m.conversions, 2),
         })
     return terms
+
+
+def get_max_clicks_costly_terms(client, cid, campaign_ids):
+    """For the given (uncapped Maximise Clicks) campaigns, return the single priciest
+    search term per campaign over the last 30 days: {campaign_id: {term, cpc}}. Used to
+    give the slide a hard fact about how expensive an uncapped click can get. Read-only;
+    caller wraps in try/except. Returns {} if campaign_ids is empty.
+    """
+    out = {}
+    for camp_id in campaign_ids:
+        gaql = f"""
+            SELECT search_term_view.search_term, metrics.average_cpc
+            FROM search_term_view
+            WHERE campaign.id = {camp_id}
+              AND segments.date DURING LAST_30_DAYS
+              AND metrics.clicks > 0
+            ORDER BY metrics.average_cpc DESC
+            LIMIT 1
+        """
+        rows = run_query(client, cid, gaql)
+        for row in rows:
+            cpc = row.metrics.average_cpc
+            if cpc:
+                out[str(camp_id)] = {
+                    "term": row.search_term_view.search_term,
+                    "cpc": round(cpc / 1_000_000, 2),
+                }
+            break
+    return out
 
 
 def get_location_targeting(client, cid):
@@ -831,6 +874,22 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → Campaigns...")
     campaigns = get_campaigns(client, cid)
 
+    # For UNCAPPED Maximise Clicks campaigns only, pull the priciest click/term (a hard
+    # fact for the slide). Skipped entirely when every Max-Clicks campaign has a CPC cap.
+    print("  → Max-Clicks costly terms (uncapped only)...")
+    max_clicks_costly_terms = {}
+    try:
+        _uncapped = [
+            c["id"] for c in campaigns
+            if c.get("status") == "ENABLED"
+            and c.get("bid_strategy", "").upper() in ("MAXIMIZE_CLICKS", "TARGET_SPEND")
+            and not c.get("cpc_ceiling_gbp")
+        ]
+        if _uncapped:
+            max_clicks_costly_terms = get_max_clicks_costly_terms(client, cid, _uncapped)
+    except Exception as e:
+        print(f"    (max-clicks costly-terms query failed: {e})")
+
     print("  → Ad groups...")
     ad_groups = get_ad_groups(client, cid)
 
@@ -984,6 +1043,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "account_summary_30d": account_summary,
         "campaigns": campaigns,
         "campaign_types_active": campaign_types,
+        "max_clicks_costly_terms": max_clicks_costly_terms,
         "ad_groups": ad_groups,
         "conversion_actions": conversion_actions,
         "keyword_match_breakdown": keyword_match_breakdown,
