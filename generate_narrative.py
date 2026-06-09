@@ -438,8 +438,15 @@ REC3: <third recommendation>
     return parsed
 
 
-def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list) -> dict:
-    """Generates the Executive Summary slide content."""
+def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list,
+                                 escalation_note: str = "") -> dict:
+    """Generates the Executive Summary slide content.
+
+    escalation_note: when the overall rating was escalated to RED because efficiency
+    collapsed (CPA roughly doubled+ vs the 12-month average), this carries a directive
+    + the real figures so the Commercial Impact explicitly states the "parts are amber,
+    whole is red" reasoning the client should hear out loud. Empty otherwise.
+    """
 
     issues_detail = "\n".join(
         f"- {i.get('title','Issue')} ({i.get('rag','AMBER').upper()}):\n"
@@ -463,7 +470,7 @@ Rules:
 - COMMERCIAL_IMPACT: 1 - 2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). TENSE: for things that are demonstrably happening NOW per the findings (e.g. budget spent on named non-converting terms), use direct present tense - "budget is leaking into low-quality clicks", NOT "can leak" or "could leak". Reserve "risks"/"could" only for FUTURE projections of what happens if nothing changes. Say "genuine lead demand" rather than just "demand".
 - If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK or STRANGLED by the issues - e.g. solid groundwork is being throttled while budget is capped on winning campaigns and leaks into non-converting searches. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
-- Use British English spelling.
+- Use British English spelling.{escalation_note}
 
 Respond in EXACTLY this format (no extra text, no markdown):
 EXEC_HEADLINE: <punchy specific headline  -  under 15 words>
@@ -841,13 +848,31 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     _perf_raw = (findings.get("performance_summary", {}) or {}).get("_raw", {})
     _cpa30 = (_perf_raw.get("t30", {}) or {}).get("cpa")
     _cpa12 = (_perf_raw.get("t12", {}) or {}).get("cpa")
+    _escalation_note = ""
     if (_cpa30 and _cpa12 and _cpa30 >= 2 * _cpa12 and len(selected) >= 4
             and overall_rag in ("amber", "amber_red")):
         overall_rag = "red"
         print(f"  ↑ Overall escalated to RED (30d CPA £{_cpa30:.0f} ≥ 2× 12m CPA £{_cpa12:.0f}, {len(selected)} issues)")
+        # Make the amber-to-red reasoning explicit on the slide so it can be read verbatim.
+        _mult = _cpa30 / _cpa12
+        _rise = ("nearly tripled" if _mult >= 2.6 else
+                 "more than doubled" if _mult > 2.0 else "doubled")
+        _escalation_note = (
+            "\n- OVERALL RATING IS RED (escalated): each issue above is individually amber and "
+            "fixable, but the account's efficiency has collapsed - cost per lead has "
+            f"{_rise}, from about £{_cpa12:.0f} (12-month average) to about £{_cpa30:.0f} (last 30 "
+            "days). END the COMMERCIAL_IMPACT with one clear, standalone sentence making this "
+            f"explicit using those figures: that the individual issues are amber and fixable, but "
+            f"because cost per lead has {_rise} from £{_cpa12:.0f} to £{_cpa30:.0f} the account as a "
+            "whole sits in the red. Close on a crisp line such as 'The parts are amber; the whole is "
+            "red.' Do not exaggerate beyond the figures given."
+        )
 
     print("  → Generating Executive Summary...")
-    exec_sum = _retry(lambda: _narrative_executive_summary(client, findings, issues), "Executive Summary")
+    exec_sum = _retry(
+        lambda: _narrative_executive_summary(client, findings, issues, _escalation_note),
+        "Executive Summary"
+    )
 
     print("  → Generating Key Opportunities...")
     opps = _retry(lambda: _narrative_key_opportunities(client, findings, issues), "Key Opportunities")
