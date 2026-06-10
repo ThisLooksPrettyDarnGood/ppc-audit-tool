@@ -72,6 +72,7 @@ def get_conversion_actions(client, cid):
             conversion_action.status,
             conversion_action.counting_type,
             conversion_action.include_in_conversions_metric,
+            conversion_action.primary_for_goal,
             conversion_action.tag_snippets,
             conversion_action.category,
             conversion_action.type,
@@ -88,6 +89,10 @@ def get_conversion_actions(client, cid):
             "status": ca.status.name,
             "counting_type": ca.counting_type.name,
             "include_in_conversions": ca.include_in_conversions_metric,
+            # primary_for_goal is the modern (goal-based) "is this a primary conversion" flag.
+            # On goal-based accounts include_in_conversions_metric can be False on an action that
+            # is still primary and counting (e.g. IB's lead form), so we keep both.
+            "primary_for_goal": bool(ca.primary_for_goal),
             "category": ca.category.name,
             "type": ca.type.name,
             # False = no native tag = likely imported from GA4 or another source
@@ -99,13 +104,16 @@ def get_conversion_actions(client, cid):
 
 def get_conversion_action_volume(client, cid):
     """
-    Conversions recorded PER conversion action over the last 30 days. Lets the analyser
-    tell whether a low-value primary action (e.g. a page-view) is actually firing and
-    skewing bidding, versus merely being misconfigured but recording nothing - so we
-    don't over-claim. Caller wraps in try/except.
+    Per conversion action over the last 30 days, BOTH:
+      - all_conversions: every recorded event (incl. non-ad-attributed GA4 site activity), and
+      - conversions: the AD-ATTRIBUTED count - the "Conversions" column bidding actually uses.
+    The gap matters: an action can record 72 all_conversions (site scrolls) yet 0 ad-attributed,
+    so it is NOT actually inflating the reported/optimised number. Using ad-attributed as ground
+    truth stops us claiming "your conversions are inflated" when they are not. Returns
+    {name: {"all": float, "attributed": float}}. Caller wraps in try/except.
     """
     gaql = """
-        SELECT segments.conversion_action_name, metrics.all_conversions
+        SELECT segments.conversion_action_name, metrics.all_conversions, metrics.conversions
         FROM customer
         WHERE segments.date DURING LAST_30_DAYS
     """
@@ -113,7 +121,9 @@ def get_conversion_action_volume(client, cid):
     vol = {}
     for row in rows:
         name = row.segments.conversion_action_name
-        vol[name] = vol.get(name, 0) + row.metrics.all_conversions
+        d = vol.setdefault(name, {"all": 0.0, "attributed": 0.0})
+        d["all"] += row.metrics.all_conversions
+        d["attributed"] += row.metrics.conversions
     return vol
 
 
@@ -1047,9 +1057,13 @@ def fetch_account_data(client_cid: str) -> dict:
     try:
         _ca_vol = get_conversion_action_volume(client, cid)
         for ca in conversion_actions:
-            ca["conversions_30d"] = round(_ca_vol.get(ca["name"], 0), 2)
-        _firing = [ca["name"] for ca in conversion_actions if ca.get("conversions_30d", 0) > 0]
-        print(f"    {len(_firing)} action(s) recording conversions")
+            _v = _ca_vol.get(ca["name"], {})
+            # conversions_30d stays = all_conversions (site activity, back-compat); attributed is
+            # the ad-attributed count that actually drives the reported/optimised Conversions.
+            ca["conversions_30d"] = round(_v.get("all", 0), 2)
+            ca["attributed_conversions_30d"] = round(_v.get("attributed", 0), 2)
+        _firing = [ca["name"] for ca in conversion_actions if ca.get("attributed_conversions_30d", 0) > 0]
+        print(f"    {len(_firing)} action(s) with ad-attributed conversions")
     except Exception as e:
         print(f"    (per-action volume query failed: {e})")
         # leave conversions_30d unset → analyser treats volume as unknown (cautious wording)

@@ -998,8 +998,14 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                               "bullet per misdirected term naming what it ACTUALLY is, its total spend, and (where "
                               "given) the keyword that triggered it (about 18 words each); then, if any, one bullet listing the "
                               "genuine-demand term(s) worth adding. WHY IT MATTERS: this spend buys clicks meant "
-                              "for other organisations, and because conversion tracking is inflated these recorded "
-                              "'conversions' are likely page activity, not enquiries; each is small but together "
+                              "for other organisations; " + (
+                                  "and because conversion tracking is inflated these recorded 'conversions' are "
+                                  "likely page activity, not real enquiries"
+                                  if bool((findings.get("conversion_tracking", {}) or {}).get("conversions_inflated"))
+                                  else "the recorded conversions are form submissions, but from searchers whose "
+                                       "intent was a different organisation, so they are likely low-quality leads, "
+                                       "and without offline conversion import (OCI) you cannot tell which became real customers"
+                              ) + "; each is small but together "
                               "they show the search query report is not being reviewed. RECOMMENDATIONS: add the "
                               "genuine-demand term(s) as keywords; add each misdirected term as a negative keyword; "
                               "review the search query report at least monthly so misdirected spend is caught early.")
@@ -1094,11 +1100,10 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     perf = findings.get("performance_summary", {})
     if perf:
         print("  → Writing performance commentary...")
-        # If conversions are inflated (low-value primary actions firing, or double-counting),
-        # an "improved" CPA/volume is NOT real progress - tell the commentary not to celebrate it.
-        _ct_issues = " ".join((findings.get("conversion_tracking", {}) or {}).get("issues", [])).lower()
-        _conv_inflated = any(k in _ct_issues for k in
-                             ("actively recording conversions", "double-counting", "double counting"))
+        # If conversions are ACTUALLY inflated right now (low-value actions recording ad-attributed
+        # conversions, or real multi-counting), an "improved" CPA/volume is not real progress. Use the
+        # analyser's structured flag, not text matching, so latent setup risk doesn't trip it.
+        _conv_inflated = bool((findings.get("conversion_tracking", {}) or {}).get("conversions_inflated"))
         _conv_caveat = ""
         if _conv_inflated:
             _conv_caveat = ("\nIMPORTANT: the conversion COUNT is inflated (low-value page-view/engagement "

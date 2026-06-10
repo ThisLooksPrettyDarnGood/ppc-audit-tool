@@ -410,6 +410,10 @@ def overall_rag_from_issues(issues):
 def score_conversion_tracking(data):
     issues = []
     rag = "green"
+    # True only when conversions are ACTUALLY inflated right now (low-value actions recording
+    # ad-attributed conversions, or real multi-counting) - drives the downstream "don't celebrate
+    # the CPA" caveat. Stays False for latent setup risk where the reported numbers are genuine.
+    conversions_inflated = False
     conversion_actions = data.get("conversion_actions", [])
     summary = data.get("account_summary_30d", {})
     total_conversions = summary.get("conversions", 0)
@@ -440,8 +444,24 @@ def score_conversion_tracking(data):
         # Only ACTIVE conversion actions matter  -  inactive/hidden ones aren't being
         # used by the account, so don't flag them at all (practitioner feedback).
         active_actions = [ca for ca in conversion_actions if ca.get("status") == "ENABLED"]
+
+        # "Primary" = optimised towards. On goal-based accounts include_in_conversions_metric can
+        # be False on an action that is still primary and counting (IB's lead form is exactly this),
+        # so accept EITHER signal.
+        def _is_primary(ca):
+            return bool(ca.get("primary_for_goal") or ca.get("include_in_conversions"))
+        # AD-ATTRIBUTED conversions are the ground truth for what is actually being counted/optimised
+        # (metrics.conversions), as opposed to conversions_30d which is all_conversions (site activity
+        # incl. non-ad GA4 events). None when the per-action volume query was unavailable.
+        def _attr(ca):
+            return ca.get("attributed_conversions_30d")
+        _has_attr = any(ca.get("attributed_conversions_30d") is not None for ca in active_actions)
+        # Does this action actually drive the reported/optimised Conversions number right now?
+        def _is_counting(ca):
+            return (_attr(ca) or 0) > 0 if _has_attr else bool((ca.get("conversions_30d") or 0) > 0)
+
         # Count only PRIMARY actions (the ones bidding actually optimises towards).
-        primary_actions = [ca for ca in active_actions if ca.get("include_in_conversions")]
+        primary_actions = [ca for ca in active_actions if _is_primary(ca)]
 
         # ── Possible double-counting: multiple PRIMARY actions of the same category, or an
         # overlapping cluster of call/contact actions, can count one interaction several times -
@@ -451,31 +471,37 @@ def score_conversion_tracking(data):
         _cat_pretty = {"PHONE_CALL_LEAD": "phone call", "CONTACT": "click-to-call/contact",
                        "GET_DIRECTIONS": "get-directions", "SUBMIT_LEAD_FORM": "lead form",
                        "REQUEST_QUOTE": "quote request", "BOOK_APPOINTMENT": "appointment"}
-        _primary_cats = _Counter(ca.get("category", "") for ca in primary_actions if ca.get("category"))
+        # Only actions that ACTUALLY record ad-attributed conversions can double-count a real lead.
+        # A pile of primary actions recording nothing is a setup risk (the low-value finding below
+        # covers it), NOT active double-counting - so when we have attribution data, base this on the
+        # counting actions only. (Falls back to all primary actions when attribution is unavailable.)
+        _basis = [ca for ca in primary_actions if _is_counting(ca)] if _has_attr else primary_actions
+        _primary_cats = _Counter(ca.get("category", "") for ca in _basis if ca.get("category"))
         _dup_cats = {c: n for c, n in _primary_cats.items() if n >= 2}
         # True call/contact actions only - GET_DIRECTIONS is deliberately excluded: a directions
         # tap isn't a phone enquiry, so counting it here would overstate the call double-counting.
-        _call_cluster = [ca for ca in primary_actions
+        _call_cluster = [ca for ca in _basis
                          if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "CALL"}]
         if _dup_cats or len(_call_cluster) >= 2:
             _dup_txt = "; ".join(
                 f"{n} separate primary '{_cat_pretty.get(c, c.replace('_', ' ').lower())}' actions"
                 for c, n in sorted(_dup_cats.items(), key=lambda x: -x[1]))
+            _count_word = "recording" if _has_attr else "set up as"
             _call_note = ""
             if len(_call_cluster) >= 2:
                 _cnames = ", ".join(f"'{ca.get('name')}'" for ca in _call_cluster[:3])
                 _more = "" if len(_call_cluster) <= 3 else " among others"
-                _call_note = (f" In particular, {len(_call_cluster)} call/contact actions are primary "
-                              f"({_cnames}{_more}), so a single phone enquiry can be counted several times.")
+                _call_note = (f" In particular, {len(_call_cluster)} call/contact actions are {_count_word} "
+                              f"conversions ({_cnames}{_more}), so a single phone enquiry can be counted several times.")
             _lead_txt = (_dup_txt if _dup_txt else f"{len(_call_cluster)} overlapping call/contact actions")
             issues.append(
-                f"Possible conversion double-counting: of {len(primary_actions)} primary actions there are "
-                f"{_lead_txt}, which can count the same lead more than once.{_call_note} Double-counting makes "
-                "cost per lead look artificially LOW, so historic figures (including the paused PMax CPAs) may "
-                "be around half the true cost. Consolidate to one clean primary action per genuine lead type "
-                "(ideally the form fill), move the rest to secondary, and reconcile against the back-end "
-                "enquiry count so there is a single source of truth."
+                f"Possible conversion double-counting: {_lead_txt} are {_count_word} conversions, which can count "
+                f"the same lead more than once.{_call_note} Double-counting makes cost per lead look artificially "
+                "LOW, so historic figures (including the paused PMax CPAs) may be around half the true cost. "
+                "Consolidate to one clean primary action per genuine lead type (ideally the form fill), move the "
+                "rest to secondary, and reconcile against the back-end enquiry count so there is a single source of truth."
             )
+            conversions_inflated = True
             if rag not in ("red",):
                 rag = "amber_red"
 
@@ -514,56 +540,80 @@ def score_conversion_tracking(data):
         spammable_categories = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD", "OUTBOUND_CLICK"}
         _lowval_plain = {"PAGE_VIEW": "a page-view action", "ENGAGEMENT": "an engagement action",
                          "DOWNLOAD": "a download action", "OUTBOUND_CLICK": "an outbound-click action"}
-        primary_spammable = [
-            (ca.get("name", "Unknown"), ca.get("category", ""), ca.get("conversions_30d"))
-            for ca in active_actions
-            if ca.get("include_in_conversions")
-            and ca.get("category", "") in spammable_categories
-        ]
+        primary_spammable = [ca for ca in active_actions
+                             if _is_primary(ca) and ca.get("category", "") in spammable_categories]
         if primary_spammable:
-            plain = ", ".join(_lowval_plain.get(c, "a low-value action") for _, c, _v in primary_spammable)
-            vols = [v for _, _, v in primary_spammable]
-            recording = any((v is not None and v > 0) for v in vols)
-            all_known_zero = bool(vols) and all((v is not None and v == 0) for v in vols)
-            if recording:
-                # QUANTIFY it - "scroll 75% recorded 71 conversions" is a completely different
-                # story to "2", and the volume is the whole point (per practitioner feedback).
+            plain = ", ".join(_lowval_plain.get(ca.get("category", ""), "a low-value action")
+                              for ca in primary_spammable)
+            _vols_all = [ca.get("conversions_30d") for ca in primary_spammable]   # all_conversions
+            _recording_site = any((v is not None and v > 0) for v in _vols_all)
+            _all_known_zero = bool(_vols_all) and all((v is not None and v == 0) for v in _vols_all)
+            _attr_low = sum((_attr(ca) or 0) for ca in primary_spammable) if _has_attr else None
+
+            # The genuine lead action currently driving the reported conversions (if any) - used both
+            # to flag a true inversion and, in the softer case, to reassure that the headline number
+            # already reflects real enquiries.
+            _genuine_counting = [ca for ca in active_actions
+                                 if ca.get("category", "") in {"SUBMIT_LEAD_FORM", "LEAD", "REQUEST_QUOTE",
+                                                               "BOOK_APPOINTMENT"} and _is_counting(ca)]
+            _g = max(_genuine_counting,
+                     key=lambda ca: (_attr(ca) if _has_attr else ca.get("conversions_30d")) or 0) \
+                 if _genuine_counting else None
+            _gv = int(round(((_attr(_g) if _has_attr else _g.get("conversions_30d")) or 0))) if _g else 0
+            _g_label = _clean_action_label(_g.get("name")) if _g else ""
+
+            # ACTIVE inflation: low-value actions are actually recording AD-ATTRIBUTED conversions
+            # (or we have no attribution data and they're firing, so we can't rule it out).
+            _active = _recording_site and (not _has_attr or (_attr_low or 0) >= 1)
+            if _active:
+                _use_attr = _has_attr and (_attr_low or 0) >= 1
                 _named = sorted(
-                    [(_clean_action_label(n, _lowval_plain.get(c, "a low-value action")), v or 0)
-                     for n, c, v in primary_spammable if (v or 0) > 0],
+                    [(_clean_action_label(ca.get("name"), _lowval_plain.get(ca.get("category"), "a low-value action")),
+                      (_attr(ca) if _use_attr else ca.get("conversions_30d")) or 0)
+                     for ca in primary_spammable
+                     if ((_attr(ca) if _use_attr else ca.get("conversions_30d")) or 0) > 0],
                     key=lambda x: x[1], reverse=True)
                 _total_low = int(round(sum(v for _, v in _named)))
                 _egs = ", ".join(f"'{lbl}' ({int(round(v))})" for lbl, v in _named[:3])
-                # Inversion: a GENUINE lead action that is NOT primary while these low-value ones are.
-                _genuine = [ca for ca in active_actions
-                            if not ca.get("include_in_conversions")
-                            and ca.get("category", "") in {"SUBMIT_LEAD_FORM", "LEAD", "REQUEST_QUOTE",
-                                                           "BOOK_APPOINTMENT"}
-                            and (ca.get("conversions_30d") or 0) > 0]
+                _attr_word = "ad-attributed " if _use_attr else ""
+                # Inversion only when the genuine action is genuinely NOT primary (truly sidelined).
                 _inv = ""
-                if _genuine:
-                    _g = max(_genuine, key=lambda ca: ca.get("conversions_30d") or 0)
-                    _gv = int(round(_g.get("conversions_30d") or 0))
-                    # Add a plain-English descriptor so a foreign-language action name is still clear.
-                    _cat_desc = {"SUBMIT_LEAD_FORM": "a contact-form submission", "LEAD": "a lead",
-                                 "REQUEST_QUOTE": "a quote request",
-                                 "BOOK_APPOINTMENT": "an appointment booking"}.get(_g.get("category"), "an enquiry")
-                    _inv = (f" Worse, your genuine enquiry action ('{_clean_action_label(_g.get('name'))}', "
-                            f"{_cat_desc}, {_gv} in 30 days) is NOT set as a primary conversion - so the real "
-                            "lead is not even what bidding optimises towards.")
-                _cpa_ctx = ""
+                if _g and not _is_primary(_g):
+                    _inv = (f" Worse, your genuine enquiry action ('{_g_label}', {_gv} in 30 days) is NOT set as a "
+                            "primary conversion - so the real lead is not even what bidding optimises towards.")
                 issues.append(
-                    f"Your PRIMARY conversions are dominated by low-value website activity, not real enquiries: "
-                    f"{_egs} recorded about {_total_low} 'conversions' in the last 30 days - these are page "
-                    f"scrolls, clicks and page views, not genuine leads.{_inv} Google therefore optimises towards "
-                    "low-value activity and your reported conversion numbers are heavily inflated. Move these to "
-                    f"secondary and make the genuine enquiry (form submission) the single primary conversion.{_cpa_ctx}"
+                    f"Your PRIMARY conversions include low-value website activity that is being counted, not real "
+                    f"enquiries: {_egs} recorded about {_total_low} {_attr_word}'conversions' in the last 30 days - "
+                    f"page scrolls, clicks and page views, not genuine leads.{_inv} Google optimises towards this "
+                    "activity, inflating your reported numbers. Move these to secondary and make the genuine enquiry "
+                    "(form submission) the single primary conversion."
                 )
+                conversions_inflated = True
                 if rag != "red":
                     rag = "amber_red"
-            elif all_known_zero:
-                # Primary but recording nothing → a latent misconfiguration, not active harm.
-                # Don't over-claim that Google "is" optimising towards it.
+            elif _recording_site:
+                # Set as primary and firing as SITE events, but ~0 ad-attributed → NOT inflating the
+                # reported/optimised Conversions today (which reflect genuine enquiries). Real setup
+                # risk, but we must not claim the numbers are inflated when they are not.
+                _site_named = sorted(
+                    [(_clean_action_label(ca.get("name"), _lowval_plain.get(ca.get("category"), "a low-value action")),
+                      ca.get("conversions_30d") or 0) for ca in primary_spammable if (ca.get("conversions_30d") or 0) > 0],
+                    key=lambda x: x[1], reverse=True)
+                _egs = ", ".join(f"'{lbl}'" for lbl, _ in _site_named[:3])
+                _g_note = (f" Encouragingly, your reported conversions are currently driven by the genuine enquiry "
+                           f"action ('{_g_label}', {_gv} in 30 days), so the headline numbers are not inflated today."
+                           if _g else "")
+                issues.append(
+                    f"Low-value website actions are set as PRIMARY conversions ({_egs}) and fire often as site "
+                    "events, but they are not currently attributed to your Google Ads clicks, so they are not "
+                    f"inflating your reported Conversions right now.{_g_note} It is still a misconfiguration that "
+                    "points bidding at the wrong goals and would distort your numbers if that traffic grows: move "
+                    "these actions to secondary and keep the genuine form submission as the single primary conversion."
+                )
+                if rag == "green":
+                    rag = "amber"
+            elif _all_known_zero:
+                # Primary but recording nothing at all → a latent misconfiguration, not active harm.
                 issues.append(
                     f"A low-value action is set as a primary conversion but is recording no conversions in the "
                     f"last 30 days: {plain}. It isn't skewing bidding right now, but it should be removed or set "
@@ -693,6 +743,7 @@ def score_conversion_tracking(data):
         "rag": rag,
         "headline": _ct_headline(rag, total_conversions, len(conversion_actions)),
         "issues": issues,
+        "conversions_inflated": conversions_inflated,
         "data_points": {
             "conversion_actions_count": len(conversion_actions),
             "total_conversions_30d": total_conversions,
@@ -1110,12 +1161,18 @@ def score_targeting_keywords(data):
     wasted_terms = [t for t in wasted_terms
                     if str(t.get("term", "")).strip().lower() not in _comp_names]
 
-    # If low-value actions are primary AND firing, ANY "converted/lead" count below may be page
-    # activity (scrolls, page views), not genuine enquiries - caveat it rather than overclaim.
+    # If low-value actions are primary AND recording AD-ATTRIBUTED conversions, ANY "converted/lead"
+    # count below may be page activity, not genuine enquiries - caveat it. But only when they actually
+    # count: an action firing 72 site scrolls with 0 ad-attributed isn't polluting the search-term
+    # conversions (those came through the genuine action), so we must not add a misleading caveat.
+    def _lv_attr(ca):
+        a = ca.get("attributed_conversions_30d")
+        return a if a is not None else (ca.get("conversions_30d") or 0)
     _lv_primary_firing = any(
-        ca.get("status") == "ENABLED" and ca.get("include_in_conversions")
+        ca.get("status") == "ENABLED"
+        and (ca.get("primary_for_goal") or ca.get("include_in_conversions"))
         and ca.get("category") in {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD", "OUTBOUND_CLICK"}
-        and (ca.get("conversions_30d") or 0) > 0
+        and (_lv_attr(ca) or 0) > 0
         for ca in (data.get("conversion_actions") or []))
     _quality_caveat = (" Note: low-value actions (page views, scrolls, clicks) are currently counted as "
                        "primary conversions, so some of these 'leads' may be page activity rather than "
