@@ -226,6 +226,8 @@ _ISSUE_SIGNATURES = [
     ("restricted by their target ROAS",            65, "amber",     "Bidding Strategy"),  # tROAS above achieved = bids squeezed
     ("share a single campaign budget",             56, "amber",     "Budget & Coverage"),  # shared pool decides priority
     ("receiving spend from more than one campaign", 61, "amber",    "Account Structure"),  # product overlap / self-competition
+    ("triggering ads in more than one campaign",   59, "amber",     "Account Structure"),  # search-term cannibalisation (material)
+    ("A small overlap of search terms",            35, "amber",     "Account Structure"),  # cannibalisation watch-item -> Observations
     ("still on Manual CPC despite",                62, "amber",     "Bidding Strategy"),
     ("on Manual CPC.",                             58, "amber",     "Bidding Strategy"),
     ("has a target CPA of",                        55, "amber",     "Bidding Strategy"),
@@ -1062,6 +1064,42 @@ def score_account_structure(data):
         )
         if rag == "green":
             rag = "amber"
+
+    # ── Campaign cannibalisation: the same search term triggering ads in 2+ campaigns
+    # means the campaigns compete in the same auctions (split data, bid against each
+    # other). Severity follows the money: a couple of stray terms is a watch-item, a
+    # material overlap is a structural problem (the human decks lead with the latter).
+    _ts = data.get("top_search_terms") or []
+    _t_camps, _t_spend = {}, {}
+    for _r in _ts:
+        _t, _c = _r.get("term"), _r.get("campaign_name")
+        if _t and _c:
+            _t_camps.setdefault(_t, set()).add(_c)
+            _t_spend[_t] = _t_spend.get(_t, 0) + (_r.get("spend") or 0)
+    _multi = {t: c for t, c in _t_camps.items() if len(c) >= 2}
+    if _multi:
+        _ov_spend = sum(_t_spend[t] for t in _multi)
+        _worst = max(_multi, key=lambda t: _t_spend[t])
+        _eg = (f"'{_worst}' triggered ads from {len(_multi[_worst])} campaigns "
+               f"({', '.join(sorted(_multi[_worst])[:3])})")
+        if _ov_spend >= 50 or len(_multi) >= 3:
+            issues.append(
+                f"{len(_multi)} search term(s) are triggering ads in more than one campaign at the "
+                f"same time, about £{_ov_spend:,.0f} of spend in 30 days. For example {_eg}. "
+                "Overlapping campaigns compete against each other in the same auctions and split "
+                "their performance data, so both learn more slowly and CPCs are pushed up. Tightening "
+                "the boundaries between campaigns (keywords, locations, negatives) removes the "
+                "self-competition."
+            )
+            if rag == "green":
+                rag = "amber"
+        else:
+            issues.append(
+                f"A small overlap of search terms between campaigns: {len(_multi)} term(s) "
+                f"(about £{_ov_spend:,.0f}) triggered ads from more than one campaign, e.g. {_eg}. "
+                "Not material yet, but it is a sign the campaigns share auction space - worth "
+                "keeping the boundaries (keywords, locations, negatives) clean as spend grows."
+            )
 
     # If no genuine structural problems surfaced, describe the structure positively
     # FIRST  -  so the slide validates a lean-but-appropriate setup the way our team does,
