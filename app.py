@@ -384,6 +384,14 @@ if submitted:
     try:
         _run_pipeline()
     except Exception as e:
+        from fetch_account_data import AccountAccessError
+        if isinstance(e, AccountAccessError):
+            # We cannot see this account AT ALL - wrong CID or not linked under the MCC.
+            # Stop with a clear message; running on would fabricate a deck from no data.
+            progress_bar.empty()
+            status_box.empty()
+            st.error(f"🔒 {e}")
+            st.stop()
         if _is_transient(e):
             # Friendly countdown, then one automatic retry
             progress_bar.empty()

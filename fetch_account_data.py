@@ -51,6 +51,18 @@ def build_client(creds):
     return GoogleAdsClient.load_from_dict(config, version="v21")
 
 
+class AccountAccessError(Exception):
+    """The API rejected access to this customer ID (not linked under the MCC, a typo in
+    the CID, or a cancelled account). Raised so the audit STOPS with a clear message -
+    swallowing it would 'audit' an empty dataset and produce a confidently wrong deck
+    ('tracking is not set up', 'no active campaigns') for a perfectly healthy account."""
+
+
+# Error signatures that mean "we cannot see this account at all" (vs a bad query).
+_ACCESS_ERROR_MARKS = ("USER_PERMISSION_DENIED", "CUSTOMER_NOT_FOUND", "NOT_ADS_USER",
+                       "CUSTOMER_NOT_ENABLED")
+
+
 def run_query(client, customer_id, gaql):
     service = client.get_service("GoogleAdsService")
     request = client.get_type("SearchGoogleAdsRequest")
@@ -61,6 +73,12 @@ def run_query(client, customer_id, gaql):
         for row in service.search(request=request):
             rows.append(row)
     except GoogleAdsException as ex:
+        if any(mark in str(ex) for mark in _ACCESS_ERROR_MARKS):
+            raise AccountAccessError(
+                f"Google Ads denied access to account {customer_id}. Double-check the CID, "
+                "and confirm the account is linked under the agency MCC (539-263-1535). "
+                "No audit was produced - auditing without data would give false findings."
+            ) from ex
         print(f"  [ERROR] Query failed for {customer_id}: {ex}")
     return rows
 
