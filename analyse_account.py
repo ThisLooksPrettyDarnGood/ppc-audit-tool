@@ -15,6 +15,16 @@ APPROVED_AAR_TYPES = {
     "OPTIMIZE_AD_ROTATION",                 # "Use optimised ad rotation"
 }
 
+# AAR types that change BIDDING or TARGETING by themselves - the team's view (and the
+# human decks') is these should never sit quietly enabled: a bid-strategy switch or new
+# broad-match keywords applied without sign-off can reshape an account overnight.
+RISKY_AAR_TYPES = {
+    "MAXIMIZE_CLICKS_OPT_IN", "MAXIMIZE_CONVERSIONS_OPT_IN",
+    "MAXIMIZE_CONVERSION_VALUE_OPT_IN", "TARGET_CPA_OPT_IN", "TARGET_ROAS_OPT_IN",
+    "ENHANCED_CPC_OPT_IN", "USE_BROAD_MATCH_KEYWORD", "KEYWORD_MATCH_TYPE",
+    "DISPLAY_EXPANSION_OPT_IN", "SEARCH_PARTNERS_OPT_IN",
+}
+
 # Friendly labels for the client-facing slide (prettify unknowns automatically).
 # Enum names confirmed from the official RecommendationType reference.
 AAR_LABELS = {
@@ -42,7 +52,13 @@ def _aar_label(t: str) -> str:
 
 def detect_account_type(data):
     """
-    Infer whether this is a lead gen or eCommerce account from conversion action categories.
+    Infer whether this is a lead gen or eCommerce account. Decide by where the
+    AD-ATTRIBUTED conversions actually sit rather than by which action types merely
+    exist: a retailer almost always has a contact or newsletter action lying around,
+    and existence-based logic labelled a 13x-ROAS Shopping account 'lead_gen'
+    (Powertool, June 2026). Purchases get a 2x weight because a store's purchase
+    count is naturally lower than its enquiry-style event count. Falls back to the
+    existence test when nothing has recorded recently.
     Returns 'ecommerce', 'lead_gen', or 'unknown'.
     """
     conversion_actions = data.get("conversion_actions", [])
@@ -51,19 +67,35 @@ def detect_account_type(data):
         "LEAD", "CONTACT", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT",
         "REQUEST_QUOTE", "SIGNUP", "PHONE_CALL_LEAD", "IMPORTED_LEAD",
     }
-    has_purchase = any(
-        ca.get("category", "") in ecommerce_categories
-        for ca in conversion_actions
-    )
-    has_lead = any(
-        ca.get("category", "") in lead_gen_categories
-        for ca in conversion_actions
-    )
+
+    def _vol(ca):
+        v = ca.get("attributed_conversions_30d")
+        if v is None:
+            v = ca.get("conversions_30d")
+        return v or 0
+
+    purchase_vol = sum(_vol(ca) for ca in conversion_actions
+                       if ca.get("category", "") in ecommerce_categories)
+    lead_vol = sum(_vol(ca) for ca in conversion_actions
+                   if ca.get("category", "") in lead_gen_categories)
+    if purchase_vol or lead_vol:
+        return "ecommerce" if purchase_vol * 2 >= lead_vol else "lead_gen"
+
+    has_purchase = any(ca.get("category", "") in ecommerce_categories
+                       for ca in conversion_actions)
+    has_lead = any(ca.get("category", "") in lead_gen_categories
+                   for ca in conversion_actions)
     if has_purchase and not has_lead:
         return "ecommerce"
     if has_lead:
         return "lead_gen"
     return "unknown"
+
+
+def _app_only(data):
+    """True when every ENABLED campaign is an App campaign (MULTI_CHANNEL)."""
+    enabled = [c for c in data.get("campaigns", []) if c.get("status") == "ENABLED"]
+    return bool(enabled) and all(c.get("type") == "MULTI_CHANNEL" for c in enabled)
 
 
 def parse_competitors_from_questionnaire(text):
@@ -120,6 +152,36 @@ def analyse_account(data, raw_questionnaire=""):
         "account_type":        account_type,
         "performance_summary": data.get("performance_summary", {}),
     }
+
+    # ── App-only accounts (Dan's call, 10 June 2026): don't build full App support.
+    # Most checks here are built for Search/Shopping/PMax and either can't see App
+    # campaigns or actively misfire (recommending extensions App campaigns can't have,
+    # keyword checks with no keywords). Mute the misfires and tell the auditor plainly.
+    if _app_only(data):
+        findings["app_only"] = True
+        _APP_MUTED = ("missing high-value extension types", "keyword click",
+                      "come from Broad Match", "come from Exact Match", "Exact Match only",
+                      "No Exact Match keyword clicks", "keyword spend is on Broad Match",
+                      "looks well-structured", "No Search or Performance Max",
+                      # OCI wording is lead-gen/web framed; app conversion depth (in-app
+                      # events, Firebase) is covered by the manual-review banner instead.
+                      "offline conversion imports (OCI)")
+        for _sec in ("targeting_keywords", "efficiency", "account_structure", "conversion_tracking"):
+            _d = findings.get(_sec) or {}
+            if _d.get("issues"):
+                _d["issues"] = [i for i in _d["issues"]
+                                if not any(n in i for n in _APP_MUTED)]
+        findings["account_structure"].setdefault("issues", []).insert(0,
+            "This account runs Google App campaigns only. Most of this audit's checks are built "
+            "for Search, Shopping and Performance Max, so they have limited visibility into App "
+            "campaign performance, and some standard recommendations do not apply (App campaigns "
+            "choose their own placements and assets automatically). Full App campaign support is "
+            "coming in a future update of this tool. For now treat this report as partial and "
+            "review the App campaigns manually - especially in-app conversion depth, in-app "
+            "action value bidding, creative variety and audience signals.")
+        if findings["account_structure"].get("rag") == "green":
+            findings["account_structure"]["rag"] = "amber"
+
     return findings
 
 
@@ -176,16 +238,20 @@ _ISSUE_SIGNATURES = [
     ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries (high-value "dropped ball")
     ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
     ("targeting the whole UK",                     55, "amber",     "Targeting & Keywords"),
+    ("A minor point on ad strength",               30, "amber",     "Targeting & Keywords"),  # weak RSAs, trivial spend -> Observations
     ("responsive search ads are rated",            54, "amber",     "Targeting & Keywords"),  # RSA ad strength
     ("of keyword clicks come from Broad Match",    58, "amber",     "Targeting & Keywords"),
     ("of keyword spend is on Broad Match",         57, "amber",     "Targeting & Keywords"),
     ("negative keywords applied across",           50, "amber",     "Targeting & Keywords"),
     ("Exact Match only",                           45, "amber",     "Targeting & Keywords"),
+    ("come from Exact Match",                      44, "amber",     "Targeting & Keywords"),  # majority-exact volume restriction
     ("No Exact Match keyword clicks",              44, "amber",     "Targeting & Keywords"),
     ("No keyword click data",                      48, "amber",     "Targeting & Keywords"),
     ("CTR is",                                     40, "amber",     "Targeting & Keywords"),
     # Conversion tracking (amber)
     ("offline conversion imports (OCI)",           70, "amber",     "Conversion Tracking"),  # the elephant (lead gen) - paramount
+    ("Revenue feedback loop",                      64, "amber",     "Conversion Tracking"),  # the ecommerce OCI equivalent
+    ("appear set up but have recorded nothing",    58, "amber",     "Conversion Tracking"),  # dead genuine action (broken tag)
     ("imported from GA4",                          56, "amber",     "Conversion Tracking"),
     ("still use last-click attribution",           50, "amber",     "Conversion Tracking"),
     ("being picked up by non-brand campaigns",     48, "amber",     "Targeting & Keywords"),  # brand leakage
@@ -200,6 +266,8 @@ _ISSUE_SIGNATURES = [
     ("No Search or Performance Max",               50, "amber",     "Account Structure"),
     ("split across",                               48, "amber",     "Account Structure"),  # budget too thin
     ("smart bidding cannot learn",                 50, "amber",     "Account Structure"),
+    ("change bidding and targeting automatically", 62, "amber",     "Account Structure"),  # risky auto-applies (bid/targeting)
+    ("runs Google App campaigns only",             85, "amber",     "Account Structure"),  # App-only banner - leads the deck
     ("Auto-Apply is enabled for:",                 32, "amber",     "Account Structure"),
     ("Auto-Apply Recommendations are enabled",     30, "amber",     "Account Structure"),
 ]
@@ -765,6 +833,44 @@ def score_conversion_tracking(data):
             )
             if rag == "green":
                 rag = "amber"
+        elif not has_oci and detect_account_type(data) == "ecommerce":
+            # The ecommerce equivalent of the OCI elephant: orders are tracked, but what
+            # they were WORTH after the click (margin, returns, new-vs-returning) is not
+            # fed back, so value bidding steers on top-line order value only.
+            issues.append(
+                "Revenue feedback loop: conversion tracking records orders, but we could not find any "
+                "offline or enhanced revenue import feeding back what those orders were worth AFTER the "
+                "click - actual margin, returns and cancellations, or new-versus-returning customer "
+                "value. Importing true order outcomes (even a periodic spreadsheet upload) lets smart "
+                "bidding optimise towards profit rather than top-line order value, which matters most "
+                "when target-ROAS bidding is steering spend."
+            )
+            if rag == "green":
+                rag = "amber"
+
+        # A genuine lead/purchase action that is ENABLED and PRIMARY but has recorded
+        # ~nothing across 12 months looks like broken tracking (e.g. a 'Book an
+        # Appointment' tag that never fires). Only fires when the account as a whole
+        # IS recording - so it's the action that's dead, not the account. SIGNUP and
+        # CONTACT are deliberately excluded (often legitimately dormant).
+        _monthly = data.get("conversion_volume_by_month") or {}
+        if _monthly and sum(sum(s.values()) for s in _monthly.values()) >= 20:
+            _GENUINE_CATS = {"PURCHASE", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT",
+                             "REQUEST_QUOTE", "PHONE_CALL_LEAD", "LEAD", "IMPORTED_LEAD"}
+            _dead = [ca for ca in primary_actions
+                     if ca.get("category") in _GENUINE_CATS
+                     and sum((_monthly.get(ca.get("name")) or {}).values()) < 1]
+            if _dead:
+                _dnames = ", ".join(f"'{ca.get('name')}'" for ca in _dead[:3])
+                issues.append(
+                    f"{len(_dead)} genuine conversion action(s) appear set up but have recorded nothing "
+                    f"in the last 12 months: {_dnames}. The rest of the account records conversions "
+                    "fine, so if customers do convert this way the tag is likely broken or misfiring - "
+                    "worth a manual test conversion to confirm. (If the action was only created "
+                    "recently, this is expected and can be ignored.)"
+                )
+                if rag == "green":
+                    rag = "amber"
 
     # Campaigns spending with zero conversions. Skip awareness-style campaigns  - 
     # Display / Video / Demand Gen are often run for reach, so zero conversions is
@@ -937,8 +1043,26 @@ def score_account_structure(data):
                         if str(t).upper() not in ("UNKNOWN", "UNSPECIFIED")]
     if auto_apply_types:
         labelled = ", ".join(_aar_label(t) for t in auto_apply_types)
-        non_approved = [t for t in auto_apply_types if t not in APPROVED_AAR_TYPES]
-        if non_approved:
+        risky = [t for t in auto_apply_types if t in RISKY_AAR_TYPES]
+        non_approved = [t for t in auto_apply_types
+                        if t not in APPROVED_AAR_TYPES and t not in RISKY_AAR_TYPES]
+        if risky:
+            # Bid-strategy / targeting changes applied automatically are never "fine to
+            # leave" - the human decks lead with this, and the team's approved list
+            # (Max's red boxes) contains none of these. Name them and escalate.
+            risky_labelled = ", ".join(_aar_label(t) for t in risky)
+            other_note = (f" (alongside lower-risk types: {', '.join(_aar_label(t) for t in non_approved)})"
+                          if non_approved else "")
+            issues.append(
+                f"Google is allowed to change bidding and targeting automatically: Auto-Apply is "
+                f"switched on for {risky_labelled}{other_note}. These types can switch a campaign's "
+                "bid strategy or alter keywords and reach without anyone signing it off, based on "
+                "Google's recommendations rather than your strategy. Most accounts are better with "
+                "these off, applying such changes deliberately after review."
+            )
+            if rag == "green":
+                rag = "amber"
+        elif non_approved:
             # Name exactly what's enabled (self-documents on the deck) and invite review.
             # INFORMATIONAL ONLY  -  we do NOT escalate the RAG here: whether a given
             # auto-apply type is acceptable is a human judgement we can't make from here,
@@ -1045,6 +1169,16 @@ def score_targeting_keywords(data):
             issues.append(
                 f"{exact_pct:.0%} of clicks come from Exact Match only  -  no Phrase or Broad match active. "
                 "This restricts search volume and limits growth. Consider adding Phrase Match keywords."
+            )
+            if rag == "green":
+                rag = "amber"
+        elif exact_pct >= 0.7:
+            # Majority-exact accounts are volume-restricted too, even with a few phrase/broad
+            # clicks present - the human decks flag "majority Exact Match" (Maitri, HGV Med).
+            issues.append(
+                f"{exact_pct:.0%} of keyword clicks come from Exact Match. Exact match gives control "
+                "but restricts search volume - the account may be missing demand that Phrase Match "
+                "keywords (paired with good negatives) would capture. Consider widening the proven themes."
             )
             if rag == "green":
                 rag = "amber"
@@ -1443,12 +1577,23 @@ def score_targeting_keywords(data):
             # Show the weak-ad spend as a share of total spend so it's easy to weigh.
             total_spend = (data.get("account_summary_30d", {}) or {}).get("spend", 0) or 0
             pct = f" - around {round(rsa_low_spend / total_spend * 100)}% of total account spend" if total_spend else ""
-            issues.append(
-                f"{rsa_low} of {rsa_total} live responsive search ads are rated Poor or Average "
-                f"ad strength, carrying about £{rsa_low_spend:,.0f} of spend{pct}.{eg} "
-                "Ad strength reflects how distinct and relevant the headlines and descriptions are - "
-                "improving it tends to lift CTR and Quality Score."
-            )
+            # Severity follows the money: weak ads carrying under 5% of account spend are a
+            # tidy-up, not a slide (Powertool: a "£0 of spend" RSA point made the main deck).
+            _share = (rsa_low_spend / total_spend) if total_spend else None
+            if _share is not None and _share < 0.05:
+                issues.append(
+                    f"A minor point on ad strength: {rsa_low} of {rsa_total} live responsive search "
+                    f"ads are rated Poor or Average, but they carry only about £{rsa_low_spend:,.0f} "
+                    f"of spend{pct}, so the commercial impact is small. Worth tidying when convenient "
+                    "rather than as a priority."
+                )
+            else:
+                issues.append(
+                    f"{rsa_low} of {rsa_total} live responsive search ads are rated Poor or Average "
+                    f"ad strength, carrying about £{rsa_low_spend:,.0f} of spend{pct}.{eg} "
+                    "Ad strength reflects how distinct and relevant the headlines and descriptions are - "
+                    "improving it tends to lift CTR and Quality Score."
+                )
             if rag == "green":
                 rag = "amber"
 

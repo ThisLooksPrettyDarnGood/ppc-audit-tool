@@ -287,6 +287,13 @@ if submitted:
         from analyse_account import analyse_account
         findings = analyse_account(account_data, raw_questionnaire=raw_questionnaire.strip())
         findings["account_cid"] = cid_clean
+        if findings.get("app_only"):
+            st.warning(
+                "📱 This is an App-campaign account. The tool's checks are built for Search, "
+                "Shopping and Performance Max, so this deck will be PARTIAL - full App support "
+                "is coming in a future update. Please review the App campaigns manually before "
+                "sending anything to the client."
+            )
 
         # ── Step 3: generate narrative ────────────────────────────────────
         update("Writing audit narrative with GPT-5.5…", 55)
