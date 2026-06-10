@@ -174,6 +174,25 @@ def get_conversion_volume_by_month(client, cid):
     return series
 
 
+def get_conversion_tracking_setting(client, cid):
+    """
+    Account-level conversion tracking settings. enhanced_conversions_for_leads_enabled
+    is the API-visible half of Enhanced Conversions (the web/purchase side lives in the
+    tag config and is NOT exposed, so we never claim anything about it). Caller wraps.
+    """
+    gaql = """
+        SELECT customer.conversion_tracking_setting.enhanced_conversions_for_leads_enabled,
+               customer.conversion_tracking_setting.accepted_customer_data_terms
+        FROM customer
+    """
+    rows = run_query(client, cid, gaql)
+    for row in rows:
+        s = row.customer.conversion_tracking_setting
+        return {"ec_for_leads": bool(s.enhanced_conversions_for_leads_enabled),
+                "accepted_customer_data_terms": bool(s.accepted_customer_data_terms)}
+    return {}
+
+
 def get_campaigns(client, cid):
     gaql = """
         SELECT
@@ -1177,6 +1196,13 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (per-action volume query failed: {e})")
         # leave conversions_30d unset → analyser treats volume as unknown (cautious wording)
 
+    print("  → Conversion tracking settings (Enhanced Conversions for leads)...")
+    conversion_tracking_setting = {}
+    try:
+        conversion_tracking_setting = get_conversion_tracking_setting(client, cid)
+    except Exception as e:
+        print(f"    (tracking-setting query failed: {e})")
+
     print("  → Conversion volume by month (12m, tracking-change check)...")
     conversion_volume_by_month = {}
     try:
@@ -1396,6 +1422,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "product_overlap": product_overlap,
         "ad_groups": ad_groups,
         "conversion_actions": conversion_actions,
+        "conversion_tracking_setting": conversion_tracking_setting,
         "conversion_volume_by_month": conversion_volume_by_month,
         "keyword_match_breakdown": keyword_match_breakdown,
         "top_search_terms": top_search_terms,

@@ -262,6 +262,7 @@ _ISSUE_SIGNATURES = [
     ("offline conversion imports (OCI)",           70, "amber",     "Conversion Tracking"),  # the elephant (lead gen) - paramount
     ("Revenue feedback loop",                      64, "amber",     "Conversion Tracking"),  # the ecommerce OCI equivalent
     ("appear set up but have recorded nothing",    58, "amber",     "Conversion Tracking"),  # dead genuine action (broken tag)
+    ("Enhanced conversions for leads is not enabled", 50, "amber",  "Conversion Tracking"),  # EC-for-leads off (API-visible half)
     ("imported from GA4",                          56, "amber",     "Conversion Tracking"),
     ("still use last-click attribution",           50, "amber",     "Conversion Tracking"),
     ("being picked up by non-brand campaigns",     48, "amber",     "Targeting & Keywords"),  # brand leakage
@@ -854,6 +855,22 @@ def score_conversion_tracking(data):
                 "value. Importing true order outcomes (even a periodic spreadsheet upload) lets smart "
                 "bidding optimise towards profit rather than top-line order value, which matters most "
                 "when target-ROAS bidding is steering spend."
+            )
+            if rag == "green":
+                rag = "amber"
+
+        # Enhanced Conversions for LEADS (the API-visible half of EC - the web/purchase
+        # side lives in the tag and is not exposed, so we say nothing about it). A
+        # lead-gen account with this off is leaving measurement accuracy on the table.
+        _cts = data.get("conversion_tracking_setting") or {}
+        if (_cts and not _cts.get("ec_for_leads")
+                and detect_account_type(data) in ("lead_gen", "mixed", "unknown")):
+            issues.append(
+                "Enhanced conversions for leads is not enabled at account level. It sends securely "
+                "hashed first-party data (the email or phone number a lead submits) alongside the "
+                "conversion, recovering conversions that cookies alone now miss and sharpening what "
+                "smart bidding learns from. It is a settings-level switch plus a tag tweak - low "
+                "effort for a measurable accuracy gain."
             )
             if rag == "green":
                 rag = "amber"
