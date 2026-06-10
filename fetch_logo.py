@@ -5,22 +5,26 @@ Download a crisp client logo from their website and return raw bytes + content t
 
 The job is a SHARP brand logo for slide 1, not just "any image". A 32px favicon scaled
 up to fill the logo box looks blurry (Dan scored that 30/100), so we:
-  • read each candidate's real pixel size from its header (no extra dependency), and
-  • reject anything too small to look crisp, keeping the largest seen as a fallback.
+  • read each candidate's real pixel size from its header (no extra dependency),
+  • reject anything too small to look crisp, keeping the largest seen as a fallback, and
+  • rasterise SVG logos (the only real logo on many modern sites) to a crisp PNG, recolouring
+    pure-white logos to dark so they show on the white logo box.
 
 Candidate priority (best brand-logo signal first):
-  TRUSTED on-page (a clean logo, any aspect ratio):
-    1. <img> whose src/alt says "logo"          — the actual site logo, named as such
-    2. First <img> inside <header> / <nav>      — almost always the logo
+  TRUSTED on-page (the site's OWN clean logo, any aspect ratio):
+    1. First <img> inside <header> / <nav>      — most reliable spot for the site's own logo
+    2. <img> whose src/alt says "logo" AND carries the site's brand token
     3. apple-touch-icon                          — clean square, usually 180px+
     4. Largest sized <link rel="icon">
-  Then Google favicon service (sz=256)           — serves the site's best square icon; clean
-  LOOSE on-page (only if nothing better):
-    5. og:image                                  — often a wide social *banner*, not a logo
-    6. First few <img> in document order
+  Then Google favicon service (sz=256)           — always the site's own icon, up to 256px
+  LOW-PRIORITY (only if nothing better):
+    5. other "logo"-named imgs                   — may be third-party partner logos
+    6. og:image                                  — often a wide social *banner*, not a logo
+    7. First few <img> in document order
 
-(Clearbit's public logo API was sunset by HubSpot - logo.clearbit.com no longer resolves -
-so it's deliberately not used.)
+SVG logos are rasterised with PyMuPDF (a self-contained wheel - no system libraries - so it
+works on Streamlit Cloud from requirements.txt alone). If PyMuPDF is missing it degrades
+gracefully to the raster path. (Clearbit's public logo API was sunset by HubSpot, so unused.)
 
 Returns (bytes, content_type) or (None, None) if nothing usable found.
 """
@@ -106,6 +110,57 @@ def _download(url: str) -> tuple[bytes | None, str | None, int]:
     return None, None, 0
 
 
+_SVG_TARGET_W = 600        # render width; vector stays crisp at any size
+_SVG_MAX_SIDE = 2000       # clamp so a pathological viewBox can't explode the render
+_WHITE_FILLS = {"white", "#fff", "#ffffff"}
+
+
+def _recolour_white_svg(svg: str) -> str:
+    """Many brand logos are pure-white SVGs built for a dark site header (IB Masters is one).
+    On slide 1's white logo box a white logo is invisible, so if EVERY explicit fill is white
+    we recolour them to a dark neutral. Mixed/colour logos are left untouched."""
+    fills = re.findall(r'fill\s*=\s*["\']([^"\']+)["\']', svg, re.IGNORECASE)
+    explicit = [f.strip().lower() for f in fills if f.strip().lower() not in ("none", "")]
+    if explicit and all(f in _WHITE_FILLS for f in explicit):
+        svg = re.sub(r'(fill\s*=\s*["\'])(white|#fff|#ffffff)(["\'])',
+                     r'\g<1>#1a1a1a\g<3>', svg, flags=re.IGNORECASE)
+    return svg
+
+
+def _rasterise_svg(svg_bytes: bytes) -> bytes | None:
+    """Rasterise an SVG logo to a crisp PNG via PyMuPDF (self-contained wheel, no system
+    libs - so it works on Streamlit Cloud from requirements.txt alone). Returns PNG bytes
+    on a white background, or None if PyMuPDF is unavailable or rendering fails. Wrapped so a
+    missing dependency degrades gracefully to the raster-logo path."""
+    try:
+        import fitz  # PyMuPDF
+        svg = svg_bytes.decode("utf-8", "ignore")
+        svg = _recolour_white_svg(svg)
+        doc = fitz.open(stream=svg.encode("utf-8"), filetype="svg")
+        page = doc[0]
+        w = page.rect.width or _SVG_TARGET_W
+        zoom = max(1.0, min(_SVG_TARGET_W / w, _SVG_MAX_SIDE / max(page.rect.height, 1)))
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        png = pix.tobytes("png")
+        return png if 100 < len(png) <= MAX_LOGO_BYTES else None
+    except Exception:
+        return None
+
+
+def _try_svg(url: str) -> tuple[bytes | None, str | None]:
+    """Fetch an SVG candidate and rasterise it. Returns (png_bytes, 'image/png') or (None, None)."""
+    try:
+        r = requests.get(url, timeout=TIMEOUT, headers=HEADERS, allow_redirects=True)
+        ct = r.headers.get("Content-Type", "").lower()
+        if r.status_code == 200 and ("svg" in ct or url.lower().split("?")[0].endswith(".svg")):
+            png = _rasterise_svg(r.content)
+            if png:
+                return png, "image/png"
+    except Exception:
+        pass
+    return None, None
+
+
 def fetch_logo_bytes(website_url: str) -> tuple[bytes, str] | tuple[None, None]:
     """Returns (image_bytes, content_type) or (None, None)."""
     root = _parse_root(website_url)
@@ -121,21 +176,20 @@ def fetch_logo_bytes(website_url: str) -> tuple[bytes, str] | tuple[None, None]:
         pass
 
     domain = urlparse(root).netloc
-    trusted: list[str] = []   # clean logos, any aspect ratio
-    loose: list[str] = []     # og:image banners and stray imgs - only if nothing better
+    # Brand token from the domain (e.g. 'ibmasters', 'notion') - used to tell the site's OWN
+    # logo apart from third-party logos embedded on the page.
+    brand_token = domain.lower()
+    if brand_token.startswith("www."):
+        brand_token = brand_token[4:]
+    brand_token = brand_token.split(".")[0]
+
+    trusted: list[str] = []     # clean OWN-brand logos, any aspect ratio
+    logo_other: list[str] = []  # 'logo'-named imgs that aren't clearly the site's own brand
+    loose: list[str] = []       # og:image banners and stray imgs - only if nothing better
 
     if html:
-        # 1. Any <img> whose src URL or alt contains "logo" - strongest brand-logo signal
-        logo_imgs = re.findall(
-            r'<img[^>]+(?:src=["\']([^"\']*logo[^"\']*)["\']|alt=["\'][^"\']*logo[^"\']*["\'][^>]+src=["\']([^"\']+)["\'])',
-            html, re.IGNORECASE,
-        )
-        for groups in logo_imgs[:3]:
-            img_url = groups[0] or groups[1]
-            if img_url:
-                trusted.append(urljoin(root, img_url))
-
-        # 2. First <img> inside <header> or <nav>
+        # 1. First <img> inside <header> or <nav> - the most reliable spot for a site's OWN
+        #    logo. (A marketing page's "trusted by" partner logos live lower in the body.)
         for container_tag in ("header", "nav"):
             m = re.search(
                 rf'<{container_tag}[^>]*>(.*?)</{container_tag}>',
@@ -146,6 +200,24 @@ def fetch_logo_bytes(website_url: str) -> tuple[bytes, str] | tuple[None, None]:
                 if img:
                     trusted.append(urljoin(root, img.group(1)))
                     break
+
+        # 2. <img> whose src/alt contains "logo". Split by brand: one carrying the site's own
+        #    brand token is trusted; the rest (often third-party partner logos, e.g. a Vercel /
+        #    Figma "customers" strip) drop to a low-priority tier so they can never beat the
+        #    site's own clean icon.
+        logo_imgs = re.findall(
+            r'<img[^>]+(?:src=["\']([^"\']*logo[^"\']*)["\']|alt=["\'][^"\']*logo[^"\']*["\'][^>]+src=["\']([^"\']+)["\'])',
+            html, re.IGNORECASE,
+        )
+        for groups in logo_imgs[:5]:
+            img_url = groups[0] or groups[1]
+            if not img_url:
+                continue
+            full = urljoin(root, img_url)
+            if len(brand_token) >= 3 and brand_token in full.lower():
+                trusted.append(full)
+            else:
+                logo_other.append(full)
 
         # 3. Apple touch icon - clean square, usually 180px+
         m = re.search(
@@ -195,7 +267,9 @@ def fetch_logo_bytes(website_url: str) -> tuple[bytes, str] | tuple[None, None]:
     # Google's favicon service serves the site's best square icon (up to 256px) and always
     # resolves - a cleaner logo-box fill than an og:image banner, so it sits above the loose set.
     google_fav = f"https://www.google.com/s2/favicons?domain={domain}&sz=256"
-    ordered = trusted + [google_fav] + loose
+    # Own-brand candidates first, then the always-own-brand favicon, then the riskier
+    # 'logo'-named third-party imgs, then banners/stray imgs.
+    ordered = trusted + [google_fav] + logo_other + loose
 
     # Take the first candidate that's crisp enough; if none clear the bar, keep the largest
     # seen so we never fail outright on a logo-only site.
@@ -205,6 +279,14 @@ def fetch_logo_bytes(website_url: str) -> tuple[bytes, str] | tuple[None, None]:
         if url in seen:
             continue
         seen.add(url)
+        # SVG candidate (often the only true brand logo): rasterise it. A vector render is
+        # always crisp, so a success wins immediately - this is what gets the real wordmark
+        # onto slide 1 instead of falling back to a tiny favicon.
+        if url.lower().split("?")[0].endswith(".svg"):
+            svg_png, svg_ct = _try_svg(url)
+            if svg_png:
+                return svg_png, svg_ct
+            continue
         data, ct, min_side = _download(url)
         if not data:
             continue
