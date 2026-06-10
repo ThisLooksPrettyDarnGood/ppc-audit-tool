@@ -127,6 +127,35 @@ def get_conversion_action_volume(client, cid):
     return vol
 
 
+def get_conversion_volume_by_month(client, cid):
+    """
+    Monthly AD-ATTRIBUTED conversions per conversion action over the last 12 months.
+    Used to detect a mid-window tracking change: if the action doing the counting today
+    only began recording partway through the window (or a previously dominant action
+    stopped), the 12-month totals mix two measurement setups, so the 30-day-vs-12-month
+    comparison is not like-for-like. Segmented historical stats still include actions
+    that have since been removed, which is exactly what makes the before/after visible.
+    Returns {action_name: {"YYYY-MM": conversions}}. Caller wraps in try/except.
+    """
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    start = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    end = today.strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT segments.month, segments.conversion_action_name, metrics.conversions
+        FROM customer
+        WHERE segments.date BETWEEN '{start}' AND '{end}'
+    """
+    rows = run_query(client, cid, gaql)
+    series = {}
+    for row in rows:
+        name = row.segments.conversion_action_name
+        month = str(row.segments.month)[:7]   # '2025-11-01' -> '2025-11'
+        d = series.setdefault(name, {})
+        d[month] = d.get(month, 0.0) + row.metrics.conversions
+    return series
+
+
 def get_campaigns(client, cid):
     gaql = """
         SELECT
@@ -1068,6 +1097,15 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (per-action volume query failed: {e})")
         # leave conversions_30d unset → analyser treats volume as unknown (cautious wording)
 
+    print("  → Conversion volume by month (12m, tracking-change check)...")
+    conversion_volume_by_month = {}
+    try:
+        conversion_volume_by_month = get_conversion_volume_by_month(client, cid)
+        print(f"    {len(conversion_volume_by_month)} action(s) with monthly history")
+    except Exception as e:
+        print(f"    (monthly volume query failed: {e})")
+        # leave empty → analyser skips the tracking-change check (cautious default)
+
     print("  → Campaigns...")
     campaigns = get_campaigns(client, cid)
 
@@ -1265,6 +1303,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "max_clicks_costly_terms": max_clicks_costly_terms,
         "ad_groups": ad_groups,
         "conversion_actions": conversion_actions,
+        "conversion_volume_by_month": conversion_volume_by_month,
         "keyword_match_breakdown": keyword_match_breakdown,
         "top_search_terms": top_search_terms,
         "priciest_clicks": priciest_clicks,

@@ -1073,6 +1073,17 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
             "whole sits in the red. Close on a crisp line such as 'The parts are amber; the whole is "
             "red.' Do not exaggerate beyond the figures given."
         )
+        # If tracking changed mid-window, the CPA rise is partly a measurement artefact
+        # (e.g. an action stopped recording), so the escalation must say so - the deck
+        # must never state a hard "costs tripled" the perf slide then walks back.
+        _tc_esc = (findings.get("conversion_tracking", {}) or {}).get("tracking_change") or {}
+        if _tc_esc.get("changed"):
+            _escalation_note += (
+                f" HOWEVER, conversion tracking changed around {_tc_esc.get('month')} "
+                f"({_tc_esc.get('detail')}), so part of the apparent CPA rise may reflect the "
+                "measurement change rather than performance alone. Say this in the same breath: "
+                "the account still sits in the red on the evidence, but the size of the rise "
+                "cannot be read at face value until tracking has settled.")
 
     print("  → Generating Executive Summary...")
     exec_sum = _retry(
@@ -1112,6 +1123,18 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                             "performance is 'improving' or 'trending up'; instead state that the reported gain is "
                             "flattered by inflated conversion tracking and the true cost per genuine lead is "
                             "higher, and cannot be trusted until tracking is corrected and OCI is in place.")
+        # If conversion tracking CHANGED inside the 12-month window (the counting action was
+        # replaced or stopped partway through), the 12-month averages mix two measurement
+        # setups - so a 30d-vs-12m "trend" must never be presented as like-for-like.
+        _tc = (findings.get("conversion_tracking", {}) or {}).get("tracking_change") or {}
+        if _tc.get("changed"):
+            _conv_caveat += (
+                f"\nIMPORTANT: conversion tracking changed during the 12-month window, around {_tc.get('month')} "
+                f"({_tc.get('detail')}). The 12-month averages therefore mix two different measurement setups, so "
+                "the 30-day-vs-12-month comparison is NOT like-for-like. Do not present the trend (up or down) as "
+                "a clean improvement or decline; state plainly that tracking changed around that month, the periods "
+                "are measured differently, and the trend should be read with caution until a full period under the "
+                "current setup is available.")
         perf_commentary = _retry(
             lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat),
             "Performance Commentary"

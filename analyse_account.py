@@ -407,6 +407,67 @@ def overall_rag_from_issues(issues):
 # SECTION 1: CONVERSION TRACKING
 # ─────────────────────────────────────────────
 
+def detect_tracking_change(monthly):
+    """
+    Detect a conversion-tracking change INSIDE the 12-month window from the per-action
+    monthly ad-attributed series ({action: {"YYYY-MM": conversions}}). Two signals:
+      - a now-material action (>=15% of the last-3-months total, >=5 conversions) whose
+        first recording month is 3+ months into the window, while the account was already
+        recording conversions before it appeared (a setup change, not a new account); or
+      - a previously material action (>=15% of the earlier total, >=10 conversions) that
+        has recorded nothing in the last 3 months.
+    15% not 50%: the genuine action is often the MINORITY of recorded conversions
+    precisely because junk engagement actions dominate (IB: real form ~21% of recent).
+    Both guards keep tiny accounts and new accounts from false-flagging. Returns None,
+    or {"changed": True, "month": "November 2025", "detail": "..."} for the caveat.
+    """
+    if not monthly:
+        return None
+    all_months = sorted({m for s in monthly.values() for m in s})
+    if len(all_months) < 6:
+        return None   # window too short to call anything "mid-window"
+    month_totals = {m: sum(s.get(m, 0) for s in monthly.values()) for m in all_months}
+    if sum(month_totals.values()) < 20:
+        return None   # too little volume to infer a setup change
+    recent, earlier = all_months[-3:], all_months[:-3]
+    recent_total = sum(month_totals[m] for m in recent)
+    earlier_total = sum(month_totals[m] for m in earlier)
+
+    def _label(month_key):
+        from datetime import datetime as _dt
+        return _dt.strptime(month_key, "%Y-%m").strftime("%B %Y")
+
+    appeared, stopped = [], []
+    for name, series in monthly.items():
+        active = [m for m in all_months if series.get(m, 0) >= 1]
+        if not active:
+            continue
+        rec = sum(series.get(m, 0) for m in recent)
+        ear = sum(series.get(m, 0) for m in earlier)
+        first, last = active[0], active[-1]
+        idx = all_months.index(first)
+        pre_total = sum(month_totals[m] for m in all_months[:idx])
+        if (recent_total > 0 and rec >= 5 and rec / recent_total >= 0.15
+                and idx >= 3 and pre_total >= 10):
+            appeared.append((name, first, rec / recent_total))
+        if (earlier_total > 0 and ear >= 10 and ear / earlier_total >= 0.15
+                and rec < 1 and last not in recent):
+            stopped.append((name, last))
+    if not appeared and not stopped:
+        return None
+
+    parts = []
+    for name, first, share in sorted(appeared, key=lambda a: -a[2])[:2]:
+        parts.append(f"'{name}' (about {share:.0%} of recent conversions) only began "
+                     f"recording in {_label(first)}")
+    for name, last in stopped[:2]:
+        parts.append(f"'{name}' recorded conversions until {_label(last)}, then stopped")
+    # The change month: when the new counting action appeared, or just after the old one stopped.
+    change_month = (min(a[1] for a in appeared) if appeared
+                    else min(s[1] for s in stopped))
+    return {"changed": True, "month": _label(change_month), "detail": "; ".join(parts)}
+
+
 def score_conversion_tracking(data):
     issues = []
     rag = "green"
@@ -739,11 +800,21 @@ def score_conversion_tracking(data):
             f"set up and recording {total_conversions:.0f} conversions."
         )
 
+    # Mid-window tracking change (e.g. counting action replaced partway through the year):
+    # structured flag only - it drives the performance-commentary caveat so a 30d-vs-12m
+    # "trend" is never presented as like-for-like across two measurement setups.
+    tracking_change = None
+    try:
+        tracking_change = detect_tracking_change(data.get("conversion_volume_by_month") or {})
+    except Exception:
+        pass
+
     return {
         "rag": rag,
         "headline": _ct_headline(rag, total_conversions, len(conversion_actions)),
         "issues": issues,
         "conversions_inflated": conversions_inflated,
+        "tracking_change": tracking_change,
         "data_points": {
             "conversion_actions_count": len(conversion_actions),
             "total_conversions_30d": total_conversions,
