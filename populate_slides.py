@@ -270,6 +270,10 @@ def main():
     requests.append(replace("{{EXEC_BULLET_2}}",     exec_sum.get("bullet_2", "")))
     requests.append(replace("{{EXEC_BULLET_3}}",     exec_sum.get("bullet_3", "")))
     requests.append(replace("{{COMMERCIAL_IMPACT}}", exec_sum.get("commercial_impact", "")))
+    # Score-slide verdict (the "verdict in a breath" next to the dial). Falls back to the
+    # commercial impact if the model omitted it, so the slide is never left with a raw token.
+    requests.append(replace("{{SCORE_SUMMARY}}",
+                            exec_sum.get("score_summary") or exec_sum.get("commercial_impact", "")))
 
     # ── Performance Summary slide ──
     requests.append(replace("{{PERF_SPEND_30D}}",  perf.get("spend_30d",  "N/A")))

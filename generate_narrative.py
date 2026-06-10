@@ -441,14 +441,30 @@ REC3: <third recommendation>
 
 
 def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list,
-                                 escalation_note: str = "") -> dict:
+                                 escalation_note: str = "", overall_rag: str = "amber") -> dict:
     """Generates the Executive Summary slide content.
 
     escalation_note: when the overall rating was escalated to RED because efficiency
     collapsed (CPA roughly doubled+ vs the 12-month average), this carries a directive
     + the real figures so the Commercial Impact explicitly states the "parts are amber,
     whole is red" reasoning the client should hear out loud. Empty otherwise.
+
+    overall_rag: drives the tone of SCORE_SUMMARY (the short 'verdict in a breath' shown
+    next to the score dial on the Executive Summary & Score slide), so a red account reads
+    honest and a green one reads affirming.
     """
+    # Tone guidance for the score verdict, keyed off the finalised overall RAG.
+    _rag_tone = {
+        "red":       "The overall score is RED - the account has serious, costly inefficiencies. "
+                     "Be honest and direct about that, but constructive: frame it as a story about "
+                     "efficiency, not effort, and make clear the issues are fixable.",
+        "amber_red": "The overall score is on the RED side of amber - real problems are dragging "
+                     "performance down. Be candid and a little urgent, but constructive and fixable.",
+        "amber":     "The overall score is AMBER - solid foundations with clear room to improve. "
+                     "Be measured and balanced: genuine credit where due, honest about the gaps.",
+        "green":     "The overall score is GREEN - the account is in good shape. Be affirming, "
+                     "acknowledge what is working, and frame the rest as light-touch refinement.",
+    }.get(str(overall_rag).lower(), "The overall score is AMBER - balanced, honest about the gaps.")
 
     issues_detail = "\n".join(
         f"- {i.get('title','Issue')} ({i.get('rag','AMBER').upper()}):\n"
@@ -473,6 +489,7 @@ Rules:
 - If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK or STRANGLED by the issues - e.g. solid groundwork is being throttled while budget is capped on winning campaigns and leaks into non-converting searches. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - TERMINOLOGY: when referring to importing real lead outcomes (booked jobs / sales) back into Google Ads, name it "offline conversion import (OCI)" - not vague wording like "sales outcomes are not imported".
+- SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close on a forward-looking note (the sections that follow show where the gains are). {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human.
 - Use British English spelling.{escalation_note}
 
 Respond in EXACTLY this format (no extra text, no markdown):
@@ -481,6 +498,7 @@ BULLET_1: <specific key finding 1 with real details>
 BULLET_2: <specific key finding 2 with real details>
 BULLET_3: <specific key finding 3 with real details>
 COMMERCIAL_IMPACT: <specific commercial impact  -  1 - 2 sentences>
+SCORE_SUMMARY: <2 - 3 sentence plain-English verdict matching the overall score>
 """.strip()
 
     prompt += "\n\n" + EXEC_SUMMARY_EXAMPLE
@@ -504,6 +522,7 @@ COMMERCIAL_IMPACT: <specific commercial impact  -  1 - 2 sentences>
         "bullet_2":          lines.get("BULLET_2", ""),
         "bullet_3":          lines.get("BULLET_3", ""),
         "commercial_impact": lines.get("COMMERCIAL_IMPACT", ""),
+        "score_summary":     lines.get("SCORE_SUMMARY", ""),
     }
 
 
@@ -958,7 +977,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
 
     print("  → Generating Executive Summary...")
     exec_sum = _retry(
-        lambda: _narrative_executive_summary(client, findings, issues, _escalation_note),
+        lambda: _narrative_executive_summary(client, findings, issues, _escalation_note, overall_rag),
         "Executive Summary"
     )
 
