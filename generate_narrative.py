@@ -73,12 +73,14 @@ def _parse_response(raw: str) -> dict:
         lines.get("REC3", ""),
     ] if r]
 
-    # Build bullet strings for whats_happening and why_it_matters
-    wh_bullets = [lines.get("WHATS_HAPPENING_1", ""), lines.get("WHATS_HAPPENING_2", "")]
+    # Build bullet strings for whats_happening and why_it_matters. Most issues emit 2 "what's
+    # happening" bullets; the search-query-report breakdown emits more (one per misdirected term),
+    # so read up to 6 - backward compatible, since absent keys are simply skipped.
+    wh_bullets = [lines.get(f"WHATS_HAPPENING_{i}", "") for i in range(1, 7)]
     wh_bullets = [b for b in wh_bullets if b]
     whats_happening = "\n".join(f"• {b}" for b in wh_bullets)
 
-    wm_bullets = [lines.get("WHY_IT_MATTERS_1", ""), lines.get("WHY_IT_MATTERS_2", "")]
+    wm_bullets = [lines.get(f"WHY_IT_MATTERS_{i}", "") for i in range(1, 4)]
     wm_bullets = [b for b in wm_bullets if b]
     why_it_matters = "\n".join(f"• {b}" for b in wm_bullets)
 
@@ -409,6 +411,19 @@ REC1: <first recommendation>
 REC2: <second recommendation>
 REC3: <third recommendation>
 """.strip()
+
+    # Per-term breakdown mode (search-query-report / misdirected-terms finding): allow one
+    # "what's happening" bullet per term so each misdirected term gets its own start-middle-end
+    # line, instead of one long list. The format directive in the finding drives the content.
+    if "PER-TERM BREAKDOWN MODE" in issue.get("detail", ""):
+        prompt = prompt.replace(
+            "WHATS_HAPPENING_1: <first bullet  -  what is happening>\n"
+            "WHATS_HAPPENING_2: <second bullet  -  what is happening>",
+            "WHATS_HAPPENING_1: <frame the search-query-report review>\n"
+            "WHATS_HAPPENING_2: <misdirected term 1 - what it is + total spend>\n"
+            "WHATS_HAPPENING_3: <misdirected term 2 - what it is + total spend>\n"
+            "WHATS_HAPPENING_4: <misdirected term 3 - what it is + total spend>\n"
+            "WHATS_HAPPENING_5: <genuine-demand term(s) to add, or omit this line>")
 
     if ex_key:
         prompt += "\n\n" + example_block(EXAMPLES[ex_key])
@@ -856,6 +871,30 @@ def _sensecheck_terms(client: OpenAI, terms: list, business_context: str = "") -
         return ""
 
 
+def _classify_sensecheck(sc_text: str, term_dicts: list) -> list:
+    """Match each converting-term dict (term + conversions + total spend) to its sense-check line
+    and pull out the classification + 'what it is'. Returns dicts with term/conv/spend/what/cls.
+    Robust to hyphens in the description: we anchor on the known term and the classification word."""
+    out = []
+    sc_lines = [ln.strip() for ln in (sc_text or "").splitlines() if ln.strip()]
+    _CLS = ["GENUINE DEMAND", "MISDIRECTED", "COMPETITOR", "UNSURE"]
+    for d in term_dicts:
+        term = str(d.get("term", "")).strip()
+        if not term:
+            continue
+        line = next((ln for ln in sc_lines if term.lower() in ln.lower()), "")
+        cls = next((c for c in _CLS if c in line.upper()), "UNSURE")
+        what = line
+        # Strip the leading term and the trailing classification to leave the description.
+        what = re.sub(re.escape(term), "", what, count=1, flags=re.IGNORECASE)
+        for c in _CLS:
+            what = re.sub(re.escape(c), "", what, flags=re.IGNORECASE)
+        what = what.strip(" -–:•|").strip()
+        out.append({"term": term, "conversions": d.get("conversions", 0),
+                    "spend": d.get("spend", 0), "what": what, "cls": cls})
+    return out
+
+
 def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "", raw_questionnaire: str = "") -> dict:
     """
     Args:
@@ -890,7 +929,11 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     # vertical. Verified context is injected into those findings before they are narrated.
     _tk = findings.get("targeting_keywords", {}) or {}
     _comp_terms = [t.get("term") for t in _tk.get("competitor_terms", []) if t.get("term")]
-    _conv_terms = list(_tk.get("converting_terms", []) or [])
+    # Converting terms are now full dicts (term + conversions + total spend). Order by spend so
+    # the priciest (most worth naming) are the ones sense-checked within the 6-term budget.
+    _conv_dicts = sorted([d for d in (_tk.get("converting_terms") or []) if d.get("term")],
+                         key=lambda d: d.get("spend", 0) or 0, reverse=True)
+    _conv_terms = [d.get("term") for d in _conv_dicts]
     _fade_terms = list(_tk.get("fading_winner_terms", []) or [])
     _has_comp = any("look like competitor business names" in (i.get("detail") or "") for i in selected)
     _has_conv = any("are NOT added as active keywords" in (i.get("detail") or "") for i in selected)
@@ -905,16 +948,47 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         _sc = _sensecheck_terms(client, _terms_to_check, _bizctx)
         if _sc:
             _sc_line = _sc.replace(chr(10), " | ")
+            # Build a structured per-term breakdown for the search-query-report finding: each
+            # converting term tagged genuine vs misdirected, with its real numbers.
+            _classified = _classify_sensecheck(_sc, _conv_dicts)
+            _md = [c for c in _classified if c["cls"] in ("MISDIRECTED", "COMPETITOR") and c.get("what")]
+            _genuine = [c for c in _classified if c["cls"] == "GENUINE DEMAND"]
             for _iss in selected:
                 _d = _iss.get("detail") or ""
                 if "look like competitor business names" in _d:
                     _iss["detail"] += (" WEB SENSE-CHECK (verified - weave key facts in, naming what each term "
                                        "actually is): " + _sc_line)
                 elif "are NOT added as active keywords" in _d:
-                    _iss["detail"] += (" WEB SENSE-CHECK (verified): " + _sc_line + " Use this: recommend adding "
-                                       "ONLY the GENUINE DEMAND terms as keywords; for any MISDIRECTED term (a "
-                                       "different organisation or brand the searcher actually wants), do NOT "
-                                       "recommend adding it - say to add it as a negative keyword instead.")
+                    if _md:
+                        _md_facts = "; ".join(
+                            f"'{c['term']}' ({c['conversions']} recorded conversion"
+                            f"{'s' if c['conversions'] != 1 else ''}, about £{c['spend']:.0f} total) = {c['what']}"
+                            for c in _md[:4])
+                        _gen_facts = (", ".join(f"'{c['term']}'" for c in _genuine[:3])
+                                      if _genuine else "")
+                        _iss["detail"] += (
+                            " PER-TERM BREAKDOWN MODE. This finding is really about the search query report: "
+                            "terms that recorded conversions in the last 90 days but are not keywords. A web "
+                            "sense-check of each shows the priciest are MISDIRECTED - searches meant for other "
+                            "organisations, not this advertiser. Verified facts (use the EXACT numbers, do not "
+                            f"invent): {_md_facts}."
+                            + (f" GENUINE-DEMAND term(s) worth adding as keywords: {_gen_facts}." if _gen_facts
+                               else " No clearly genuine-demand terms stood out.")
+                            + " Structure WHAT'S HAPPENING as: bullet 1 frames the search-query-report review "
+                              "(how many terms converted but are not keywords, and that the priciest are "
+                              "misdirected); then ONE concise bullet per misdirected term naming what it ACTUALLY "
+                              "is and its total spend (about 16 words each); then, if any, one bullet listing the "
+                              "genuine-demand term(s) worth adding. WHY IT MATTERS: this spend buys clicks meant "
+                              "for other organisations, and because conversion tracking is inflated these recorded "
+                              "'conversions' are likely page activity, not enquiries; each is small but together "
+                              "they show the search query report is not being reviewed. RECOMMENDATIONS: add the "
+                              "genuine-demand term(s) as keywords; add each misdirected term as a negative keyword; "
+                              "review the search query report at least monthly so misdirected spend is caught early.")
+                    else:
+                        _iss["detail"] += (" WEB SENSE-CHECK (verified): " + _sc_line + " Use this: recommend "
+                                           "adding ONLY the GENUINE DEMAND terms as keywords; for any MISDIRECTED "
+                                           "term (a different organisation or brand the searcher actually wants), do "
+                                           "NOT recommend adding it - say to add it as a negative keyword instead.")
                 elif "Fading winner spotted by comparing" in _d:
                     _iss["detail"] += (" WEB SENSE-CHECK (verified): " + _sc_line + " IMPORTANT: if this term is a "
                                        "COMPETITOR or MISDIRECTED (a rival or a different organisation, e.g. a rival "

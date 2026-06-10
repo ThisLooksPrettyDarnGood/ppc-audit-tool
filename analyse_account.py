@@ -1374,8 +1374,12 @@ def score_targeting_keywords(data):
                              for t in competitor_terms],
         # Converting-but-unkeyworded terms we'd otherwise recommend adding - the narrative layer
         # sense-checks these too, so we never recommend a misdirected/other-brand term (e.g.
-        # 'british council', 'macmillan') as a keyword for an unrelated advertiser.
-        "converting_terms": [t.get("term") for t in converting_not_added if t.get("term")],
+        # 'british council', 'macmillan') as a keyword for an unrelated advertiser. Full dicts
+        # (term + conversions + TOTAL spend) so the deck can give a per-term breakdown.
+        "converting_terms": [{"term": t.get("term"),
+                              "conversions": int(round(t.get("conversions", 0) or 0)),
+                              "spend": round(t.get("spend", 0) or 0, 2)}
+                             for t in converting_not_added if t.get("term")],
         # Fading winners are sense-checked too: a competitor like 'astra ai' must be reframed as a
         # rival, not presented as "lost demand to recover".
         "fading_winner_terms": [f.get("term") for f in fading_winners if f.get("term")],
