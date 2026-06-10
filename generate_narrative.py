@@ -763,14 +763,36 @@ WEBSITE_URL: <full website URL or blank>
 
 
 def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: str = "",
-                               conversion_caveat: str = "") -> str:
+                               conversion_caveat: str = "", account_type: str = "") -> str:
     """
     Write 2 - 3 sentences interpreting the 30-day vs 12-month performance numbers.
-    Flags whether trend is positive, negative, or mixed.
+    Flags whether trend is positive, negative, or mixed. For ecommerce accounts the
+    read leads with revenue and ROAS, not conversion counts and CPA.
     """
     raw = perf.get("_raw", {})
     t30 = raw.get("t30", {})
     t12 = raw.get("t12", {})
+
+    _has_roas = perf.get("roas_30d") not in (None, "N/A")
+    _is_ecom = account_type == "ecommerce" and _has_roas
+    _is_mixed = account_type == "mixed" and _has_roas
+    _rev_line30 = (f" | Revenue {perf.get('revenue_30d')} | ROAS {perf.get('roas_30d')}"
+                   if (_is_ecom or _is_mixed) else "")
+    _rev_line12 = (f" | Revenue {perf.get('revenue_12m')} | ROAS {perf.get('roas_12m')}"
+                   if (_is_ecom or _is_mixed) else "")
+    if _is_ecom:
+        _ecom_instr = (
+            "\nThis is an ECOMMERCE account: lead with revenue and ROAS (return on ad spend) - that is "
+            "the commercial story. Treat conversion counts and CPA as secondary detail. Instead of the "
+            "OCI caveat, end with one short caveat that ROAS here is TOP-LINE order value: it does not "
+            "reflect margin, returns or new-versus-returning customers, so true profitability may differ.")
+    elif _is_mixed:
+        _ecom_instr = (
+            "\nThis account does BOTH ecommerce and lead generation: read revenue and ROAS for the "
+            "sales side AND conversions/CPA for the lead side - do not collapse them into one number, "
+            "since a strong ROAS can hide an expensive lead side and vice versa.")
+    else:
+        _ecom_instr = ""
 
     def _share_line(t):
         parts = []
@@ -781,8 +803,8 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
         return (" | " + " | ".join(parts)) if parts else ""
 
     context = f"""
-Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d','?')} | Conversions {perf.get('convs_30d','?')} | CPA {perf.get('cpa_30d','?')} | SIS {perf.get('sis_30d','?')}{_share_line(t30)}
-Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}{_share_line(t12)}
+Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d','?')} | Conversions {perf.get('convs_30d','?')} | CPA {perf.get('cpa_30d','?')} | SIS {perf.get('sis_30d','?')}{_rev_line30}{_share_line(t30)}
+Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}{_rev_line12}{_share_line(t12)}
 """.strip()
 
     client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
@@ -791,11 +813,11 @@ Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m
 You are writing 2 - 3 sentences for a Google Ads audit slide called "Performance Summary".
 The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
-Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{conversion_caveat}
+Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{_ecom_instr}{conversion_caveat}
 If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
 When you note Search impression share (SIS) is low, QUANTIFY what that means: state the approximate share of eligible searches being missed (roughly 100% minus the SIS%, e.g. SIS of 40% means about 60% of eligible searches are being missed) - do not leave "low" vague.
-End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened.
-Use British English. Be direct, not alarmist. You may write up to 4 sentences if needed to include the OCI caveat.
+{("End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened." if not _is_ecom else "")}
+Use British English. Be direct, not alarmist. You may write up to 4 sentences if needed to include the closing caveat.
 {client_context}
 
 Performance data:
@@ -1136,7 +1158,8 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                 "are measured differently, and the trend should be read with caution until a full period under the "
                 "current setup is available.")
         perf_commentary = _retry(
-            lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat),
+            lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat,
+                                               account_type=str(findings.get("account_type") or "")),
             "Performance Commentary"
         )
     else:

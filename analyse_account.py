@@ -79,7 +79,14 @@ def detect_account_type(data):
     lead_vol = sum(_vol(ca) for ca in conversion_actions
                    if ca.get("category", "") in lead_gen_categories)
     if purchase_vol or lead_vol:
-        return "ecommerce" if purchase_vol * 2 >= lead_vol else "lead_gen"
+        # Some accounts genuinely do BOTH (a store with a trade-quote form, say). When
+        # both sides record material volume and neither dominates, call it 'mixed' so
+        # the deck reads both lenses (ROAS for the sales side, CPA/OCI for the leads).
+        _p_weighted = purchase_vol * 2
+        _p_share = _p_weighted / (_p_weighted + lead_vol)
+        if purchase_vol >= 5 and lead_vol >= 5 and 0.25 <= _p_share <= 0.75:
+            return "mixed"
+        return "ecommerce" if _p_share >= 0.5 else "lead_gen"
 
     has_purchase = any(ca.get("category", "") in ecommerce_categories
                        for ca in conversion_actions)
@@ -216,6 +223,9 @@ _ISSUE_SIGNATURES = [
     ("is new, so Maximise Clicks is sensible",        30, "amber",  "Bidding Strategy"),  # new/low-data -> not a problem yet
     ("on Maximise Clicks",                         78, "amber",     "Bidding Strategy"),
     ("paused campaign(s) historically delivered",  66, "amber",     "Bidding Strategy"),
+    ("restricted by their target ROAS",            65, "amber",     "Bidding Strategy"),  # tROAS above achieved = bids squeezed
+    ("share a single campaign budget",             56, "amber",     "Budget & Coverage"),  # shared pool decides priority
+    ("receiving spend from more than one campaign", 61, "amber",    "Account Structure"),  # product overlap / self-competition
     ("still on Manual CPC despite",                62, "amber",     "Bidding Strategy"),
     ("on Manual CPC.",                             58, "amber",     "Bidding Strategy"),
     ("has a target CPA of",                        55, "amber",     "Bidding Strategy"),
@@ -822,7 +832,7 @@ def score_conversion_tracking(data):
         # real jobs/sales aren't imported back, bidding optimises towards form fills, not revenue.
         OCI_TYPES = {"UPLOAD_CLICKS", "UPLOAD_CALLS", "STORE_SALES", "STORE_SALES_DIRECT_UPLOAD"}
         has_oci = any(str(ca.get("type", "")) in OCI_TYPES for ca in conversion_actions)
-        if not has_oci and detect_account_type(data) in ("lead_gen", "unknown"):
+        if not has_oci and detect_account_type(data) in ("lead_gen", "unknown", "mixed"):
             issues.append(
                 "We checked for offline conversion imports (OCI) and could not find any set up. For a lead "
                 "generation business this is one of the biggest opportunities there is: importing which "
@@ -1016,6 +1026,25 @@ def score_account_structure(data):
                 )
                 if rag == "green":
                     rag = "amber"
+
+    # ── Products advertised in more than one campaign (Shopping/PMax): learnings are
+    # split and the account bids against itself, raising CPCs. Names the worst products.
+    _overlap = data.get("product_overlap") or []
+    if _overlap:
+        _top = _overlap[0]
+        _camps = _top["campaigns"]
+        _eg = (f"'{_top['title']}' took spend in {len(_camps)} campaigns at once "
+               f"({', '.join(n for n, _ in _camps[:4])}) - about £{_top['total_spend']:,.0f} in 30 days")
+        issues.append(
+            f"{len(_overlap)} product(s) are receiving spend from more than one campaign at the same "
+            f"time. For example {_eg}. When the same product runs in several campaigns its performance "
+            "data is split between them and the campaigns can compete against each other in the same "
+            "auctions, pushing CPCs up. Reviewing the campaign structure so each product lives in the "
+            "most relevant campaign (and is excluded elsewhere) consolidates the learnings and removes "
+            "the self-competition."
+        )
+        if rag == "green":
+            rag = "amber"
 
     # If no genuine structural problems surfaced, describe the structure positively
     # FIRST  -  so the slide validates a lean-but-appropriate setup the way our team does,
@@ -1986,6 +2015,56 @@ def score_bidding_strategy(data):
         if rag == "green":
             rag = "amber"
 
+    # ── Target ROAS restricting delivery (ecommerce): a campaign told to hit a higher
+    # return than it is actually achieving gets its bids squeezed - Google holds spend
+    # back rather than 'fail' the target. Classic on value-bid Shopping/PMax accounts
+    # where one blanket tROAS is applied across campaigns with different economics.
+    _troas_restricted = []
+    for c in campaigns:
+        if c.get("status") != "ENABLED":
+            continue
+        tgt = c.get("target_roas")
+        spend = c.get("spend_30d", 0) or 0
+        value = c.get("conv_value_30d")
+        if tgt and value is not None and spend >= 100:
+            actual = value / spend if spend else 0
+            if actual < tgt * 0.8:
+                _troas_restricted.append((c.get("name"), tgt, actual, spend))
+    if _troas_restricted:
+        _troas_restricted.sort(key=lambda x: -x[3])
+        _egs = "; ".join(f"'{n}' targets {t:.0f}x but is achieving about {a:.1f}x"
+                         for n, t, a, _s in _troas_restricted[:3])
+        _same_tgt = len({round(t) for _n, t, _a, _s in _troas_restricted}) == 1 and len(_troas_restricted) >= 2
+        issues.append(
+            f"{len(_troas_restricted)} campaign(s) look restricted by their target ROAS - the target is "
+            f"set well above what the campaign actually achieves, so bidding holds spend back to protect "
+            f"the target: {_egs}." +
+            (" The same target is applied across campaigns with different actual returns, which squeezes "
+             "the weaker ones hardest." if _same_tgt else "") +
+            " Testing a target closer to the achieved figure (then walking it up) usually unlocks volume."
+        )
+        if rag == "green":
+            rag = "amber"
+
+    # ── Shared budgets: campaigns drawing from one pool let the budget decide spend
+    # priority, not the strategy. Worth surfacing whenever 2+ enabled campaigns share.
+    _shared = {}
+    for c in campaigns:
+        if c.get("status") == "ENABLED" and c.get("shared_budget") and c.get("budget_resource"):
+            _shared.setdefault(c["budget_resource"], []).append(c.get("name"))
+    _shared_groups = [v for v in _shared.values() if len(v) >= 2]
+    if _shared_groups:
+        _g = max(_shared_groups, key=len)
+        issues.append(
+            f"{sum(len(g) for g in _shared_groups)} campaigns share a single campaign budget "
+            f"(e.g. {', '.join(_g[:4])}{'...' if len(_g) > 4 else ''}). A shared pool decides spend "
+            "priority between campaigns by itself, so stronger campaigns can starve the others and "
+            "individual budget control is lost. Testing independent budgets for the priority "
+            "campaigns gives back control over where money goes."
+        )
+        if rag == "green":
+            rag = "amber"
+
     # Zero conversions with spend
     if total_conversions == 0 and total_cost > 50:
         issues.append(
@@ -2127,7 +2206,7 @@ def score_efficiency(data):
         material = _poi_spend >= max(100.0, 0.10 * (_acct_spend or 0))
         if material:
             local_note = (" For a local business this is a silent leak worth closing."
-                          if account_type in ("lead_gen", "unknown") else "")
+                          if account_type in ("lead_gen", "unknown", "mixed") else "")
             issues.append(
                 f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
                 f"{names}.{_mag} The setting shows your ads to people merely INTERESTED in your area, not only "

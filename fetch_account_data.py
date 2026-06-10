@@ -185,12 +185,16 @@ def get_campaigns(client, cid):
             campaign.bidding_strategy_type,
             campaign.target_cpa.target_cpa_micros,
             campaign.target_roas.target_roas,
+            campaign.maximize_conversion_value.target_roas,
+            campaign.bidding_strategy,
             campaign.target_spend.cpc_bid_ceiling_micros,
             campaign_budget.amount_micros,
             campaign_budget.delivery_method,
+            campaign_budget.explicitly_shared,
             metrics.cost_micros,
             metrics.clicks,
             metrics.conversions,
+            metrics.conversions_value,
             metrics.impressions,
             metrics.average_cpc
         FROM campaign
@@ -207,7 +211,9 @@ def get_campaigns(client, cid):
         tcpa_micros = c.target_cpa.target_cpa_micros
         target_cpa_gbp = round(tcpa_micros / 1_000_000, 2) if tcpa_micros else None
 
-        troas = c.target_roas.target_roas
+        # tROAS lives in one of two places: the standard Target ROAS strategy, or a
+        # Maximise Conversion Value strategy with a target set (how PMax expresses it).
+        troas = c.target_roas.target_roas or c.maximize_conversion_value.target_roas
         target_roas = round(troas, 3) if troas else None
 
         # Maximise Clicks (TARGET_SPEND) can carry an optional max-CPC ceiling.
@@ -230,8 +236,54 @@ def get_campaigns(client, cid):
             "cpc_ceiling_gbp": cpc_ceiling_gbp,        # Max-Clicks CPC cap, or None if unset
             "target_cpa_gbp": target_cpa_gbp,
             "target_roas": target_roas,
+            "conv_value_30d": round(m.conversions_value, 2),
+            # Shared budgets: same budget resource across campaigns = one pool deciding
+            # spend priority. Portfolio strategy: bidding_strategy resource set.
+            "shared_budget": bool(b.explicitly_shared),
+            "budget_resource": str(b.resource_name or ""),
+            "portfolio_strategy": bool(str(c.bidding_strategy or "")),
         })
     return campaigns
+
+
+def get_product_overlap(client, cid):
+    """
+    Products receiving spend from MORE THAN ONE campaign in the last 30 days (Shopping/
+    PMax accounts). Split learnings and self-competition raise CPCs - a staple of the
+    team's ecommerce audits. Returns a list of {title, total_spend, campaigns:[(name,
+    spend), ...]} for the worst offenders, ordered by total spend. Caller wraps in
+    try/except; returns [] when there is no shopping traffic.
+    """
+    gaql = """
+        SELECT segments.product_item_id, segments.product_title, campaign.name,
+               metrics.cost_micros
+        FROM shopping_performance_view
+        WHERE segments.date DURING LAST_30_DAYS
+        ORDER BY metrics.cost_micros DESC
+        LIMIT 2000
+    """
+    rows = run_query(client, cid, gaql)
+    products = {}
+    for row in rows:
+        pid = row.segments.product_item_id
+        cost = row.metrics.cost_micros / 1_000_000
+        if not pid or cost <= 0:
+            continue
+        p = products.setdefault(pid, {"title": row.segments.product_title or pid,
+                                      "campaigns": {}})
+        p["campaigns"][row.campaign.name] = p["campaigns"].get(row.campaign.name, 0) + cost
+    overlap = []
+    for p in products.values():
+        # Only meaningful overlap: 2+ campaigns each spending at least £5 on the product.
+        spenders = {n: c for n, c in p["campaigns"].items() if c >= 5}
+        if len(spenders) >= 2:
+            overlap.append({
+                "title": p["title"],
+                "total_spend": round(sum(p["campaigns"].values()), 2),
+                "campaigns": sorted(spenders.items(), key=lambda x: -x[1]),
+            })
+    overlap.sort(key=lambda x: -x["total_spend"])
+    return overlap[:10]
 
 
 def get_ad_groups(client, cid):
@@ -978,21 +1030,24 @@ def get_performance_summary(client, cid):
 
     def _totals(rows):
         t = {"spend": 0, "clicks": 0, "conversions": 0, "impressions": 0,
-             "sis_sum": 0.0, "sis_count": 0}
+             "value": 0.0, "sis_sum": 0.0, "sis_count": 0}
         for row in rows:
             m = row.metrics
             t["spend"]       += m.cost_micros / 1_000_000
             t["clicks"]      += m.clicks
             t["conversions"] += m.conversions
             t["impressions"] += m.impressions
+            t["value"]       += m.conversions_value
             sis = m.search_impression_share
             if sis and sis > 0:
                 t["sis_sum"]   += sis
                 t["sis_count"] += 1
         t["spend"]       = round(t["spend"], 2)
         t["conversions"] = round(t["conversions"], 2)
+        t["value"]       = round(t["value"], 2)
         t["cpa"]  = round(t["spend"] / t["conversions"], 2) if t["conversions"] > 0 else None
         t["cvr"]  = round(t["conversions"] / t["clicks"] * 100, 2) if t["clicks"] > 0 else None
+        t["roas"] = round(t["value"] / t["spend"], 2) if t["spend"] > 0 and t["value"] > 0 else None
         t["sis"]  = round(t["sis_sum"] / t["sis_count"] * 100, 1) if t["sis_count"] > 0 else None
         return t
 
@@ -1002,6 +1057,7 @@ def get_performance_summary(client, cid):
             metrics.cost_micros,
             metrics.clicks,
             metrics.conversions,
+            metrics.conversions_value,
             metrics.impressions
         FROM campaign
         WHERE campaign.status != 'REMOVED'
@@ -1012,6 +1068,7 @@ def get_performance_summary(client, cid):
             metrics.cost_micros,
             metrics.clicks,
             metrics.conversions,
+            metrics.conversions_value,
             metrics.impressions
         FROM campaign
         WHERE campaign.status != 'REMOVED'
@@ -1085,6 +1142,11 @@ def get_performance_summary(client, cid):
         "cvr_12m":    f"{t12['cvr']}%" if t12["cvr"] is not None else "N/A",
         "cpa_12m":    f"£{int(round(t12['cpa'])):,}" if t12["cpa"] else "N/A",
         "sis_12m":    f"{int(round(t12['sis']))}%" if t12["sis"] else "N/A",
+        # Revenue lens (ecommerce accounts) - whole pounds, ROAS as a multiple
+        "revenue_30d": f"£{int(round(t30['value'])):,}" if t30["value"] else "N/A",
+        "revenue_12m": f"£{int(round(t12['value'])):,}" if t12["value"] else "N/A",
+        "roas_30d":    f"{t30['roas']:.1f}x" if t30["roas"] else "N/A",
+        "roas_12m":    f"{t12['roas']:.1f}x" if t12["roas"] else "N/A",
         # Raw numbers for GPT commentary
         "_raw": {"t30": t30, "t12": t12},
     }
@@ -1142,6 +1204,18 @@ def fetch_account_data(client_cid: str) -> dict:
             max_clicks_costly_terms = get_max_clicks_costly_terms(client, cid, _uncapped)
     except Exception as e:
         print(f"    (max-clicks costly-terms query failed: {e})")
+
+    # Product overlap (Shopping/PMax only) - products taking spend in 2+ campaigns
+    print("  → Product overlap (Shopping/PMax)...")
+    product_overlap = []
+    try:
+        if any(c.get("type") in ("SHOPPING", "PERFORMANCE_MAX") and c.get("status") == "ENABLED"
+               for c in campaigns):
+            product_overlap = get_product_overlap(client, cid)
+            if product_overlap:
+                print(f"    {len(product_overlap)} product(s) spending in 2+ campaigns")
+    except Exception as e:
+        print(f"    (product-overlap query failed: {e})")
 
     print("  → Ad groups...")
     ad_groups = get_ad_groups(client, cid)
@@ -1319,6 +1393,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "campaigns": campaigns,
         "campaign_types_active": campaign_types,
         "max_clicks_costly_terms": max_clicks_costly_terms,
+        "product_overlap": product_overlap,
         "ad_groups": ad_groups,
         "conversion_actions": conversion_actions,
         "conversion_volume_by_month": conversion_volume_by_month,
