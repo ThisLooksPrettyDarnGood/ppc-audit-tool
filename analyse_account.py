@@ -900,9 +900,10 @@ def score_conversion_tracking(data):
                 issues.append(
                     f"{len(_dead)} genuine conversion action(s) appear set up but have recorded nothing "
                     f"in the last 12 months: {_dnames}. The rest of the account records conversions "
-                    "fine, so if customers do convert this way the tag is likely broken or misfiring - "
-                    "worth a manual test conversion to confirm. (If the action was only created "
-                    "recently, this is expected and can be ignored.)"
+                    "fine, so each of these is either a broken or misfiring tag (worth a manual test "
+                    "conversion if customers DO convert this way), or a leftover default action that is "
+                    "no longer used - either way it should not sit as a primary conversion. (If the "
+                    "action was only created recently, this is expected and can be ignored.)"
                 )
                 if rag == "green":
                     rag = "amber"
@@ -1088,12 +1089,15 @@ def score_account_structure(data):
     # proactivity') made measurable - a strong, honest audit point.
     _activity = data.get("change_activity") or {}
     _spend_30d = (data.get("account_summary_30d", {}) or {}).get("spend", 0) or 0
-    if _activity and _activity.get("changes") == 0 and _spend_30d >= 200:
+    _changes = _activity.get("changes") if _activity else None
+    if _changes is not None and _changes <= 2 and _spend_30d >= 200:
+        _ch_txt = ("No changes have been made to the account" if _changes == 0
+                   else f"Only {_changes} change(s) have been made to the account")
         issues.append(
-            f"No changes have been made to the account in the last {_activity.get('days', 28)} days, "
+            f"{_ch_txt} in the last {_activity.get('days', 28)} days, "
             f"while it spent about £{_spend_30d:,.0f}. Google Ads accounts need regular attention - "
             "search term reviews, bid and budget adjustments, negative keywords, ad tests. Money is "
-            "being spent on autopilot with nobody steering."
+            "being spent largely on autopilot with nobody steering."
         )
         if rag == "green":
             rag = "amber"
