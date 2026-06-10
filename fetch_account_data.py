@@ -63,23 +63,42 @@ _ACCESS_ERROR_MARKS = ("USER_PERMISSION_DENIED", "CUSTOMER_NOT_FOUND", "NOT_ADS_
                        "CUSTOMER_NOT_ENABLED")
 
 
-def run_query(client, customer_id, gaql):
+def run_query(client, customer_id, gaql, _attempts=3):
     service = client.get_service("GoogleAdsService")
     request = client.get_type("SearchGoogleAdsRequest")
     request.customer_id = customer_id.replace("-", "")
     request.query = gaql
     rows = []
-    try:
-        for row in service.search(request=request):
-            rows.append(row)
-    except GoogleAdsException as ex:
-        if any(mark in str(ex) for mark in _ACCESS_ERROR_MARKS):
-            raise AccountAccessError(
-                f"Google Ads denied access to account {customer_id}. Double-check the CID, "
-                "and confirm the account is linked under the agency MCC (539-263-1535). "
-                "No audit was produced - auditing without data would give false findings."
-            ) from ex
-        print(f"  [ERROR] Query failed for {customer_id}: {ex}")
+    for attempt in range(1, _attempts + 1):
+        rows = []
+        try:
+            for row in service.search(request=request):
+                rows.append(row)
+            return rows
+        except GoogleAdsException as ex:
+            if any(mark in str(ex) for mark in _ACCESS_ERROR_MARKS):
+                raise AccountAccessError(
+                    f"Google Ads denied access to account {customer_id}. Double-check the CID, "
+                    "and confirm the account is linked under the agency MCC (539-263-1535). "
+                    "No audit was produced - auditing without data would give false findings."
+                ) from ex
+            # A malformed/unsupported query won't get better on retry - log and move on.
+            print(f"  [ERROR] Query failed for {customer_id}: {ex}")
+            return rows
+        except Exception as ex:
+            # Google-side blips ('A transient internal error has occurred. Retry the
+            # request.') used to kill a 40-query fetch at query 30. Retry just this
+            # query a couple of times before giving up.
+            _msg = str(ex).lower()
+            _transient = any(x in _msg for x in ("transient", "internal error", "500",
+                                                 "unavailable", "deadline"))
+            if _transient and attempt < _attempts:
+                print(f"  [retry {attempt}/{_attempts - 1}] transient Google error on this "
+                      "query - retrying in 3s...")
+                import time as _t
+                _t.sleep(3)
+                continue
+            raise
     return rows
 
 
