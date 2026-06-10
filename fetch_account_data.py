@@ -284,6 +284,80 @@ def get_campaigns(client, cid):
     return campaigns
 
 
+def get_ad_policy_status(client, cid):
+    """
+    Policy status of every ENABLED ad in ENABLED campaigns/ad groups. A disapproved ad
+    silently stops serving - every expert checklist starts here and we never did.
+    Returns {"total": n, "disapproved": [...], "limited": [...]} with campaign names.
+    """
+    gaql = """
+        SELECT ad_group_ad.policy_summary.approval_status, campaign.name, ad_group.name
+        FROM ad_group_ad
+        WHERE ad_group_ad.status = 'ENABLED' AND campaign.status = 'ENABLED'
+          AND ad_group.status = 'ENABLED'
+    """
+    rows = run_query(client, cid, gaql)
+    out = {"total": 0, "disapproved": [], "limited": []}
+    for row in rows:
+        status = row.ad_group_ad.policy_summary.approval_status.name
+        out["total"] += 1
+        entry = {"campaign": row.campaign.name, "ad_group": row.ad_group.name}
+        if status == "DISAPPROVED":
+            out["disapproved"].append(entry)
+        elif status in ("APPROVED_LIMITED", "AREA_OF_INTEREST_ONLY"):
+            out["limited"].append(entry)
+    return out
+
+
+def get_change_activity(client, cid, days=28):
+    """
+    How many changes were made to the account recently (change_event caps at 30 days).
+    Zero changes on a spending account = nobody is actively managing it - which is
+    usually the client's stated pain ('lack of proactivity') made measurable.
+    """
+    from datetime import datetime, timedelta
+    start = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+    end = datetime.today().strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT change_event.change_date_time FROM change_event
+        WHERE change_event.change_date_time >= '{start}'
+          AND change_event.change_date_time <= '{end} 23:59:59'
+        LIMIT 1000
+    """
+    rows = run_query(client, cid, gaql)
+    return {"days": days, "changes": len(rows)}
+
+
+def get_hourly_performance(client, cid):
+    """30-day spend/conversions by hour of day. Returns {hour: {"spend", "conv"}}."""
+    gaql = """
+        SELECT segments.hour, metrics.cost_micros, metrics.conversions
+        FROM campaign WHERE segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    hours = {}
+    for row in rows:
+        h = hours.setdefault(int(row.segments.hour), {"spend": 0.0, "conv": 0.0})
+        h["spend"] += row.metrics.cost_micros / 1_000_000
+        h["conv"] += row.metrics.conversions
+    return hours
+
+
+def get_device_performance(client, cid):
+    """30-day spend/conversions by device. Returns {device: {"spend", "conv"}}."""
+    gaql = """
+        SELECT segments.device, metrics.cost_micros, metrics.conversions
+        FROM campaign WHERE segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    devices = {}
+    for row in rows:
+        d = devices.setdefault(row.segments.device.name, {"spend": 0.0, "conv": 0.0})
+        d["spend"] += row.metrics.cost_micros / 1_000_000
+        d["conv"] += row.metrics.conversions
+    return devices
+
+
 def get_product_overlap(client, cid):
     """
     Products receiving spend from MORE THAN ONE campaign in the last 30 days (Shopping/
@@ -1262,6 +1336,21 @@ def fetch_account_data(client_cid: str) -> dict:
     except Exception as e:
         print(f"    (product-overlap query failed: {e})")
 
+    print("  → Ad policy status / change activity / hourly / device splits...")
+    ad_policy_status, change_activity, hourly_performance, device_performance = {}, {}, {}, {}
+    for _name, _fn in (("ad_policy_status", get_ad_policy_status),
+                       ("change_activity", get_change_activity),
+                       ("hourly_performance", get_hourly_performance),
+                       ("device_performance", get_device_performance)):
+        try:
+            _res = _fn(client, cid)
+            if _name == "ad_policy_status":   ad_policy_status = _res
+            elif _name == "change_activity":  change_activity = _res
+            elif _name == "hourly_performance": hourly_performance = _res
+            else:                              device_performance = _res
+        except Exception as e:
+            print(f"    ({_name} query failed: {e})")
+
     print("  → Ad groups...")
     ad_groups = get_ad_groups(client, cid)
 
@@ -1439,6 +1528,10 @@ def fetch_account_data(client_cid: str) -> dict:
         "campaign_types_active": campaign_types,
         "max_clicks_costly_terms": max_clicks_costly_terms,
         "product_overlap": product_overlap,
+        "ad_policy_status": ad_policy_status,
+        "change_activity": change_activity,
+        "hourly_performance": hourly_performance,
+        "device_performance": device_performance,
         "ad_groups": ad_groups,
         "conversion_actions": conversion_actions,
         "conversion_tracking_setting": conversion_tracking_setting,

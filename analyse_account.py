@@ -240,6 +240,12 @@ _ISSUE_SIGNATURES = [
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("losing a large share of impressions to Ad Rank", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank
+    ("disapproved and silently not serving",       78, "amber_red", "Ads & Assets"),       # disapproved ads - dark ad groups
+    ("approved but LIMITED by policy",             38, "amber",     "Ads & Assets"),       # policy-limited -> Observations
+    ("No changes have been made to the account",   67, "amber",     "Account Structure"),  # unmanaged account (neglect)
+    ("ran between midnight and 6am",               55, "amber",     "Budget & Coverage"),  # overnight waste (lead gen)
+    ("a device that is not converting",            52, "amber",     "Budget & Coverage"),  # device gap
+    ("usually comes from an automated feed",       30, "amber",     "Account Structure"),  # SKU-scale structure -> Observations
     ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions
     ("have a LOW score (4 or below)",              54, "amber",     "Ad Rank & Quality"),  # low Quality Score
     # Targeting & keywords
@@ -988,10 +994,22 @@ def score_account_structure(data):
     search_count = sum(1 for c in enabled_campaigns if c.get("type") == "SEARCH")
     pmax_count   = sum(1 for c in enabled_campaigns if c.get("type") == "PERFORMANCE_MAX")
 
-    # Ad groups per campaign ratio
+    # Ad groups per campaign ratio. At feed scale (50+ per campaign on a Shopping/PMax
+    # account) this is almost always an automated SKU-level structure from a bid
+    # management platform (e.g. Bidnamic) - intentional, not sprawl. Don't tell an
+    # automated account to "consolidate"; ask them to confirm the tool instead.
     if num_ad_groups > 0 and num_campaigns > 0:
         ratio = num_ad_groups / num_campaigns
-        if ratio > 10:
+        shopping_count = sum(1 for c in enabled_campaigns if c.get("type") == "SHOPPING")
+        if ratio > 50 and (shopping_count or pmax_count):
+            issues.append(
+                f"{num_ad_groups:,} ad groups across {num_campaigns} campaigns - this scale "
+                "usually comes from an automated feed/SKU-level structure built by a bid "
+                "management platform rather than hand-built sprawl. Worth confirming the tool "
+                "and its fees are still earning their keep; if no automation platform is in "
+                "place, the structure needs consolidating into tighter themes."
+            )
+        elif ratio > 10:
             issues.append(
                 f"{num_ad_groups} ad groups across {num_campaigns} campaigns "
                 f"({ratio:.1f} per campaign). Consider consolidating into tighter themes."
@@ -1061,6 +1079,21 @@ def score_account_structure(data):
             "auctions, pushing CPCs up. Reviewing the campaign structure so each product lives in the "
             "most relevant campaign (and is excluded elsewhere) consolidates the learnings and removes "
             "the self-competition."
+        )
+        if rag == "green":
+            rag = "amber"
+
+    # ── Account neglect: zero changes in the last 28 days on a spending account means
+    # nobody is actively managing it. This is the client's usual stated pain ('lack of
+    # proactivity') made measurable - a strong, honest audit point.
+    _activity = data.get("change_activity") or {}
+    _spend_30d = (data.get("account_summary_30d", {}) or {}).get("spend", 0) or 0
+    if _activity and _activity.get("changes") == 0 and _spend_30d >= 200:
+        issues.append(
+            f"No changes have been made to the account in the last {_activity.get('days', 28)} days, "
+            f"while it spent about £{_spend_30d:,.0f}. Google Ads accounts need regular attention - "
+            "search term reviews, bid and budget adjustments, negative keywords, ad tests. Money is "
+            "being spent on autopilot with nobody steering."
         )
         if rag == "green":
             rag = "amber"
@@ -2172,6 +2205,68 @@ def score_efficiency(data):
     campaigns = data.get("campaigns", [])
     account_type = detect_account_type(data)
     AWARENESS = {"DISPLAY", "VIDEO", "DEMAND_GEN", "MULTI_CHANNEL"}
+
+    # ── Disapproved / policy-limited ads: a disapproved ad silently stops serving,
+    # and its ad group can sit dark for months. The first thing every expert checks.
+    _pol = data.get("ad_policy_status") or {}
+    if _pol.get("disapproved"):
+        _bad = _pol["disapproved"]
+        _camps = sorted({e["campaign"] for e in _bad})
+        issues.append(
+            f"{len(_bad)} enabled ad(s) are disapproved and silently not serving, in: "
+            f"{', '.join(_camps[:3])}{'...' if len(_camps) > 3 else ''}. A disapproved ad shows "
+            "no error anywhere a client normally looks - the ad group just goes dark. Review the "
+            "policy reason in Ads > Status and fix or replace the ads."
+        )
+        if rag != "red":
+            rag = "amber_red"
+    elif _pol.get("limited"):
+        issues.append(
+            f"{len(_pol['limited'])} enabled ad(s) are approved but LIMITED by policy, which "
+            "restricts where or how often they can show. Worth reviewing the policy detail - "
+            "small wording changes often lift the restriction."
+        )
+
+    # ── Overnight waste (lead gen): spend running midnight-6am with zero conversions
+    # and no schedule trimming it. Ecommerce converts around the clock, so this check
+    # deliberately stays silent on ecommerce/mixed accounts.
+    _hours = data.get("hourly_performance") or {}
+    if _hours and account_type in ("lead_gen", "unknown"):
+        _night_spend = sum((_hours.get(h) or {}).get("spend", 0) for h in range(0, 6))
+        _night_conv = sum((_hours.get(h) or {}).get("conv", 0) for h in range(0, 6))
+        _total_spend = sum(v.get("spend", 0) for v in _hours.values())
+        if (_night_spend >= 50 and _total_spend > 0
+                and _night_spend / _total_spend >= 0.05 and _night_conv < 1):
+            issues.append(
+                f"About £{_night_spend:,.0f} ({_night_spend / _total_spend:.0%} of spend) ran between "
+                "midnight and 6am in the last 30 days with zero conversions. For a lead business "
+                "those clicks rarely become enquiries - an ad schedule that trims the dead hours "
+                "moves that budget to the times that actually convert."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    # ── Device performance gap: one device taking a material share of spend while
+    # recording nothing, when another device IS converting. Humble framing - device
+    # mix can be deliberate, so recommend a review, not a verdict.
+    _devices = data.get("device_performance") or {}
+    if _devices:
+        _dev_total = sum(v.get("spend", 0) for v in _devices.values())
+        _conv_devs = [d for d, v in _devices.items() if v.get("conv", 0) >= 3]
+        for _d, _v in _devices.items():
+            if (_dev_total > 0 and _v.get("spend", 0) >= 100
+                    and _v["spend"] / _dev_total >= 0.20
+                    and _v.get("conv", 0) == 0 and _conv_devs):
+                issues.append(
+                    f"A meaningful share of spend is going to a device that is not converting: "
+                    f"£{_v['spend']:,.0f} ({_v['spend'] / _dev_total:.0%} of spend) on "
+                    f"{_d.title()} recorded no conversions in 30 days, while "
+                    f"{_conv_devs[0].title()} converts fine. Worth reviewing device performance "
+                    "and applying a negative bid adjustment if the pattern holds."
+                )
+                if rag == "green":
+                    rag = "amber"
+                break
 
     # ── Impression share lost to BUDGET (capped campaigns) ────────────────────
     isl = data.get("impression_share_lost") or []
