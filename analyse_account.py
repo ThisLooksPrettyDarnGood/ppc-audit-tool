@@ -551,12 +551,13 @@ def score_conversion_tracking(data):
                     _inv = (f" Worse, your genuine enquiry action ('{_clean_action_label(_g.get('name'))}', "
                             f"{_cat_desc}, {_gv} in 30 days) is NOT set as a primary conversion - so the real "
                             "lead is not even what bidding optimises towards.")
+                _cpa_ctx = ""
                 issues.append(
                     f"Your PRIMARY conversions are dominated by low-value website activity, not real enquiries: "
                     f"{_egs} recorded about {_total_low} 'conversions' in the last 30 days - these are page "
                     f"scrolls, clicks and page views, not genuine leads.{_inv} Google therefore optimises towards "
                     "low-value activity and your reported conversion numbers are heavily inflated. Move these to "
-                    "secondary and make the genuine enquiry (form submission) the single primary conversion."
+                    f"secondary and make the genuine enquiry (form submission) the single primary conversion.{_cpa_ctx}"
                 )
                 if rag != "red":
                     rag = "amber_red"
@@ -1039,10 +1040,16 @@ def score_targeting_keywords(data):
                 continue
             a = agg.setdefault(k, {"term": t.get("term"), "spend": 0.0, "conversions": 0.0,
                                    "clicks": 0, "status": t.get("status", "NONE"),
-                                   "campaign_name": t.get("campaign_name", "")})
+                                   "campaign_name": t.get("campaign_name", ""),
+                                   "keyword": t.get("keyword", ""),
+                                   "keyword_match_type": t.get("keyword_match_type", "")})
             a["spend"] += t.get("spend", 0) or 0
             a["conversions"] += t.get("conversions", 0) or 0
             a["clicks"] += t.get("clicks", 0) or 0
+            # Keep a triggering keyword if this row carries one and we don't have it yet.
+            if not a.get("keyword") and t.get("keyword"):
+                a["keyword"] = t.get("keyword")
+                a["keyword_match_type"] = t.get("keyword_match_type", "")
         return list(agg.values())
 
     converting_not_added = _agg_by_term(converting_not_added)
@@ -1378,7 +1385,9 @@ def score_targeting_keywords(data):
         # (term + conversions + TOTAL spend) so the deck can give a per-term breakdown.
         "converting_terms": [{"term": t.get("term"),
                               "conversions": int(round(t.get("conversions", 0) or 0)),
-                              "spend": round(t.get("spend", 0) or 0, 2)}
+                              "spend": round(t.get("spend", 0) or 0, 2),
+                              "keyword": t.get("keyword", ""),
+                              "keyword_match_type": t.get("keyword_match_type", "")}
                              for t in converting_not_added if t.get("term")],
         # Fading winners are sense-checked too: a competitor like 'astra ai' must be reframed as a
         # rival, not presented as "lost demand to recover".
@@ -1819,10 +1828,17 @@ def score_efficiency(data):
         _ooa_spend = _geo.get("out_of_area_spend")
         _ooa_pct = _geo.get("out_of_area_pct") or 0
         if _ooa_spend is not None and _geo.get("total_spend"):
+            # Name where the out-of-area spend actually landed - concrete substance for the slide
+            # (and it lets the client decide which areas, if any, they want to keep).
+            _fc = _geo.get("top_foreign_countries") or []
+            _areas = ""
+            if _fc:
+                _areas = (f" The top countries reached outside {_geo.get('target_country') or 'your target country'} "
+                          "were " + ", ".join(f"{c['country']} (£{c['spend']:.0f})" for c in _fc[:3]) + ".")
             if _ooa_spend >= max(20.0, 0.02 * _geo["total_spend"]):
                 _real = (f" The geographic report confirms the leak is real: in the last 30 days "
                          f"£{_ooa_spend:.0f} ({_ooa_pct:.0%} of spend) went to clicks from people "
-                         f"NOT physically in your targeted area.")
+                         f"NOT physically in your targeted area.{_areas}")
             elif _ooa_spend < 1:
                 _real = (" Encouragingly, the geographic report shows this exposure has not turned "
                          "into waste yet - effectively none of your spend reached people outside "

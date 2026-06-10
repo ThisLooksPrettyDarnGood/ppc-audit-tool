@@ -612,8 +612,12 @@ Findings:
 
 Rules:
 - One line per finding, in the SAME order. Maximum {len(items)} lines.
-- Plain English for a non-technical business owner. Under 22 words each.
+- Plain English for a non-technical business owner. Under 24 words each.
 - Lead with the concrete fact (a number, percentage or specific item) where there is one.
+- KEEP THE MAGNITUDE. If a finding states a multiple or share (e.g. "7x the account's average
+  CPC", "57% of impressions", "63% of spend"), carry it into your line - it is what makes a
+  small-pound figure land (a "£6 click" is forgettable; "a £6 click, about 7x the £1 average" is
+  not). Express multiples as "Nx the average"; do not convert them to a percentage yourself.
 - Neutral, observational tone - these are smaller notes worth flagging, not alarms. No hard sell.
 - British English spelling. Whole pounds, no pence.
 - Do NOT restate the main issue slides; keep each line tied to its finding above.
@@ -891,7 +895,9 @@ def _classify_sensecheck(sc_text: str, term_dicts: list) -> list:
             what = re.sub(re.escape(c), "", what, flags=re.IGNORECASE)
         what = what.strip(" -–:•|").strip()
         out.append({"term": term, "conversions": d.get("conversions", 0),
-                    "spend": d.get("spend", 0), "what": what, "cls": cls})
+                    "spend": d.get("spend", 0), "what": what, "cls": cls,
+                    "keyword": d.get("keyword", ""),
+                    "keyword_match_type": d.get("keyword_match_type", "")})
     return out
 
 
@@ -960,10 +966,22 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                                        "actually is): " + _sc_line)
                 elif "are NOT added as active keywords" in _d:
                     if _md:
+                        def _kw_clause(c):
+                            if not c.get("keyword"):
+                                return ""
+                            mt = (c.get("keyword_match_type") or "").replace("_", " ").lower()
+                            mt = f"{mt}-match " if mt and mt not in ("unspecified", "unknown") else ""
+                            return f", triggered by your {mt}keyword '{c['keyword']}'"
                         _md_facts = "; ".join(
                             f"'{c['term']}' ({c['conversions']} recorded conversion"
-                            f"{'s' if c['conversions'] != 1 else ''}, about £{c['spend']:.0f} total) = {c['what']}"
+                            f"{'s' if c['conversions'] != 1 else ''}, about £{c['spend']:.0f} total"
+                            f"{_kw_clause(c)}) = {c['what']}"
                             for c in _md[:4])
+                        _kw_note = (" Several were triggered by tight/EXACT-match keywords, which is the "
+                                    "key point: Google's match types are far looser than advertisers expect, "
+                                    "so even exact-match keywords pull in unrelated searches. Where a triggering "
+                                    "keyword is given above, name it in that term's bullet."
+                                    if any(c.get("keyword") for c in _md) else "")
                         _gen_facts = (", ".join(f"'{c['term']}'" for c in _genuine[:3])
                                       if _genuine else "")
                         _iss["detail"] += (
@@ -971,13 +989,14 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                             "terms that recorded conversions in the last 90 days but are not keywords. A web "
                             "sense-check of each shows the priciest are MISDIRECTED - searches meant for other "
                             "organisations, not this advertiser. Verified facts (use the EXACT numbers, do not "
-                            f"invent): {_md_facts}."
+                            f"invent): {_md_facts}.{_kw_note}"
                             + (f" GENUINE-DEMAND term(s) worth adding as keywords: {_gen_facts}." if _gen_facts
                                else " No clearly genuine-demand terms stood out.")
                             + " Structure WHAT'S HAPPENING as: bullet 1 frames the search-query-report review "
                               "(how many terms converted but are not keywords, and that the priciest are "
-                              "misdirected); then ONE concise bullet per misdirected term naming what it ACTUALLY "
-                              "is and its total spend (about 16 words each); then, if any, one bullet listing the "
+                              "misdirected, several pulled in by broad/exact-match keywords); then ONE concise "
+                              "bullet per misdirected term naming what it ACTUALLY is, its total spend, and (where "
+                              "given) the keyword that triggered it (about 18 words each); then, if any, one bullet listing the "
                               "genuine-demand term(s) worth adding. WHY IT MATTERS: this spend buys clicks meant "
                               "for other organisations, and because conversion tracking is inflated these recorded "
                               "'conversions' are likely page activity, not enquiries; each is small but together "

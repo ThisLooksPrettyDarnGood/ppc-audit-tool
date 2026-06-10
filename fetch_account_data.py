@@ -274,11 +274,17 @@ def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
     today = datetime.today()
     start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     end = today.strftime("%Y-%m-%d")
+    # segments.keyword.* exposes the KEYWORD that triggered each search term - the punchline for
+    # misdirected terms (e.g. an EXACT-match 'english ib tutor' triggering the search 'british
+    # council'). Segmenting by keyword splits a term across its triggering keywords, so we
+    # aggregate back per term and keep the dominant trigger (most conversions).
     gaql = f"""
         SELECT
             search_term_view.search_term,
             search_term_view.status,
             campaign.name,
+            segments.keyword.info.text,
+            segments.keyword.info.match_type,
             metrics.clicks,
             metrics.cost_micros,
             metrics.conversions
@@ -289,20 +295,35 @@ def get_converting_unkeyworded_terms(client, cid, lookback_days=90, limit=25):
         LIMIT {limit}
     """
     rows = run_query(client, cid, gaql)
-    terms = []
+    agg = {}
     for row in rows:
         st = row.search_term_view
         if st.status.name != "NONE":      # already added as a keyword (or excluded)
             continue
         m = row.metrics
-        terms.append({
-            "term": st.search_term,
-            "status": st.status.name,
-            "campaign_name": row.campaign.name,
-            "clicks": m.clicks,
-            "spend": round(m.cost_micros / 1_000_000, 2),
-            "conversions": round(m.conversions, 2),
+        kw_text = row.segments.keyword.info.text or ""
+        kw_match = row.segments.keyword.info.match_type.name if kw_text else ""
+        key = st.search_term
+        d = agg.setdefault(key, {
+            "term": st.search_term, "status": st.status.name,
+            "campaign_name": row.campaign.name, "clicks": 0, "spend": 0.0,
+            "conversions": 0.0, "keyword": "", "keyword_match_type": "", "_kw_conv": -1.0,
         })
+        d["clicks"] += m.clicks
+        d["spend"] += m.cost_micros / 1_000_000
+        d["conversions"] += m.conversions
+        # Keep the keyword that drove the most conversions for this term.
+        if kw_text and m.conversions > d["_kw_conv"]:
+            d["_kw_conv"] = m.conversions
+            d["keyword"] = kw_text
+            d["keyword_match_type"] = kw_match
+    terms = []
+    for d in agg.values():
+        d.pop("_kw_conv", None)
+        d["spend"] = round(d["spend"], 2)
+        d["conversions"] = round(d["conversions"], 2)
+        terms.append(d)
+    terms.sort(key=lambda x: x["conversions"], reverse=True)
     return terms
 
 
