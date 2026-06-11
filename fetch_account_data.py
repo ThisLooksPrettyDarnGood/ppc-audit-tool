@@ -220,6 +220,32 @@ def get_conversion_value_by_action(client, cid):
     return out
 
 
+def get_campaign_conversion_split(client, cid):
+    """
+    Which conversion actions each campaign recorded over the last 12 months:
+    {campaign_name: {action_name: conversions}}. Lets the duplicate-purchase check
+    test Dan's red-herring rule (11 June 2026): if each campaign only ever records
+    ONE of two same-category purchase actions, they are cleanly one-per-storefront;
+    if a single campaign records BOTH, the tags overlap on the same traffic and the
+    setup genuinely needs confirming. Caller wraps in try/except.
+    """
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    start = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT campaign.name, segments.conversion_action_name, metrics.conversions
+        FROM campaign
+        WHERE segments.date BETWEEN '{start}' AND '{today.strftime("%Y-%m-%d")}'
+          AND metrics.conversions > 0
+    """
+    out = {}
+    for r in run_query(client, cid, gaql):
+        c = out.setdefault(r.campaign.name, {})
+        n = r.segments.conversion_action_name
+        c[n] = round(c.get(n, 0) + r.metrics.conversions, 2)
+    return out
+
+
 def get_conversion_tracking_setting(client, cid):
     """
     Account-level conversion tracking settings. enhanced_conversions_for_leads_enabled
@@ -1429,6 +1455,14 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (per-action value query failed: {e})")
         # leave empty → analyser skips the zero-value check (cautious default)
 
+    print("  → Conversion actions per campaign (12m, duplicate-tag evidence)...")
+    campaign_conversion_split = {}
+    try:
+        campaign_conversion_split = get_campaign_conversion_split(client, cid)
+    except Exception as e:
+        print(f"    (campaign conversion split query failed: {e})")
+        # leave empty → duplicate check keeps its unenriched wording
+
     print("  → Campaigns...")
     campaigns = get_campaigns(client, cid)
 
@@ -1691,6 +1725,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "network_settings": network_settings,
         "network_split": network_split,
         "conversion_value_by_action": conversion_value_by_action,
+        "campaign_conversion_split": campaign_conversion_split,
         "brand_leakage": brand_leakage,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,

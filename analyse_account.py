@@ -192,6 +192,13 @@ def analyse_account(data, raw_questionnaire=""):
         _m = _re.search(r'e[- ]?com(?:merce)?\s+or\s+lead\s*gen[^:]*:\s*(.+)',
                         str(raw_questionnaire or ""), _re.I)
         data["claims_lead_gen"] = bool(_m and _re.search(r'lead|both', _m.group(1), _re.I))
+    if "stated_roas_target" not in data:
+        # The client's own ROAS bar (e.g. "Target ROAS 4:1 minimum") - lets bidding
+        # findings anchor recommendations to THEIR number rather than a generic one.
+        import re as _re
+        _rt = _re.search(r'(?:target\s+)?ROAS\s+(\d+(?:\.\d+)?)\s*:\s*1',
+                         str(raw_questionnaire or ""), _re.I)
+        data["stated_roas_target"] = float(_rt.group(1)) if _rt else None
     account_type = detect_account_type(data)
     findings = {
         "conversion_tracking": score_conversion_tracking(data),
@@ -721,19 +728,39 @@ def score_conversion_tracking(data):
                 _dup_divergent[_c] = [ca.get("name") for ca in _basis if ca.get("category") == _c]
                 del _dup_cats[_c]
         if _dup_divergent:
+            # Dan's red-herring rule (11 June 2026): if each campaign only ever records ONE
+            # of the actions, the one-tag-per-storefront read is supported and this is just
+            # a labelling note; if a single campaign records BOTH, its traffic converts
+            # through both tags and the overlap genuinely needs confirming.
+            _camp_split = data.get("campaign_conversion_split") or {}
             for _c, _names in _dup_divergent.items():
                 _pretty = _cat_pretty.get(_c, _c.replace("_", " ").lower())
                 _named = " and ".join(f"'{n}'" for n in _names[:3])
+                _evidence = ""
+                if _camp_split:
+                    _both = [(camp, acts) for camp, acts in _camp_split.items()
+                             if sum(1 for n in _names if (acts.get(n) or 0) > 0) >= 2]
+                    if _both:
+                        _bcamp, _bacts = max(_both, key=lambda x: sum(x[1].get(n, 0) for n in _names))
+                        _counts = " and ".join(f"{int(round(_bacts.get(n, 0)))}x '{n}'"
+                                               for n in _names if (_bacts.get(n) or 0) > 0)
+                        _evidence = (f" Notably, the '{_bcamp}' campaign has recorded BOTH actions over the "
+                                     f"last 12 months ({_counts}), so the same campaign's traffic converts "
+                                     "through both tags - the overlap is real and worth confirming, not just "
+                                     "a labelling note.")
+                    else:
+                        _evidence = (" Each campaign records only one of these actions, which supports the "
+                                     "separate-storefronts read - most likely fine as set up.")
                 issues.append(
                     f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
                     "but their monthly volumes move independently, so they appear to track different parts of "
                     "the business (for example two websites or product lines) rather than double-counting the "
-                    "same orders. Two quick confirmations settle it: visit the destination sites behind each "
-                    "conversion action (separate storefronts is usually obvious within a minute), and check "
-                    "inside the account that each order can only ever fire one of these tags - if both can "
-                    "fire on the same checkout, sales and revenue are overstated and CPAs understated. If they "
-                    "are genuinely separate, keep both but label them clearly so reporting can split "
-                    "performance by site."
+                    f"same orders.{_evidence} Two quick confirmations settle it: visit the destination sites "
+                    "behind each conversion action (separate storefronts is usually obvious within a minute), "
+                    "and check inside the account that each order can only ever fire one of these tags - if "
+                    "both can fire on the same checkout, sales and revenue are overstated and CPAs "
+                    "understated. If they are genuinely separate, keep both but label them clearly so "
+                    "reporting can split performance by site."
                 )
                 if rag == "green":
                     rag = "amber"
@@ -1272,6 +1299,9 @@ def score_account_structure(data):
         # Anchor it in time: name the most recent change in the window, or be honest that
         # Google only exposes ~30 days of change history, so the last real change is older
         # than that - we cannot see how much older (Dan, 11 June 2026).
+        # (Presenter context, not slide copy: the change_event API only exposes ~30 days,
+        # so with 0 changes the last real change is simply older than the window.)
+        _when_txt = ""
         if _changes and _activity.get("last_change"):
             try:
                 from datetime import datetime as _dt2
@@ -1279,15 +1309,9 @@ def score_account_structure(data):
                 _when_txt = f" The most recent change was on {_lc}."
             except (ValueError, TypeError):
                 _when_txt = ""
-        elif _changes == 0:
-            _when_txt = (" Google only exposes about 30 days of change history, so the last time "
-                         "anyone touched this account is older than that - how much older, the data "
-                         "cannot say.")
-        else:
-            _when_txt = ""
         issues.append(
             f"{_ch_txt} in the last {_activity.get('days', 28)} days, "
-            f"while it spent about £{_spend_30d:,.0f}.{_when_txt} Google Ads accounts need regular attention - "
+            f"while it spent £{_spend_30d:,.0f}.{_when_txt} Google Ads accounts need regular attention - "
             "search term reviews, bid and budget adjustments, negative keywords, ad tests. Money is "
             "being spent largely on autopilot with nobody steering."
         )
@@ -2248,17 +2272,47 @@ def score_bidding_strategy(data):
                 rag = "amber"
 
     if true_manual:
+        # Ecommerce path (Dan, 11 June 2026): the destination is VALUE-based bidding
+        # (target ROAS), tested via a campaign experiment against the client's own
+        # stated target - never a hard cutover. But sequencing matters: if a purchase
+        # tag records orders at £0 value, campaign ROAS reads are corrupted, so the
+        # value signal must be fixed BEFORE any value-bidding test can be judged.
+        _ecom_note = ""
+        if detect_account_type(data) == "ecommerce":
+            _tgt = data.get("stated_roas_target")
+            _tgt_txt = f" against your stated {_tgt:g}:1 target" if _tgt else ""
+            _vals_mc = data.get("conversion_value_by_action") or {}
+            _ca_mc = {ca.get("name"): ca for ca in (data.get("conversion_actions") or [])}
+            _zero_val_mc = any(
+                (v.get("conversions_12m") or 0) >= 10 and (v.get("value_12m") or 0) == 0
+                and _ca_mc.get(n, {}).get("category") == "PURCHASE"
+                and _ca_mc.get(n, {}).get("status") == "ENABLED"
+                for n, v in _vals_mc.items())
+            if _zero_val_mc:
+                _ecom_note = (
+                    " For an ecommerce account the destination is VALUE-based bidding (target ROAS)"
+                    f"{_tgt_txt} - but the revenue signal must be trustworthy first. Fix the £0-value "
+                    "purchase tag, let a clean period record, then trial target ROAS through a campaign "
+                    "experiment (a controlled A/B test) rather than a hard switch, so the move is judged "
+                    "on real data."
+                )
+            else:
+                _ecom_note = (
+                    " For an ecommerce account the natural next step is VALUE-based bidding (target ROAS)"
+                    f"{_tgt_txt}, trialled through a campaign experiment (a controlled A/B test) rather "
+                    "than a hard switch, so the move is judged on real data."
+                )
         if total_conversions >= 30:
             issues.append(
                 f"{len(true_manual)} campaign(s) still on Manual CPC despite "
                 f"{total_conversions:.0f} conversions/month. "
-                "Smart bidding should outperform manual at this volume."
+                f"Smart bidding should outperform manual at this volume.{_ecom_note}"
             )
             rag = "amber"
         else:
             issues.append(
                 f"{len(true_manual)} campaign(s) on Manual CPC. "
-                "Once you reach 30+ conversions/month, switch to smart bidding."
+                f"Once you reach 30+ conversions/month, switch to smart bidding.{_ecom_note}"
             )
             if rag == "green":
                 rag = "amber"
@@ -2625,12 +2679,20 @@ def score_efficiency(data):
     rank_lost = [c for c in isl if (c.get("lost_rank", 0) or 0) >= 30]
     if rank_lost:
         rank_lost.sort(key=lambda c: c.get("lost_rank", 0), reverse=True)
-        names = ", ".join(f"'{c['campaign']}' ({c['lost_rank']:.0f}%)" for c in rank_lost[:3])
+        # Always label the entity ("the X campaign", never a bare name) and, when these
+        # campaigns already convert, say what the missed share IS: proven demand being
+        # left to competitors - profitable volume, not extra spend (Dan, 11 June 2026).
+        names = ", ".join(f"the '{c['campaign']}' campaign ({c['lost_rank']:.0f}%)" for c in rank_lost[:3])
+        _conv_by_camp = {c.get("name"): (c.get("conversions_30d") or 0) for c in campaigns}
+        _opp = ("" if not any(_conv_by_camp.get(c["campaign"], 0) > 0 for c in rank_lost[:3]) else
+                " These campaigns already convert, so the missed impressions are demand you are proven to "
+                "win - recovering rank unlocks profitable volume from budget already being spent, rather "
+                "than needing new spend.")
         issues.append(
             f"{len(rank_lost)} Search campaign(s) are losing a large share of impressions to Ad Rank, "
             f"not budget: {names}. Ad Rank is driven by bids, ad relevance and Quality Score - so this is "
-            "a quality/bid problem, not a money one. Tighter keyword-to-ad relevance, stronger ad copy and "
-            "better landing pages recover this visibility without simply spending more."
+            f"a quality/bid problem, not a money one.{_opp} Tighter keyword-to-ad relevance, stronger ad "
+            "copy and better landing pages recover this visibility without simply spending more."
         )
         if rag == "green":
             rag = "amber"
