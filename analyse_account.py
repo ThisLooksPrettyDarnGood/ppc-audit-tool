@@ -147,6 +147,13 @@ def analyse_account(data, raw_questionnaire=""):
         data["competitors"] = parse_competitors_from_questionnaire(raw_questionnaire)
     if "ltv_note" not in data:
         data["ltv_note"] = parse_ltv_note(raw_questionnaire)
+    if "claims_lead_gen" not in data:
+        # Does the client SAY they do lead gen (or both)? If so and nothing lead-shaped
+        # is recording, that half of the business is invisible - a top-tier finding.
+        import re as _re
+        _m = _re.search(r'e[- ]?com(?:merce)?\s+or\s+lead\s*gen[^:]*:\s*(.+)',
+                        str(raw_questionnaire or ""), _re.I)
+        data["claims_lead_gen"] = bool(_m and _re.search(r'lead|both', _m.group(1), _re.I))
     account_type = detect_account_type(data)
     findings = {
         "conversion_tracking": score_conversion_tracking(data),
@@ -271,6 +278,7 @@ _ISSUE_SIGNATURES = [
     ("Revenue feedback loop",                      64, "amber",     "Conversion Tracking"),  # the ecommerce OCI equivalent
     ("appear set up but have recorded nothing",    58, "amber",     "Conversion Tracking"),  # dead genuine action (broken tag)
     ("Enhanced conversions for leads is not enabled", 50, "amber",  "Conversion Tracking"),  # EC-for-leads off (API-visible half)
+    ("no lead-type conversion action",              63, "amber",    "Conversion Tracking"),  # claims lead gen, lead side invisible
     ("imported from GA4",                          56, "amber",     "Conversion Tracking"),
     ("still use last-click attribution",           50, "amber",     "Conversion Tracking"),
     ("being picked up by non-brand campaigns",     48, "amber",     "Targeting & Keywords"),  # brand leakage
@@ -867,6 +875,27 @@ def score_conversion_tracking(data):
             if rag == "green":
                 rag = "amber"
 
+        # The client SAYS they do lead generation (or both), but nothing lead-shaped is
+        # recording - quote forms, contact forms and calls are invisible to the account,
+        # so bidding chases only the tracked sales and 'improve lead quality' cannot
+        # even be measured. (SAIC: 'Both' on the questionnaire, only purchases record.)
+        _LEAD_CATS = {"LEAD", "CONTACT", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT",
+                      "REQUEST_QUOTE", "PHONE_CALL_LEAD", "IMPORTED_LEAD"}
+        if data.get("claims_lead_gen"):
+            _lead_recording = any(_is_counting(ca) for ca in active_actions
+                                  if ca.get("category") in _LEAD_CATS)
+            if not _lead_recording:
+                issues.append(
+                    "The business generates leads as well as sales, but no lead-type conversion "
+                    "action (quote request, contact form, call) is recording anything - the lead "
+                    "side of the business is invisible to Google Ads. Bidding can only optimise "
+                    "towards what it can see, and the stated aim of improving lead quality cannot "
+                    "even be measured until enquiries are tracked. Setting up lead conversion "
+                    "actions is the first step."
+                )
+                if rag == "green":
+                    rag = "amber"
+
         # Enhanced Conversions for LEADS (the API-visible half of EC - the web/purchase
         # side lives in the tag and is not exposed, so we say nothing about it). A
         # lead-gen account with this off is leaving measurement accuracy on the table.
@@ -1351,10 +1380,16 @@ def score_targeting_keywords(data):
     # ── Brand vs non-brand: a top auditor never lets the client's OWN brand name be
     # presented as "proven new demand" - brand is cheap and already theirs. Derive brand
     # token(s) from the account name and exclude them from the SQR analysis below.
-    _generic = {"ltd", "limited", "pool", "pools", "leisure", "group", "services", "company",
-                "uk", "the", "ads", "account", "marketing", "co", "and"}
-    brand_tokens = [w.lower() for w in str(data.get("account_name", "")).split()
-                    if len(w) > 3 and w.lower() not in _generic]
+    # One source of truth for brand tokens (fetch_account_data filters generic words AND
+    # human first names - 'Mark - Dynashop' must label as 'dynashop', not 'mark').
+    try:
+        from fetch_account_data import _brand_tokens_from as _btf
+        brand_tokens = _btf(data.get("account_name", ""))
+    except Exception:
+        _generic = {"ltd", "limited", "pool", "pools", "leisure", "group", "services", "company",
+                    "uk", "the", "ads", "account", "marketing", "co", "and"}
+        brand_tokens = [w.lower() for w in str(data.get("account_name", "")).split()
+                        if len(w) > 3 and w.lower() not in _generic]
 
     def _is_brand(term):
         t = str(term).lower()

@@ -1025,7 +1025,16 @@ def get_geo_user_location_spend(client, cid):
 def _brand_tokens_from(name):
     generic = {"ltd", "limited", "pool", "pools", "leisure", "group", "services", "company",
                "uk", "the", "ads", "account", "marketing", "co", "and"}
-    return [w.lower() for w in str(name).split() if len(w) > 3 and w.lower() not in generic]
+    # Account names are often "FirstName - Brand" ('Mark - Dynashop'), and a person's
+    # name is not a brand token - it mislabels the brand-leakage finding.
+    first_names = {"mark", "james", "john", "paul", "david", "dave", "mike", "michael",
+                   "chris", "steve", "stephen", "andy", "andrew", "daniel", "danny",
+                   "matt", "matthew", "luke", "adam", "ryan", "jack", "josh", "peter",
+                   "robert", "richard", "will", "william", "liam", "simon", "stuart",
+                   "gary", "neil", "craig", "sean", "kevin", "darren", "sarah", "emma",
+                   "kate", "lucy", "claire", "laura", "lisa", "anna", "hannah", "sophie"}
+    return [w.lower() for w in str(name).split()
+            if len(w) > 3 and w.lower() not in generic and w.lower() not in first_names]
 
 
 def get_brand_leakage(client, cid, account_name):
