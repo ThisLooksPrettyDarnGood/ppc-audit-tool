@@ -118,6 +118,8 @@ Keep the headline under 10 words.
 NEVER use the word "misdirected" in client-facing copy - it is internal classification jargon.
 Say what actually happened instead: "searches meant for a different company", "searches for the
 brand/body X", or name it plainly as a competitor-brand search.
+When revenue or conversions are missing from reporting, say "under-reported" or "not reported" -
+never "undervalued" (a £0-value order is not valued too low, it is not reported at all).
 Each WHATS_HAPPENING bullet: aim 12-18 words, hard max 22  -  one fact, plainly stated.
 Each WHY_IT_MATTERS bullet: aim 12-18 words, hard max 24  -  one commercial consequence.
 Each recommendation must be a single actionable sentence starting with a verb (under 18 words).
@@ -536,6 +538,8 @@ SCORE_SUMMARY: <2 - 3 sentence plain-English verdict matching the overall score>
         "Always use British English spelling. "
         "Never use the word 'misdirected' in client-facing copy - say 'searches meant for a "
         "different company' or name the competitor/brand plainly. "
+        "When revenue or conversions are missing from reporting, say 'under-reported' or 'not "
+        "reported' - never 'undervalued'. "
         "Respond ONLY in the exact key: value format requested. No extra text, no markdown."
     )
     raw = _call_openai(client, exec_system_prompt, prompt)
@@ -640,6 +644,9 @@ Rules:
 - Never use the word "misdirected" - say "searches meant for a different company" or name the brand.
 - Keep geography precise: "outside the targeted area" is NOT the same as "outside the UK" - reuse
   the finding's own geographic phrasing and figures exactly.
+- When a finding says "X of Y", give the percentage too, e.g. "12 of 99 - about 12%".
+- When a finding names places (countries, regions), keep up to three of them so the spread shows,
+  e.g. "mostly Romania, India and France".
 - British English spelling. Whole pounds, no pence.
 - Do NOT restate the main issue slides; keep each line tied to its finding above.
 

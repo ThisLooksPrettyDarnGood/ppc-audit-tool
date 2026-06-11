@@ -745,9 +745,13 @@ def score_conversion_tracking(data):
                         _counts = " and ".join(f"{int(round(_bacts.get(n, 0)))}x '{n}'"
                                                for n in _names if (_bacts.get(n) or 0) > 0)
                         _evidence = (f" Notably, the '{_bcamp}' campaign has recorded BOTH actions over the "
-                                     f"last 12 months ({_counts}), so the same campaign's traffic converts "
-                                     "through both tags - the overlap is real and worth confirming, not just "
-                                     "a labelling note.")
+                                     f"last 12 months ({_counts}). The UNEQUAL counts matter: if both tags "
+                                     "fired on every order the numbers would match, so this is not blanket "
+                                     "double-counting. The two likeliest explanations are that buyers from "
+                                     "this campaign genuinely purchase through both sites, or that one "
+                                     "action is a newer tag running alongside an older one that was never "
+                                     "switched off after a migration - which one it is changes the fix, so "
+                                     "it needs confirming, not just labelling.")
                     else:
                         _evidence = (" Each campaign records only one of these actions, which supports the "
                                      "separate-storefronts read - most likely fine as set up.")
@@ -1059,12 +1063,12 @@ def score_conversion_tracking(data):
                                   if ca.get("category") in _LEAD_CATS)
             if not _lead_recording:
                 issues.append(
-                    "The business generates leads as well as sales, but no lead-type conversion "
-                    "action (quote request, contact form, call) is recording anything - the lead "
-                    "side of the business is invisible to Google Ads. Bidding can only optimise "
-                    "towards what it can see, and the stated aim of improving lead quality cannot "
-                    "even be measured until enquiries are tracked. Setting up lead conversion "
-                    "actions is the first step."
+                    "You told us in your questionnaire that lead generation matters to the business "
+                    "alongside online sales - yet no lead-type conversion action (quote request, "
+                    "contact form, call) is recording anything, so the lead side of the business is "
+                    "invisible to Google Ads. Bidding can only optimise towards what it can see, and "
+                    "the lead goals you described cannot even be measured until enquiries are "
+                    "tracked. Setting up lead conversion actions is the first step."
                 )
                 if rag == "green":
                     rag = "amber"
@@ -2902,6 +2906,24 @@ def build_strengths(data):
     summary = data.get("account_summary_30d", {})
     if (summary.get("conversions", 0) or 0) > 0:
         s.append("conversion tracking live and recording enquiries")
+    # Spend discipline: when we LOOKED for the classic waste signals and found none, say
+    # so - "no significant wasted spend" is a verified finding, not an omission (Dan,
+    # 11 June 2026: a tracking-heavy deck must still show the waste angle was checked).
+    _terms = data.get("top_search_terms") or []
+    _acct = (summary.get("spend") or 0)
+    if _terms and _acct >= 300:
+        _nc_spend = sum((t.get("spend") or 0) for t in _terms
+                        if (t.get("conversions") or 0) == 0)
+        _avg_cpc = summary.get("avg_cpc") or 0
+        _pricey = data.get("priciest_clicks") or []
+        _max_cpc = max((p.get("cpc") or 0) for p in _pricey) if _pricey else None
+        _no_spikes = (_max_cpc is None or not _avg_cpc or _max_cpc <= 2.5 * _avg_cpc)
+        if _nc_spend <= 0.15 * _acct and _no_spikes:
+            _spike_txt = (f" and no runaway CPCs (priciest single click £{_max_cpc:.2f} vs "
+                          f"£{_avg_cpc:.2f} average)" if _max_cpc and _avg_cpc else "")
+            s.append(f"spend discipline is good - non-converting search spend is only about "
+                     f"£{_nc_spend:.0f} ({_nc_spend / _acct:.0%} of the month), spread thinly "
+                     f"across small terms{_spike_txt}")
     return s
 
 
