@@ -792,10 +792,25 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
                    if (_is_ecom or _is_mixed) else "")
     _rev_line12 = (f" | Revenue {perf.get('revenue_12m')} | ROAS {perf.get('roas_12m')}"
                    if (_is_ecom or _is_mixed) else "")
+    # Average order value: the bridge between 'conversions are up' and 'ROAS is down'.
+    # Hand GPT the computed figures so the commentary EXPLAINS the divergence instead of
+    # leaving the reader asking what changed (Dan, 11 June 2026).
+    _aov_line = ""
+    _t30c, _t12c = (t30.get("conversions") or 0), (t12.get("conversions") or 0)
+    # Blended revenue-per-order is itself a measurement artifact when a purchase action
+    # records orders at £0 value - don't hand GPT a number we know is corrupted.
+    _value_clean = "revenue is UNDER-tracked" not in (conversion_caveat or "")
+    if (_value_clean and (t30.get("value") or 0) > 0 and (t12.get("value") or 0) > 0
+            and _t30c >= 5 and _t12c >= 30):
+        _aov_line = (f"\nAverage tracked revenue per order: £{t30['value'] / _t30c:.0f} (last 30 days) "
+                     f"vs £{t12['value'] / _t12c:.0f} (12-month average)")
     if _is_ecom:
         _ecom_instr = (
             "\nThis is an ECOMMERCE account: lead with revenue and ROAS (return on ad spend) - that is "
-            "the commercial story. Treat conversion counts and CPA as secondary detail. Instead of the "
+            "the commercial story. Treat conversion counts and CPA as secondary detail. If ROAS has "
+            "moved in the OPPOSITE direction to conversions/conversion rate, use the average revenue "
+            "per order figures to say WHY in one plain sentence (e.g. orders are up but each order is "
+            "worth far less) - never leave that divergence unexplained. Instead of the "
             "OCI caveat, end with one short caveat that ROAS here is TOP-LINE order value: it does not "
             "reflect margin, returns or new-versus-returning customers, so true profitability may differ.")
     elif _is_mixed:
@@ -816,7 +831,7 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
 
     context = f"""
 Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d','?')} | Conversions {perf.get('convs_30d','?')} | CPA {perf.get('cpa_30d','?')} | SIS {perf.get('sis_30d','?')}{_rev_line30}{_share_line(t30)}
-Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}{_rev_line12}{_share_line(t12)}
+Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}{_rev_line12}{_share_line(t12)}{_aov_line}
 """.strip()
 
     client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
@@ -845,10 +860,21 @@ Write only the 2 - 3 sentence commentary. No labels, no bullet points.
     return _call_openai(client, system, prompt).strip()
 
 
-def _retry(fn, label: str, max_attempts: int = 3):
-    """Call fn() up to max_attempts times, returning the first non-empty result."""
+def _retry(fn, label: str, max_attempts: int = 3, validate=None):
+    """Call fn() up to max_attempts times, returning the first non-empty result.
+
+    validate: optional callable(result) -> bool replacing the generic emptiness check.
+    Needed for issue slides: their dict always carries a fallback title, which the
+    generic check counted as 'content' - so a GPT blank shipped as an empty slide
+    without a single retry (SAIC deck, slide 9, 11 June 2026).
+    """
     for attempt in range(1, max_attempts + 1):
         result = fn()
+        if validate is not None:
+            if validate(result):
+                return result
+            print(f"  ⚠ {label}: failed validation on attempt {attempt}, retrying...")
+            continue
         # Determine if result has real content
         if isinstance(result, dict):
             has_content = any(v for v in result.values() if isinstance(v, str) and v.strip())
@@ -1055,21 +1081,46 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                                        "competitor/misdirected term (recommend a negative keyword or a deliberate "
                                        "competitor campaign), and note any 'leads' may include low-value tracked actions.")
 
+    # A narrated issue is only usable with real body copy - the title alone is not
+    # enough (it falls back to the category name, which is how a blank slide shipped).
+    def _narration_ok(d):
+        return bool(isinstance(d, dict) and str(d.get("whats_happening", "")).strip()
+                    and d.get("recommendations"))
+
+    # Reserve list: ranked findings below the cut. If a selected finding narrates empty
+    # after all retries, promote the next reserve instead of shipping a blank slide;
+    # the failed finding still surfaces in Additional Observations below.
+    _all_ranked = select_top_issues(findings, max_issues=50, apply_floor=False)
+    _sel_details = {i.get("detail") for i in selected}
+    _reserve = [i for i in _all_ranked if i.get("detail") not in _sel_details]
+
     issues = []
-    for n, iss in enumerate(selected, 1):
-        print(f"  → Generating issue {n}/{len(selected)}: {iss['category']} (sev {iss['severity']:.0f})...")
+    _narrated_ok = []   # the findings that actually made the deck
+    _queue = list(selected)
+    n = 0
+    while _queue:
+        iss = _queue.pop(0)
+        n += 1
+        print(f"  → Generating issue {n}: {iss['category']} (sev {iss['severity']:.0f})...")
         narrated = _retry(lambda i=iss: _narrative_issue(client, i, account_type),
-                          f"Issue {n}")
+                          f"Issue {n}", validate=_narration_ok)
+        if not _narration_ok(narrated):
+            print(f"  ✗ Issue {n} narrated empty after retries - skipping it "
+                  f"({iss.get('detail', '')[:70]}...) and promoting the next-ranked finding.")
+            if _reserve:
+                _queue.append(_reserve.pop(0))
+            continue
         narrated["rag"] = iss["rag"]            # trust the analyser's RAG, not the model
         narrated["category"] = iss["category"]
         issues.append(narrated)
+        _narrated_ok.append(iss)
 
     # ── Additional observations: genuine findings that ranked BELOW the 6-slide cut ──
     # They were only living in the internal email; surface them on their own slide so
     # the client sees the full picture (the slide is auto-deleted when there are none).
-    _all_ranked = select_top_issues(findings, max_issues=50, apply_floor=False)
-    _selected_details = {i.get("detail") for i in selected}
-    _below_cut = [i for i in _all_ranked if i.get("detail") not in _selected_details]
+    # Excludes what made the deck - so a finding whose narration failed lands here.
+    _deck_details = {i.get("detail") for i in _narrated_ok}
+    _below_cut = [i for i in _all_ranked if i.get("detail") not in _deck_details]
     if _below_cut:
         print(f"  → Summarising {min(len(_below_cut), 6)} additional observation(s)...")
         additional_observations = _retry(
@@ -1169,6 +1220,18 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                 "a clean improvement or decline; state plainly that tracking changed around that month, the periods "
                 "are measured differently, and the trend should be read with caution until a full period under the "
                 "current setup is available.")
+        # Revenue under-tracking: a purchase action counts orders but passes £0 value, so
+        # revenue/ROAS figures exclude part of the business and the ROAS TREND bends with
+        # the order mix. Never let the commentary present that ROAS as a clean read.
+        _rut = (findings.get("conversion_tracking", {}) or {}).get("revenue_undertracked") or []
+        if _rut:
+            _conv_caveat += (
+                "\nIMPORTANT: revenue is UNDER-tracked - the purchase action(s) "
+                + ", ".join(f"'{n}'" for n in _rut[:2]) +
+                " record orders but pass NO revenue value, so the revenue and ROAS figures exclude that part "
+                "of the business entirely. State plainly that true ROAS is HIGHER than shown, and that the "
+                "ROAS trend is unreliable (it falls as the untracked side's share of orders grows) until the "
+                "value tag is fixed. Do NOT present the ROAS decline as a clean performance read.")
         perf_commentary = _retry(
             lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat,
                                                account_type=str(findings.get("account_type") or "")),

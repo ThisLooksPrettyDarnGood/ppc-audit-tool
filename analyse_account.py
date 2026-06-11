@@ -263,6 +263,7 @@ _ISSUE_SIGNATURES = [
     ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
     ("PRIMARY conversions are dominated by low-value", 84, "amber_red", "Conversion Tracking"),  # quantified inflation - root cause
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
+    ("counting orders without passing their value", 75, "amber_red", "Conversion Tracking"), # £0-value purchase action - ROAS understated
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs
     ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams (e.g. two storefronts) - verify, not alarm
     ("paid some very expensive single clicks",     60, "amber",     "Bidding Strategy"),  # CPC spikes hidden by averages
@@ -286,7 +287,8 @@ _ISSUE_SIGNATURES = [
     ("Cost per conversion is",                     48, "amber",     "Bidding Strategy"),
     # Efficiency / coverage / settings (expert checks)
     ("set to 'Presence or interest' on low-spend", 34, "amber",     "Budget & Coverage"),  # small leak -> Observations
-    ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak (material)
+    ("the actual leak is small so far",            42, "amber",     "Budget & Coverage"),  # POI measured-small -> Observations
+    ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak (confirmed big or unmeasured)
     ("A network setting worth tidying",            36, "amber",     "Budget & Coverage"),  # opt-in confirmed tiny -> Observations
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
@@ -301,6 +303,7 @@ _ISSUE_SIGNATURES = [
     ("have a LOW score (4 or below)",              54, "amber",     "Ad Rank & Quality"),  # low Quality Score
     # Targeting & keywords
     ("look like competitor business names",         63, "amber",     "Targeting & Keywords"),  # competitor terms (reframe)
+    ("Average order value has dropped hard",       70, "amber",     "Revenue & Value"),      # AOV collapse - explains a falling ROAS
     ("Fading winner spotted by comparing",         72, "amber",     "Targeting & Keywords"),  # cross-window pattern (high value)
     ("A small amount of non-converting spend",     34, "amber",     "Targeting & Keywords"),  # tiny leak -> Observations
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend (material)
@@ -614,6 +617,7 @@ def score_conversion_tracking(data):
     # ad-attributed conversions, or real multi-counting) - drives the downstream "don't celebrate
     # the CPA" caveat. Stays False for latent setup risk where the reported numbers are genuine.
     conversions_inflated = False
+    revenue_undertracked = []   # (name, orders) of purchase actions counting orders at £0 value
     conversion_actions = data.get("conversion_actions", [])
     summary = data.get("account_summary_30d", {})
     total_conversions = summary.get("conversions", 0)
@@ -754,6 +758,38 @@ def score_conversion_tracking(data):
                 "rest to secondary, and reconcile against the back-end enquiry count so there is a single source of truth."
             )
             conversions_inflated = True
+            if rag not in ("red",):
+                rag = "amber_red"
+
+        # ── Orders counted, revenue not passed (ROAS understated) ────────────────
+        # A primary PURCHASE action recording material orders but £0 of conversion value
+        # over 12 months means part of the business is invisible to every revenue figure
+        # (SAIC's 'DynaShop Purchase': 41 orders, £0 - found 11 June 2026, the real cause
+        # of its 'ROAS halved' read). ROAS reads low, value bidding optimises on partial
+        # data, and the reported revenue trend bends with the order MIX, not performance.
+        # Only meaningful when some OTHER action does record value (otherwise the account
+        # simply doesn't use value tracking, which the revenue-loop finding covers).
+        _vals = data.get("conversion_value_by_action") or {}
+        _any_value = any((v.get("value_12m") or 0) > 0 for v in _vals.values())
+        for ca in active_actions:
+            if not (_is_primary(ca) and ca.get("category") == "PURCHASE"):
+                continue
+            _v = _vals.get(ca.get("name"))
+            if (_any_value and _v and (_v.get("conversions_12m") or 0) >= 10
+                    and (_v.get("value_12m") or 0) == 0):
+                revenue_undertracked.append((ca.get("name"), _v["conversions_12m"]))
+        if revenue_undertracked:
+            _zn = "; ".join(f"'{n}' recorded {c:.0f} orders but £0 of revenue"
+                            for n, c in revenue_undertracked[:2])
+            issues.append(
+                f"Part of the business is invisible to the revenue figures: over the last 12 months {_zn} - "
+                "the tag is counting orders without passing their value. Every revenue-based figure (ROAS, "
+                "revenue trends, value-based bidding) only sees the orders that DO carry value, so true "
+                "return on ad spend is HIGHER than reported - and as this action's share of orders grows, "
+                "reported ROAS falls even if nothing actually got worse. Fix the value parameter on this "
+                "conversion tag so it passes the order total at purchase, and treat ROAS trends as "
+                "unreliable until a clean period has been recorded."
+            )
             if rag not in ("red",):
                 rag = "amber_red"
 
@@ -1084,6 +1120,7 @@ def score_conversion_tracking(data):
         "headline": _ct_headline(rag, total_conversions, len(conversion_actions)),
         "issues": issues,
         "conversions_inflated": conversions_inflated,
+        "revenue_undertracked": [n for n, _ in revenue_undertracked],
         "tracking_change": tracking_change,
         "data_points": {
             "conversion_actions_count": len(conversion_actions),
@@ -2406,6 +2443,43 @@ def score_efficiency(data):
                     rag = "amber"
                 break
 
+    # ── Average order value collapse (ecommerce) ──────────────────────────────
+    # Dan (11 June 2026, SAIC): conversions UP, conversion rate UP, ROAS HALVED - the deck
+    # must say WHY. When revenue per tracked order falls hard while orders hold up, the
+    # ROAS story is about order VALUE (product mix, discounting, or a value-tracking
+    # change), not about the ads converting worse. Ecommerce only: on mixed accounts the
+    # conversions total includes lead actions, which would corrupt the order-value maths.
+    _praw = (data.get("performance_summary") or {}).get("_raw") or {}
+    _pt30, _pt12 = _praw.get("t30") or {}, _praw.get("t12") or {}
+    # Skip when a purchase action records orders at £0 value: blended order-value maths is
+    # then a measurement artifact, and the zero-value finding owns the ROAS explanation.
+    _ca_by_name = {ca.get("name"): ca for ca in (data.get("conversion_actions") or [])}
+    _zero_val_purchase = any(
+        (v.get("conversions_12m") or 0) >= 10 and (v.get("value_12m") or 0) == 0
+        and _ca_by_name.get(n, {}).get("category") == "PURCHASE"
+        and _ca_by_name.get(n, {}).get("status") == "ENABLED"
+        for n, v in (data.get("conversion_value_by_action") or {}).items())
+    if (account_type == "ecommerce" and not _zero_val_purchase
+            and (_pt30.get("conversions") or 0) >= 5 and (_pt12.get("conversions") or 0) >= 30
+            and (_pt30.get("value") or 0) > 0 and (_pt12.get("value") or 0) > 0):
+        _aov30 = _pt30["value"] / _pt30["conversions"]
+        _aov12 = _pt12["value"] / _pt12["conversions"]
+        if _aov30 < 0.65 * _aov12:
+            issues.append(
+                f"Average order value has dropped hard: the last 30 days averaged about £{_aov30:.0f} of "
+                f"tracked revenue per order, versus about £{_aov12:.0f} over the last 12 months. This - not "
+                "the ads converting worse - is what is pulling ROAS down: orders are still coming in, but "
+                "each one is worth roughly "
+                + ("half" if _aov30 <= 0.55 * _aov12 else "a third less than")
+                + " what it used to be. The three usual causes, in rough order of likelihood: the product "
+                "mix has shifted towards cheaper items, heavier discounting or promotions, or a change in "
+                "how order values are passed to the conversion tag. Segment recent sales by product line "
+                "and sanity-check the conversion value settings to pin down which it is - and if cheaper "
+                "products are genuinely taking over, margin-based bidding (POAS) matters all the more."
+            )
+            if rag == "green":
+                rag = "amber"
+
     # ── Impression share lost to BUDGET (capped campaigns) ────────────────────
     isl = data.get("impression_share_lost") or []
     # Pair with conversions so we only push budget where it actually converts.
@@ -2492,7 +2566,25 @@ def score_efficiency(data):
         else:
             _real = (" (The exact out-of-area share needs a geographic report to confirm.)")
         material = _poi_spend >= max(100.0, 0.10 * (_acct_spend or 0))
-        if material:
+        # Severity follows the MEASURED money (Dan, 11 June 2026, SAIC review): 'Presence or
+        # interest' across 100% of spend is exposure, but if the geographic report says only
+        # ~5% actually leaked, that is a tidy-up - not the deck's headline issue. Only an
+        # unmeasured leak or a confirmed-big one (>=10% of spend or >=£150/30d) leads.
+        _measured = _ooa_spend is not None and bool(_geo.get("total_spend"))
+        _leak_big = _measured and (_ooa_pct >= 0.10 or _ooa_spend >= 150)
+        if material and _measured and not _leak_big:
+            _size = (f"£{_ooa_spend:.0f} ({_ooa_pct:.0%} of spend) reached people outside your "
+                     "targeted area in the last 30 days" if _ooa_spend >= 1 else
+                     "effectively none of your spend reached people outside your targeted area "
+                     "in the last 30 days")
+            issues.append(
+                f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
+                f"{names}.{_mag} The setting exposes the whole budget to out-of-area clicks, but the geographic "
+                f"report shows the actual leak is small so far: {_size}.{_areas} Not a needle-mover at today's "
+                "spend - switch to 'Presence (people in, or regularly in, your locations)' as a free tidy-up "
+                "that stops the leak growing as budgets scale."
+            )
+        elif material:
             local_note = (" For a local business this is a silent leak worth closing."
                           if account_type in ("lead_gen", "unknown", "mixed") else "")
             issues.append(
@@ -2517,7 +2609,9 @@ def score_efficiency(data):
     _geo = data.get("geo_user_location") or {}
     _foreign = _geo.get("foreign_country_spend") or 0
     _total = _geo.get("total_spend") or 0
-    if _total and _foreign >= max(30.0, 0.03 * _total) and _geo.get("top_foreign_countries"):
+    # Gate at 5% / £50: below that the POI finding's named-countries note already covers it,
+    # and a 3%-of-spend leak reported twice reads as padding (Dan, 11 June 2026).
+    if _total and _foreign >= max(50.0, 0.05 * _total) and _geo.get("top_foreign_countries"):
         _fc = _geo["top_foreign_countries"]
         _named = ", ".join(f"{c['country']} (£{c['spend']:.0f})" for c in _fc[:3])
         _fpct = _geo.get("foreign_country_pct") or 0

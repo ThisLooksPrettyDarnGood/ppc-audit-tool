@@ -193,6 +193,33 @@ def get_conversion_volume_by_month(client, cid):
     return series
 
 
+def get_conversion_value_by_action(client, cid):
+    """
+    12-month ad-attributed conversions AND conversion value per action. Catches the
+    'orders counted, revenue never passed' tag gap: a purchase action with material
+    order volume and £0 of value silently understates ROAS, and reported ROAS then
+    falls as that action's share of orders grows (SAIC's 'DynaShop Purchase', 11 June
+    2026: 41 orders, £0). Returns {action_name: {"conversions_12m", "value_12m"}}.
+    Caller wraps in try/except.
+    """
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    start = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT segments.conversion_action_name, metrics.conversions, metrics.conversions_value
+        FROM customer
+        WHERE segments.date BETWEEN '{start}' AND '{today.strftime("%Y-%m-%d")}'
+    """
+    rows = run_query(client, cid, gaql)
+    out = {}
+    for r in rows:
+        d = out.setdefault(r.segments.conversion_action_name,
+                           {"conversions_12m": 0.0, "value_12m": 0.0})
+        d["conversions_12m"] = round(d["conversions_12m"] + r.metrics.conversions, 2)
+        d["value_12m"] = round(d["value_12m"] + r.metrics.conversions_value, 2)
+    return out
+
+
 def get_conversion_tracking_setting(client, cid):
     """
     Account-level conversion tracking settings. enhanced_conversions_for_leads_enabled
@@ -1343,6 +1370,14 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (monthly volume query failed: {e})")
         # leave empty → analyser skips the tracking-change check (cautious default)
 
+    print("  → Conversion value per action (12m, zero-value purchase check)...")
+    conversion_value_by_action = {}
+    try:
+        conversion_value_by_action = get_conversion_value_by_action(client, cid)
+    except Exception as e:
+        print(f"    (per-action value query failed: {e})")
+        # leave empty → analyser skips the zero-value check (cautious default)
+
     print("  → Campaigns...")
     campaigns = get_campaigns(client, cid)
 
@@ -1594,6 +1629,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "ad_assets": ad_assets,
         "network_settings": network_settings,
         "network_split": network_split,
+        "conversion_value_by_action": conversion_value_by_action,
         "brand_leakage": brand_leakage,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
