@@ -352,7 +352,58 @@ def get_change_activity(client, cid, days=28):
         LIMIT 1000
     """
     rows = run_query(client, cid, gaql)
-    return {"days": days, "changes": len(rows)}
+    # Most recent change date in the window, e.g. '2026-06-03' - lets the finding say
+    # WHEN someone last touched the account, not just a count. (The API caps change
+    # history at ~30 days, so beyond the window we can only say 'older than that'.)
+    last_change = ""
+    for r in rows:
+        d = str(r.change_event.change_date_time)[:10]
+        if d > last_change:
+            last_change = d
+    return {"days": days, "changes": len(rows), "last_change": last_change or None}
+
+
+def get_negative_keywords(client, cid):
+    """
+    Actual negative keyword texts with scope (campaign-level + shared sets), for the
+    negative-conflict check: a negative that matches a search term which CONVERTED in
+    the last 90 days is the classic silent sabotage - the term served and converted,
+    then a (usually broad) negative cut it off. Ad-group-level negatives are excluded
+    from conflict checking (we can't tell which ad group served the term), but they
+    are already in negative_keyword_count. Caller wraps in try/except.
+    Returns {"campaign": [{campaign, text, match_type}],
+             "shared":   [{set, text, match_type}],
+             "shared_campaigns": {set_name: [campaign names]}}.
+    """
+    out = {"campaign": [], "shared": [], "shared_campaigns": {}}
+    for r in run_query(client, cid, """
+        SELECT campaign.name, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
+        FROM campaign_criterion
+        WHERE campaign_criterion.negative = TRUE
+          AND campaign_criterion.type = 'KEYWORD'
+          AND campaign_criterion.status != 'REMOVED'
+          AND campaign.status != 'REMOVED'
+    """):
+        out["campaign"].append({"campaign": r.campaign.name,
+                                "text": r.campaign_criterion.keyword.text,
+                                "match_type": r.campaign_criterion.keyword.match_type.name})
+    for r in run_query(client, cid, """
+        SELECT shared_set.name, shared_criterion.keyword.text, shared_criterion.keyword.match_type
+        FROM shared_criterion
+        WHERE shared_criterion.type = 'KEYWORD'
+          AND shared_set.status != 'REMOVED'
+    """):
+        out["shared"].append({"set": r.shared_set.name,
+                              "text": r.shared_criterion.keyword.text,
+                              "match_type": r.shared_criterion.keyword.match_type.name})
+    for r in run_query(client, cid, """
+        SELECT campaign.name, shared_set.name
+        FROM campaign_shared_set
+        WHERE campaign_shared_set.status != 'REMOVED'
+          AND campaign.status != 'REMOVED'
+    """):
+        out["shared_campaigns"].setdefault(r.shared_set.name, []).append(r.campaign.name)
+    return out
 
 
 def get_hourly_performance(client, cid):
@@ -1460,6 +1511,16 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (negative keyword query failed: {e})")
         neg_kw_total = None
 
+    print("  → Negative keyword texts (conflict check)...")
+    negative_keywords = None
+    try:
+        negative_keywords = get_negative_keywords(client, cid)
+        print(f"    {len(negative_keywords['campaign'])} campaign-level + "
+              f"{len(negative_keywords['shared'])} shared-set negatives")
+    except Exception as e:
+        print(f"    (negative keyword texts query failed: {e})")
+        # leave None → analyser skips the conflict check (cautious default)
+
     print("  → Auto-apply recommendations...")
     auto_apply_enabled = False
     auto_apply_types = []
@@ -1635,6 +1696,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "rsa_ad_strength": rsa_ad_strength,
         "paused_campaign_history": paused_campaign_history,
         "negative_keyword_count": neg_kw_total,
+        "negative_keywords": negative_keywords,
         "auto_apply_recommendations": auto_apply_enabled,
         "auto_apply_types": auto_apply_types,
         "performance_summary": performance_summary,

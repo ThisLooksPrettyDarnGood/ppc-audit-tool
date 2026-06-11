@@ -307,7 +307,10 @@ _ISSUE_SIGNATURES = [
     ("Fading winner spotted by comparing",         72, "amber",     "Targeting & Keywords"),  # cross-window pattern (high value)
     ("A small amount of non-converting spend",     34, "amber",     "Targeting & Keywords"),  # tiny leak -> Observations
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend (material)
-    ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries (high-value "dropped ball")
+    ("are blocking searches that have CONVERTED",  73, "amber_red", "Targeting & Keywords"),  # negative conflict - silent sabotage
+    ("an unusually large list",                    33, "amber",     "Targeting & Keywords"),  # huge negative list, no conflicts -> Observations
+    ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries, 3+ conv (high-value "dropped ball")
+    ("early signals rather than statistical proof", 52, "amber",    "Targeting & Keywords"),  # converting queries, 1-2 conv each (watch-and-test)
     ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
     ("targeting the whole UK",                     55, "amber",     "Targeting & Keywords"),
     ("A minor point on ad strength",               30, "amber",     "Targeting & Keywords"),  # weak RSAs, trivial spend -> Observations
@@ -363,6 +366,10 @@ _ISSUE_THEMES = {
     "negative keywords applied across":        "negatives",
     # Per-campaign "spent with 0 conversions"  -  roll up to a single slide.
     "with 0 conversions recorded":             "zero_conv_campaign",
+    # Zero-value purchase tag vs the generic revenue-feedback finding: same client story
+    # ("order value isn't flowing back"), so show only the sharper, evidence-based one.
+    "counting orders without passing their value": "revenue_value_feedback",
+    "Revenue feedback loop":                   "revenue_value_feedback",
 }
 
 
@@ -721,10 +728,12 @@ def score_conversion_tracking(data):
                     f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
                     "but their monthly volumes move independently, so they appear to track different parts of "
                     "the business (for example two websites or product lines) rather than double-counting the "
-                    "same orders. Worth a quick confirmation inside the account that each order can only ever "
-                    "fire one of these tags - if both can fire on the same checkout, sales and revenue are "
-                    "overstated and CPAs understated. If they are genuinely separate, keep both but label them "
-                    "clearly so reporting can split performance by site."
+                    "same orders. Two quick confirmations settle it: visit the destination sites behind each "
+                    "conversion action (separate storefronts is usually obvious within a minute), and check "
+                    "inside the account that each order can only ever fire one of these tags - if both can "
+                    "fire on the same checkout, sales and revenue are overstated and CPAs understated. If they "
+                    "are genuinely separate, keep both but label them clearly so reporting can split "
+                    "performance by site."
                 )
                 if rag == "green":
                     rag = "amber"
@@ -788,7 +797,9 @@ def score_conversion_tracking(data):
                 "return on ad spend is HIGHER than reported - and as this action's share of orders grows, "
                 "reported ROAS falls even if nothing actually got worse. Fix the value parameter on this "
                 "conversion tag so it passes the order total at purchase, and treat ROAS trends as "
-                "unreliable until a clean period has been recorded."
+                "unreliable until a clean period has been recorded. Once order values flow correctly, the "
+                "next upgrade is feeding back profit rather than top-line revenue (margin, returns - POAS), "
+                "so bidding chases the orders that actually pay."
             )
             if rag not in ("red",):
                 rag = "amber_red"
@@ -1258,9 +1269,25 @@ def score_account_structure(data):
     if _changes is not None and _changes <= 2 and _spend_30d >= 200:
         _ch_txt = ("No changes have been made to the account" if _changes == 0
                    else f"Only {_changes} change(s) have been made to the account")
+        # Anchor it in time: name the most recent change in the window, or be honest that
+        # Google only exposes ~30 days of change history, so the last real change is older
+        # than that - we cannot see how much older (Dan, 11 June 2026).
+        if _changes and _activity.get("last_change"):
+            try:
+                from datetime import datetime as _dt2
+                _lc = _dt2.strptime(_activity["last_change"], "%Y-%m-%d").strftime("%-d %B %Y")
+                _when_txt = f" The most recent change was on {_lc}."
+            except (ValueError, TypeError):
+                _when_txt = ""
+        elif _changes == 0:
+            _when_txt = (" Google only exposes about 30 days of change history, so the last time "
+                         "anyone touched this account is older than that - how much older, the data "
+                         "cannot say.")
+        else:
+            _when_txt = ""
         issues.append(
             f"{_ch_txt} in the last {_activity.get('days', 28)} days, "
-            f"while it spent about £{_spend_30d:,.0f}. Google Ads accounts need regular attention - "
+            f"while it spent about £{_spend_30d:,.0f}.{_when_txt} Google Ads accounts need regular attention - "
             "search term reviews, bid and budget adjustments, negative keywords, ad tests. Money is "
             "being spent largely on autopilot with nobody steering."
         )
@@ -1718,7 +1745,7 @@ def score_targeting_keywords(data):
             "-  not a genuine enquiry, and without offline conversion import (OCI) you cannot tell which (if "
             "any) became real jobs. Rather than adding these as keywords, decide deliberately: target "
             "competitors only in a dedicated campaign with tailored messaging and landing pages, or add them "
-            "as negative keywords to stop paying for misdirected clicks."
+            "as negative keywords to stop paying for clicks meant for the other company."
         )
         if rag == "green":
             rag = "amber"
@@ -1737,23 +1764,44 @@ def score_targeting_keywords(data):
         if rag == "green":
             rag = "amber"
     if converting_not_added:
-        # Name the top converting terms with their leads + cost-per-lead so the slide is concrete.
-        _top_conv = sorted(converting_not_added, key=lambda t: (t.get("conversions", 0) or 0), reverse=True)[:3]
-        _egs = []
-        for t in _top_conv:
-            conv = t.get("conversions", 0) or 0
+        # Name the top converting terms with their numbers AND the keyword that loosely caught
+        # them ('sait sanding belts' arriving via phrase-match 'sanding belts' confused the
+        # client until the route was spelled out - Dan, 11 June 2026).
+        _sorted_conv = sorted(converting_not_added, key=lambda t: (t.get("conversions", 0) or 0), reverse=True)
+        def _ck_eg(t):
+            conv = int(round(t.get("conversions", 0) or 0))
             spend = t.get("spend", 0) or 0
-            cpl = f" at ~£{round(spend / conv)} per lead" if conv else ""
-            _egs.append(f"'{t.get('term', '?')}' ({int(round(conv))} lead{'s' if round(conv) != 1 else ''}{cpl})")
-        eg_text = (" For example " + ", ".join(_egs) + ".") if _egs else ""
-        sqr_issues.append(
-            f"{len(converting_not_added)} search terms have generated conversions over the last 90 days "
-            f"but are NOT added as active keywords.{eg_text} Proven, money-making demand is being captured "
-            "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
-            "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
-            "cannot be added and are better captured by a closely related theme - to gain control over bids, "
-            f"ad copy and landing pages.{_quality_caveat}"
-        )
+            kw, mt = t.get("keyword"), str(t.get("keyword_match_type") or "").lower()
+            via = (f", currently caught loosely by the {mt}-match keyword '{kw}'" if kw and mt else "")
+            cpl = f" at ~£{round(spend / conv)} each" if conv else ""
+            return f"'{t.get('term', '?')}' ({conv} conversion{'s' if conv != 1 else ''}{cpl}{via})"
+        # Statistical honesty (Dan, 11 June 2026): one conversion from a couple of clicks is an
+        # early SIGNAL, not proof - a £1 click that converted once can read as a £1 CPA and be
+        # a false positive over 90 days. Only 3+ conversions earns the confident framing.
+        _proven = [t for t in _sorted_conv if (t.get("conversions", 0) or 0) >= 3]
+        _early = [t for t in _sorted_conv if (t.get("conversions", 0) or 0) < 3]
+        if _proven:
+            eg_text = " For example " + ", ".join(_ck_eg(t) for t in _proven[:3]) + "."
+            _early_note = (f" A further {len(_early)} term(s) converted only once or twice - "
+                           "early signals worth watching for a repeat, not yet proof.") if _early else ""
+            sqr_issues.append(
+                f"{len(_proven)} search terms have repeatedly generated conversions over the last 90 days "
+                f"but are NOT added as active keywords.{eg_text} Proven, money-making demand is being captured "
+                "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
+                "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
+                "cannot be added and are better captured by a closely related theme - to gain control over bids, "
+                f"ad copy and landing pages.{_early_note}{_quality_caveat}"
+            )
+        else:
+            eg_text = " For example " + ", ".join(_ck_eg(t) for t in _sorted_conv[:3]) + "."
+            sqr_issues.append(
+                f"{len(converting_not_added)} search terms converted in the last 90 days without being added "
+                "as active keywords - though none has more than a couple of conversions, so these are early "
+                f"signals rather than statistical proof.{eg_text} The pattern matters more than any single "
+                "term: the search query report is producing keyword candidates and nobody is harvesting them. "
+                "Add the closest fits as keywords to test against more data, and make mining the report part "
+                f"of the monthly routine.{_quality_caveat}"
+            )
         if rag == "green":
             rag = "amber"
     if wasted_terms:
@@ -1791,6 +1839,74 @@ def score_targeting_keywords(data):
             )
         if rag == "green":
             rag = "amber"
+    # ── Negative-conflict check (Dan, 11 June 2026): "you'd be surprised how often a
+    # negative has been added that sabotages the entire account." Cross-check every
+    # search term that CONVERTED (30d top terms + 90d unkeyworded list) against the
+    # campaign-level and shared-set negatives applying to its campaign. A match means
+    # a term that was paying is now blocked (the negative arrived after the clicks).
+    # Standard negative semantics: no close variants; phrase = ordered subsequence;
+    # broad = all words present in any order. Ad-group negatives are skipped - we
+    # cannot tell which ad group served the term, so flagging them would guess.
+    _negs = data.get("negative_keywords") or {}
+    if _negs and (_negs.get("campaign") or _negs.get("shared")):
+        _shared_map = _negs.get("shared_campaigns") or {}
+
+        def _negs_for(camp):
+            for n in _negs.get("campaign") or []:
+                if n.get("campaign") == camp:
+                    yield n.get("text"), n.get("match_type"), f"campaign '{camp}'"
+            for n in _negs.get("shared") or []:
+                if camp in (_shared_map.get(n.get("set")) or []):
+                    yield n.get("text"), n.get("match_type"), f"shared list '{n.get('set')}'"
+
+        def _neg_blocks(neg_text, neg_mt, ttoks):
+            ntoks = str(neg_text or "").lower().strip().strip('"[]').split()
+            if not ntoks:
+                return False
+            mt = str(neg_mt or "").upper()
+            if mt == "EXACT":
+                return ttoks == ntoks
+            if mt == "PHRASE":
+                return any(ttoks[i:i + len(ntoks)] == ntoks
+                           for i in range(len(ttoks) - len(ntoks) + 1))
+            return all(w in ttoks for w in ntoks)
+
+        _conv_terms = {}
+        for t in ((data.get("converting_unkeyworded_terms") or [])
+                  + [t for t in (data.get("top_search_terms") or [])
+                     if (t.get("conversions") or 0) > 0]):
+            _key = (str(t.get("term", "")).lower().strip(), t.get("campaign_name"))
+            if _key[0] and _key[1]:
+                _conv_terms[_key] = max(_conv_terms.get(_key, 0), t.get("conversions") or 0)
+        _conflicts = []
+        for (_term, _camp), _conv in _conv_terms.items():
+            _ttoks = _term.split()
+            for _ntext, _nmt, _where in _negs_for(_camp):
+                if _neg_blocks(_ntext, _nmt, _ttoks):
+                    _conflicts.append((_term, _conv, _ntext, str(_nmt).lower(), _where))
+                    break
+        if _conflicts:
+            _egs = "; ".join(
+                f"the {nmt}-match negative '{ntext}' ({where}) blocks '{term}', which converted "
+                f"{int(round(conv))} time(s) recently"
+                for term, conv, ntext, nmt, where in _conflicts[:3])
+            sqr_issues.append(
+                f"{len(_conflicts)} negative keyword(s) are blocking searches that have CONVERTED recently: "
+                f"{_egs}. A negative added after a term has proven itself silently cuts off demand that was "
+                "paying - one of the most damaging quiet mistakes in account management. Review each against "
+                "the conversion history and remove or tighten the negative."
+            )
+            if rag == "green":
+                rag = "amber"
+        elif (data.get("negative_keyword_count") or 0) >= 5000:
+            sqr_issues.append(
+                f"{data['negative_keyword_count']:,} negative keywords are active across the account - an "
+                "unusually large list. We cross-checked them against every search term that converted "
+                "recently and found no conflicts, which is reassurance worth having in writing - but lists "
+                "this size often hide a blocker as they grow, so repeat the cross-check whenever negatives "
+                "are added in bulk."
+            )
+
     # ── Quality Score (we already fetch it  -  now we use it) ───────────────────
     qs_list = data.get("quality_scores") or []
     scored = [q for q in qs_list if q.get("qs")]
@@ -2577,12 +2693,15 @@ def score_efficiency(data):
                      "targeted area in the last 30 days" if _ooa_spend >= 1 else
                      "effectively none of your spend reached people outside your targeted area "
                      "in the last 30 days")
+            _route = ""
+            if _geo.get("target_country"):
+                _route = (f" The campaigns target {_geo['target_country']}, so these clicks arrive via the "
+                          "'interest' route - people elsewhere showing interest in the targeted area.")
             issues.append(
                 f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
-                f"{names}.{_mag} The setting exposes the whole budget to out-of-area clicks, but the geographic "
-                f"report shows the actual leak is small so far: {_size}.{_areas} Not a needle-mover at today's "
-                "spend - switch to 'Presence (people in, or regularly in, your locations)' as a free tidy-up "
-                "that stops the leak growing as budgets scale."
+                f"{names}. The geographic report shows the actual leak is small so far: {_size}.{_areas}"
+                f"{_route} Not a needle-mover at today's spend - switch to 'Presence (people in, or regularly "
+                "in, your locations)' as a free tidy-up that stops the leak growing as budgets scale."
             )
         elif material:
             local_note = (" For a local business this is a silent leak worth closing."

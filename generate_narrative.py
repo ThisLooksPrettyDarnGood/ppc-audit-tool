@@ -115,6 +115,9 @@ Each section of the audit follows this exact 3-part structure used by the audit 
 3. Our recommendation  -  2 to 3 specific, actionable steps starting with a verb.
 
 Keep the headline under 10 words.
+NEVER use the word "misdirected" in client-facing copy - it is internal classification jargon.
+Say what actually happened instead: "searches meant for a different company", "searches for the
+brand/body X", or name it plainly as a competitor-brand search.
 Each WHATS_HAPPENING bullet: aim 12-18 words, hard max 22  -  one fact, plainly stated.
 Each WHY_IT_MATTERS bullet: aim 12-18 words, hard max 24  -  one commercial consequence.
 Each recommendation must be a single actionable sentence starting with a verb (under 18 words).
@@ -530,6 +533,8 @@ SCORE_SUMMARY: <2 - 3 sentence plain-English verdict matching the overall score>
         "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
         "Your tone is professional, direct, and consultative  -  not salesy. "
         "Always use British English spelling. "
+        "Never use the word 'misdirected' in client-facing copy - say 'searches meant for a "
+        "different company' or name the competitor/brand plainly. "
         "Respond ONLY in the exact key: value format requested. No extra text, no markdown."
     )
     raw = _call_openai(client, exec_system_prompt, prompt)
@@ -631,6 +636,9 @@ Rules:
   small-pound figure land (a "£6 click" is forgettable; "a £6 click, about 7x the £1 average" is
   not). Express multiples as "Nx the average"; do not convert them to a percentage yourself.
 - Neutral, observational tone - these are smaller notes worth flagging, not alarms. No hard sell.
+- Never use the word "misdirected" - say "searches meant for a different company" or name the brand.
+- Keep geography precise: "outside the targeted area" is NOT the same as "outside the UK" - reuse
+  the finding's own geographic phrasing and figures exactly.
 - British English spelling. Whole pounds, no pence.
 - Do NOT restate the main issue slides; keep each line tied to its finding above.
 
@@ -703,6 +711,8 @@ TK5_FUTURE: <future state>
     takeaways_system_prompt = (
         "You are a senior Google Ads auditor writing copy for a client-facing audit presentation. "
         "Always use British English spelling. "
+        "Never use the word 'misdirected' in client-facing copy - say 'searches meant for a "
+        "different company' or name the competitor/brand plainly. "
         "Respond ONLY in the exact key: value format requested. No extra text, no markdown."
     )
     raw = _call_openai(client, takeaways_system_prompt, prompt)
@@ -845,6 +855,8 @@ If absolute-top or top-of-page impression share is provided and has fallen versu
 When you note Search impression share (SIS) is low, QUANTIFY what that means: state the approximate share of eligible searches being missed (roughly 100% minus the SIS%, e.g. SIS of 40% means about 60% of eligible searches are being missed) - do not leave "low" vague.
 {("End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened." if not _is_ecom else "")}
 Use British English. Be direct, not alarmist. You may write up to 4 sentences if needed to include the closing caveat.
+HARD LIMIT: 90 words total. This sits in a small slide text box - every sentence must earn its place.
+Pick the 2-3 numbers that carry the story and DROP the rest; do not tour every metric.
 {client_context}
 
 Performance data:
@@ -1083,9 +1095,15 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
 
     # A narrated issue is only usable with real body copy - the title alone is not
     # enough (it falls back to the category name, which is how a blank slide shipped).
-    def _narration_ok(d):
+    def _body_ok(d):
         return bool(isinstance(d, dict) and str(d.get("whats_happening", "")).strip()
                     and d.get("recommendations"))
+
+    # Stricter bar for retries: a title that fell back to the category name ("Conversion
+    # Tracking") is a visible defect on the slide, so retry for a real one - but if the
+    # body is good after all attempts, ship it rather than dropping a genuine finding.
+    def _narration_ok(d):
+        return _body_ok(d) and str(d.get("title", "")).strip() != str(d.get("category", "")).strip()
 
     # Reserve list: ranked findings below the cut. If a selected finding narrates empty
     # after all retries, promote the next reserve instead of shipping a blank slide;
@@ -1104,7 +1122,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         print(f"  → Generating issue {n}: {iss['category']} (sev {iss['severity']:.0f})...")
         narrated = _retry(lambda i=iss: _narrative_issue(client, i, account_type),
                           f"Issue {n}", validate=_narration_ok)
-        if not _narration_ok(narrated):
+        if not _body_ok(narrated):
             print(f"  ✗ Issue {n} narrated empty after retries - skipping it "
                   f"({iss.get('detail', '')[:70]}...) and promoting the next-ranked finding.")
             if _reserve:
@@ -1231,7 +1249,9 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                 " record orders but pass NO revenue value, so the revenue and ROAS figures exclude that part "
                 "of the business entirely. State plainly that true ROAS is HIGHER than shown, and that the "
                 "ROAS trend is unreliable (it falls as the untracked side's share of orders grows) until the "
-                "value tag is fixed. Do NOT present the ROAS decline as a clean performance read.")
+                "value tag is fixed. Do NOT present the ROAS decline as a clean performance read, and do NOT "
+                "quote or derive any revenue-per-order/average-order-value figure - the blend is corrupted "
+                "by the £0-value orders.")
         perf_commentary = _retry(
             lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat,
                                                account_type=str(findings.get("account_type") or "")),
