@@ -289,11 +289,17 @@ def get_product_coverage(client, cid):
         FROM shopping_performance_view
         WHERE segments.date BETWEEN '{start}' AND '{today.strftime("%Y-%m-%d")}'
     """)
+    # Feed status per item, so a dark product can be described precisely: "still in
+    # stock on your site, just not advertised" beats "gone dark" (and answers the
+    # obvious client question - is it even still sold?).
+    _avail = {r.shopping_product.item_id: r.shopping_product.availability.name
+              for r in statuses}
     rev = {}
     for r in rows12:
         if r.metrics.conversions_value > 0:
             d = rev.setdefault(r.segments.product_item_id,
-                               {"title": r.segments.product_title, "revenue_12m": 0.0})
+                               {"title": r.segments.product_title, "revenue_12m": 0.0,
+                                "availability": _avail.get(r.segments.product_item_id, "UNKNOWN")})
             d["revenue_12m"] = round(d["revenue_12m"] + r.metrics.conversions_value, 2)
     dark = sorted((d for k, d in rev.items() if k not in active30),
                   key=lambda d: -d["revenue_12m"])
@@ -429,7 +435,7 @@ def get_change_activity(client, cid, days=28):
     start = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
     end = datetime.today().strftime("%Y-%m-%d")
     gaql = f"""
-        SELECT change_event.change_date_time FROM change_event
+        SELECT change_event.change_date_time, change_event.changed_fields FROM change_event
         WHERE change_event.change_date_time >= '{start}'
           AND change_event.change_date_time <= '{end} 23:59:59'
         LIMIT 1000
@@ -438,12 +444,20 @@ def get_change_activity(client, cid, days=28):
     # Most recent change date in the window, e.g. '2026-06-03' - lets the finding say
     # WHEN someone last touched the account, not just a count. (The API caps change
     # history at ~30 days, so beyond the window we can only say 'older than that'.)
+    # Also capture when the BIDDING TARGET (tROAS/tCPA) was last touched: "the target
+    # was adjusted on 19 May - to a level still below break-even" reads very differently
+    # from "the target may have been set and forgotten" (Gastronomica, 11 June 2026).
     last_change = ""
+    last_target_change = ""
     for r in rows:
         d = str(r.change_event.change_date_time)[:10]
         if d > last_change:
             last_change = d
-    return {"days": days, "changes": len(rows), "last_change": last_change or None}
+        _cf = str(getattr(r.change_event, "changed_fields", "") or "")
+        if ("target_roas" in _cf or "target_cpa" in _cf) and d > last_target_change:
+            last_target_change = d
+    return {"days": days, "changes": len(rows), "last_change": last_change or None,
+            "last_target_change": last_target_change or None}
 
 
 def get_negative_keywords(client, cid):

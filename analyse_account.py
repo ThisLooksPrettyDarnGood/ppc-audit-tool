@@ -220,6 +220,7 @@ def analyse_account(data, raw_questionnaire=""):
         "strengths":           build_strengths(data),
         "summary_stats":       build_summary_stats(data),
         "account_type":        account_type,
+        "stated_margin_pct":   data.get("stated_margin_pct"),
         "performance_summary": _decorate_perf_trends(data.get("performance_summary", {})),
     }
 
@@ -1016,8 +1017,9 @@ def score_conversion_tracking(data):
         if many_per_click_leads:
             issues.append(
                 "Some lead conversions are set to count 'Every' rather than 'Once'. "
-                "For most lead actions 'Once' is more accurate (calls can be a fair exception)  -  "
-                "worth confirming these are counting the way you intend."
+                "For most lead actions 'Once' is more accurate (calls can be a fair exception) - "
+                "worth confirming these are counting the way you intend. Purchases are the "
+                "opposite: they should stay on 'Every', because every order counts."
             )
             if rag == "green":
                 rag = "amber"
@@ -1080,7 +1082,9 @@ def score_conversion_tracking(data):
                 "Revenue feedback loop: conversion tracking records orders, but we could not find any "
                 "offline or enhanced revenue import feeding back what those orders were worth AFTER the "
                 "click - actual margin, returns and cancellations, or new-versus-returning customer "
-                "value. Importing true order outcomes (even a periodic spreadsheet upload) lets smart "
+                "value. (First check what the purchase tag passes today: most platforms send the full "
+                "order total, not profit - if yours already sends margin-adjusted values, this is "
+                "covered.) Importing true order outcomes (even a periodic spreadsheet upload) lets smart "
                 "bidding optimise towards profit rather than top-line order value, which matters most "
                 "when target-ROAS bidding is steering spend. We roll this out for clients as POAS "
                 "(profit on ad spend): if a £100 order carries a 40% margin, bidding optimises towards "
@@ -2354,7 +2358,8 @@ def score_bidding_strategy(data):
         else:
             issues.append(
                 f"{len(true_manual)} campaign(s) on Manual CPC. "
-                f"Once you reach 30+ conversions/month, switch to smart bidding.{_ecom_note}"
+                f"As conversion volume builds into a steadier stream, smart bidding becomes worth "
+                f"testing.{_ecom_note}"
             )
             if rag == "green":
                 rag = "amber"
@@ -2713,10 +2718,15 @@ def score_efficiency(data):
         _dark_txt = ""
         if (_pc.get("dark_count") or 0) >= 3 and (_pc.get("dark_revenue_12m") or 0) >= 100:
             _top = (_pc.get("dark_products") or [{}])[0]
-            _dark_txt = (f" On top of that, {_pc['dark_count']} products that generated about "
-                         f"£{_pc['dark_revenue_12m']:.0f} of revenue in the last 12 months have had no "
-                         f"impressions at all in the last 30 days - the biggest, '{_top.get('title', '?')}', "
-                         f"earned £{_top.get('revenue_12m', 0):.0f} in the past year and is now silent.")
+            # Keep the magnitude honest: £1,452/year is about £120 a month - real, not huge.
+            _per_month = _pc["dark_revenue_12m"] / 12.0
+            _still = (" It is still in stock on your site - shoppers can buy it, your ads just "
+                      "no longer show it." if _top.get("availability") == "IN_STOCK" else "")
+            _dark_txt = (f" On top of that, {_pc['dark_count']} products that sold in the last 12 months "
+                         f"(about £{_pc['dark_revenue_12m']:.0f} of revenue, roughly £{_per_month:.0f} a "
+                         f"month) have had no impressions at all in the last 30 days. The biggest, "
+                         f"'{_top.get('title', '?')}', earned £{_top.get('revenue_12m', 0):.0f} in the past "
+                         f"year.{_still}")
         if _benched >= 0.3 * _instock:
             issues.append(
                 f"Most of the product catalogue is not being advertised: only {_pc.get('eligible', 0)} of "
@@ -2786,13 +2796,34 @@ def score_efficiency(data):
         _roas30 = ((data.get("performance_summary") or {}).get("_raw", {}).get("t30", {}) or {}).get("roas")
         if _low_tgt:
             _c = max(_low_tgt, key=lambda c: c.get("spend_30d") or 0)
+            _tgt_v = float(_c["target_roas"])
+            # Is the campaign already beating its own target? Then there is headroom to
+            # raise it NOW - and the path is small steps, never a jump to break-even.
+            _ach = ((_c.get("conv_value_30d") or 0) / (_c.get("spend_30d") or 1)) or None
+            _ach_txt = (f" The campaign is actually delivering about {_ach:.1f}x on tracked revenue - "
+                        "already beating its own target - so there is headroom to raise it now."
+                        if _ach and _ach > _tgt_v else "")
+            # When was the target last touched? A recent adjustment to a below-break-even
+            # level is a judgement problem; no adjustment in the visible window suggests
+            # set-and-forget (the API only shows ~30 days of change history).
+            _lt = (data.get("change_activity") or {}).get("last_target_change")
+            _when_tgt = ""
+            if _lt:
+                try:
+                    from datetime import datetime as _dt3
+                    _when_tgt = (" The target was last adjusted on "
+                                 f"{_dt3.strptime(_lt, '%Y-%m-%d').strftime('%-d %B %Y')} - so it is "
+                                 "being reviewed, but to a level that still buys losses.")
+                except (ValueError, TypeError):
+                    _when_tgt = ""
+            _steps = f"{_tgt_v + 0.2:.1f}, then {_tgt_v + 0.4:.1f}"
             issues.append(
                 f"The bidding target is set below break-even: at your stated {_margin:.0f}% profit margin, "
                 f"break-even ROAS is about {_be:.1f}x, yet the '{_c['name']}' campaign has a target ROAS of "
-                f"{float(_c['target_roas']):.1f}x - Google is being asked to chase orders that lose money "
-                f"on the margin.{_ltv_txt} Review the target against margin economics and raise it "
-                "deliberately (in steps, watching volume) or document why a below-break-even target is "
-                "intentional."
+                f"{_tgt_v:.1f}x - Google is being asked to chase orders that lose money on the "
+                f"margin.{_ach_txt}{_when_tgt}{_ltv_txt} Do not jump straight to {_be:.1f}x - raise the "
+                f"target in small steps ({_steps}, and so on), watching volume at each step, or document "
+                "why a below-break-even target is intentional."
             )
             if rag == "green":
                 rag = "amber"

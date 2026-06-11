@@ -24,12 +24,18 @@ from audit_style_examples import (
 
 # Fixed credibility close appended to the score verdict on slide 4 (Dan, 11 June 2026:
 # the boilerplate decks close on "our extensive experience" - mirror that next to the
-# dial). Deliberately a constant, never GPT-written, so we can't invent awards we
+# dial). Deliberately templated, never GPT-written, so we can't invent awards we
 # haven't won. DAN TO CONFIRM the Premier Partner wording (and add awards if wanted).
-CREDIBILITY_LINE = (
-    "Fixing this is what we do all day: we are a Google Premier Partner with extensive "
-    "lead generation and e-commerce experience."
-)
+# Hyper-personalised to the account's focus (Dan, round 6): a pure e-commerce client
+# hears e-commerce experience, a lead-gen client hears lead generation, mixed hears both.
+def _credibility_line(account_type: str) -> str:
+    focus = {
+        "ecommerce": "e-commerce",
+        "lead_gen":  "lead generation",
+        "mixed":     "lead generation and e-commerce",
+    }.get(str(account_type or ""), "lead generation and e-commerce")
+    return (f"Fixing this is what we do all day: we are a Google Premier Partner with "
+            f"extensive {focus} experience.")
 
 _total_tokens = 0  # module-level token counter, reset per generate_narrative() call
 
@@ -108,6 +114,11 @@ You are a senior Google Ads auditor writing copy for a client-facing audit prese
 Your tone is professional, direct, and consultative  -  not salesy.
 You write for non-technical business owners who care about results, not jargon.
 Always use British English spelling (e.g. optimise, recognise, behaviour, prioritise).
+READABILITY: write so a busy reader skimming on a phone gets it first pass - short
+sentences, everyday words, one idea per sentence. Prefer "switched off" to "deactivated",
+"sells well" to "demonstrates strong commercial performance". If a sentence needs
+re-reading, rewrite it. Aim for the reading level of a bright 12-year-old.
+Write "Performance Max (PMax)" on first mention, then just "PMax".
 
 Each section of the audit follows this exact 3-part structure used by the audit team:
 1. What's happening  -  2 short bullet points describing the current account situation in plain English.
@@ -486,9 +497,13 @@ def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list,
     _rag_tone = {
         "red":       "The overall score is RED - the account has serious, costly inefficiencies. "
                      "Be honest and direct about that, but constructive: frame it as a story about "
-                     "efficiency, not effort, and make clear the issues are fixable.",
+                     "efficiency, not effort, and make clear the issues are fixable. Do NOT open "
+                     "with praise or comfort words - open with the biggest problem in plain words.",
         "amber_red": "The overall score is on the RED side of amber - real problems are dragging "
-                     "performance down. Be candid and a little urgent, but constructive and fixable.",
+                     "performance down. Be candid and a little urgent, but constructive and fixable. "
+                     "Do NOT open with praise or comfort words ('solid base', 'tidy foundations', "
+                     "'useful groundwork') - open with the biggest problem in plain words; any "
+                     "strength gets one short clause afterwards at most.",
         "amber":     "The overall score is AMBER - solid foundations with clear room to improve. "
                      "Be measured and balanced: genuine credit where due, honest about the gaps.",
         "green":     "The overall score is GREEN - the account is in good shape. Be affirming, "
@@ -515,10 +530,12 @@ Rules:
 - The headline must be a single punchy sentence  -  maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
 - The 3 bullets must each reference a specific finding from above  -  use real details (numbers, named issues, specific tools like Enhanced Conversions or Auto-Apply). No generic statements.
 - COMMERCIAL_IMPACT: 1 - 2 sentences on what this is costing the business right now if nothing changes. Be specific about the mechanisms (e.g. wasted spend on broad match, bidding in learning state, missed conversions). TENSE: for things that are demonstrably happening NOW per the findings (e.g. budget spent on named non-converting terms), use direct present tense - "budget is leaking into low-quality clicks", NOT "can leak" or "could leak". Reserve "risks"/"could" only for FUTURE projections of what happens if nothing changes. Say "genuine lead demand" rather than just "demand".
-- If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK or STRANGLED by the issues - e.g. solid groundwork is being throttled while budget is capped on winning campaigns and leaks into non-converting searches. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
+- If "Things the account already does WELL" are provided AND the overall score is GREEN or AMBER, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK by the issues. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
+- If the overall score is AMBER_RED or RED, do the OPPOSITE: open the COMMERCIAL_IMPACT with what the problems are COSTING the business right now, in plain words. A strength may get one short clause at the END, never the opener - an account losing money must not read like a pat on the back.
 - NO INTERNAL REPETITION: never reuse the same specific figure or example in both a bullet and the COMMERCIAL_IMPACT - if a number appears in a bullet, the impact paragraph states the consequence without restating the figure. Across the deck each statistic should land once, hard, in the place it belongs.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - TERMINOLOGY: when referring to importing real lead outcomes (booked jobs / sales) back into Google Ads, name it "offline conversion import (OCI)" - not vague wording like "sales outcomes are not imported".
+- VOCABULARY follows the business: on an ecommerce account say "shoppers", "orders" and "demand" - never "leads" or "lead demand"; on a lead-gen account say "leads" and "enquiries", not "orders".
 - SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close by NAMING the one or two most important fixes in plain words (e.g. "starting with consolidating conversion tracking and tightening location targeting") - the client should finish the sentence knowing exactly where the gains will come from, not just that "fixes are clear". {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human.
 - Use British English spelling.{escalation_note}
 
@@ -552,7 +569,7 @@ SCORE_SUMMARY: <2 - 3 sentence plain-English verdict matching the overall score>
 
     _score = lines.get("SCORE_SUMMARY", "")
     if _score:
-        _score = f"{_score} {CREDIBILITY_LINE}".strip()
+        _score = f"{_score} {_credibility_line(findings.get('account_type'))}".strip()
     return {
         "headline":          lines.get("EXEC_HEADLINE", ""),
         "bullet_1":          lines.get("BULLET_1", ""),
@@ -793,7 +810,8 @@ WEBSITE_URL: <full website URL or blank>
 
 
 def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: str = "",
-                               conversion_caveat: str = "", account_type: str = "") -> str:
+                               conversion_caveat: str = "", account_type: str = "",
+                               breakeven_roas: float = 0.0) -> str:
     """
     Write 2 - 3 sentences interpreting the 30-day vs 12-month performance numbers.
     Flags whether trend is positive, negative, or mixed. For ecommerce accounts the
@@ -822,6 +840,13 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
             and _t30c >= 5 and _t12c >= 30):
         _aov_line = (f"\nAverage tracked revenue per order: £{t30['value'] / _t30c:.0f} (last 30 days) "
                      f"vs £{t12['value'] / _t12c:.0f} (12-month average)")
+    _be_note = ""
+    if breakeven_roas and _is_ecom:
+        _be_note = (f"\nBreak-even ROAS at the client's own stated profit margin is about "
+                    f"{breakeven_roas:.1f}x. If the current ROAS is BELOW that line, never describe "
+                    "performance as 'strong', 'stronger' or 'good' - say it is improving but still "
+                    "below break-even (each order is still bought at a loss). The break-even line is "
+                    "the yardstick, not the 12-month average.")
     if _is_ecom:
         _ecom_instr = (
             "\nThis is an ECOMMERCE account: lead with revenue and ROAS (return on ad spend) - that is "
@@ -830,7 +855,7 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
             "per order figures to say WHY in one plain sentence (e.g. orders are up but each order is "
             "worth far less) - never leave that divergence unexplained. Instead of the "
             "OCI caveat, end with one short caveat that ROAS here is TOP-LINE order value: it does not "
-            "reflect margin, returns or new-versus-returning customers, so true profitability may differ.")
+            f"reflect margin, returns or new-versus-returning customers, so true profitability may differ.{_be_note}")
     elif _is_mixed:
         _ecom_instr = (
             "\nThis account does BOTH ecommerce and lead generation: read revenue and ROAS for the "
@@ -1261,9 +1286,12 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                 "that detail), do NOT present the ROAS decline as a clean performance read, and do NOT "
                 "quote or derive any revenue-per-order/average-order-value figure - the blend is corrupted "
                 "by the £0-value orders.")
+        _margin = findings.get("stated_margin_pct")
+        _be = (100.0 / _margin) if _margin and 5 <= _margin <= 95 else 0.0
         perf_commentary = _retry(
             lambda: _narrative_perf_commentary(client, perf, raw_questionnaire, _conv_caveat,
-                                               account_type=str(findings.get("account_type") or "")),
+                                               account_type=str(findings.get("account_type") or ""),
+                                               breakeven_roas=_be),
             "Performance Commentary"
         )
     else:
