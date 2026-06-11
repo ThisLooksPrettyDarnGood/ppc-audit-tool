@@ -199,6 +199,17 @@ def analyse_account(data, raw_questionnaire=""):
         _rt = _re.search(r'(?:target\s+)?ROAS\s+(\d+(?:\.\d+)?)\s*:\s*1',
                          str(raw_questionnaire or ""), _re.I)
         data["stated_roas_target"] = float(_rt.group(1)) if _rt else None
+    if "stated_margin_pct" not in data:
+        # Profit margin + LTV from the questionnaire power the break-even ROAS check:
+        # at a 30% margin, break-even is ~3.3x - a 1.9x ROAS (or worse, a tROAS target
+        # of 1.6) means every first order loses money, which is only fine if it is a
+        # deliberate LTV play. These are THEIR numbers, so the maths lands personally.
+        import re as _re
+        _mg = _re.search(r'profit\s+margin[^:]*:\s*(\d+(?:\.\d+)?)\s*%',
+                         str(raw_questionnaire or ""), _re.I)
+        data["stated_margin_pct"] = float(_mg.group(1)) if _mg else None
+        _lv = _re.search(r'\bLTV[^:]*:\s*£?\s*([\d,]+)', str(raw_questionnaire or ""), _re.I)
+        data["stated_ltv_gbp"] = float(_lv.group(1).replace(",", "")) if _lv else None
     account_type = detect_account_type(data)
     findings = {
         "conversion_tracking": score_conversion_tracking(data),
@@ -282,6 +293,12 @@ _ISSUE_SIGNATURES = [
     ("on Maximise Clicks",                         78, "amber",     "Bidding Strategy"),
     ("paused campaign(s) historically delivered",  66, "amber",     "Bidding Strategy"),
     ("restricted by their target ROAS",            65, "amber",     "Bidding Strategy"),  # tROAS above achieved = bids squeezed
+    ("bidding target is set below break-even",     72, "amber_red", "Bidding Strategy"),  # tROAS below margin break-even - buying losses by design
+    ("below break-even on your own numbers",       63, "amber",     "Revenue & Value"),   # actual ROAS below margin break-even
+    ("Most of the product catalogue is not being advertised", 69, "amber", "Account Structure"),  # benched in-stock products
+    ("gone quiet despite past revenue",            56, "amber",     "Account Structure"),  # dark proven sellers only
+    ("split between Performance Max and a standard Shopping", 55, "amber", "Account Structure"),  # split estate
+    ("steer bidding on an ecommerce account",      57, "amber",     "Conversion Tracking"),  # call/lead primary on pure ecom
     ("share a single campaign budget",             56, "amber",     "Budget & Coverage"),  # shared pool decides priority
     ("receiving spend from more than one campaign", 61, "amber",    "Account Structure"),  # product overlap / self-competition
     ("triggering ads in more than one campaign",   59, "amber",     "Account Structure"),  # search-term cannibalisation (material)
@@ -834,6 +851,27 @@ def score_conversion_tracking(data):
             )
             if rag not in ("red",):
                 rag = "amber_red"
+
+        # ── Call/lead actions steering bidding on a PURE ecommerce account ─────────
+        # The client says ecommerce only (no lead gen), yet call/lead actions are set
+        # as PRIMARY and recording - so they sit in the same Conversions column as
+        # purchases and smart bidding treats a phone call like an order. Unless calls
+        # genuinely are sales (phone orders), they belong in secondary.
+        if (detect_account_type(data) == "ecommerce" and data.get("claims_lead_gen") is False):
+            _lead_primary = [ca for ca in active_actions if _is_primary(ca) and _is_counting(ca)
+                             and ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "SUBMIT_LEAD_FORM",
+                                                        "BOOK_APPOINTMENT", "REQUEST_QUOTE", "LEAD", "CALL"}]
+            if _lead_primary:
+                _ln = ", ".join(f"'{ca.get('name')}'" for ca in _lead_primary[:2])
+                issues.append(
+                    f"Call/lead conversion action(s) ({_ln}) are set as PRIMARY and steer bidding on an "
+                    "ecommerce account. They count in the same Conversions column as purchases, so smart "
+                    "bidding treats a phone call like an order when deciding what to chase. If phone "
+                    "orders are a real sales channel, keep them primary but assign realistic values; "
+                    "otherwise move them to secondary so bidding optimises purely towards purchases."
+                )
+                if rag == "green":
+                    rag = "amber"
 
         if len(primary_actions) > 10:
             issues.append(
@@ -2409,12 +2447,17 @@ def score_bidding_strategy(data):
     if efficient_paused:
         efficient_paused.sort(key=lambda p: (p.get("real_cpa") or p.get("cpa") or 1e9))
         descs = []
+        # Vocabulary follows the business: an ecommerce account's conversions are orders,
+        # not leads/enquiries (Gastronomica review, 11 June 2026).
+        _is_ecom_pw = detect_account_type(data) == "ecommerce"
+        _u1 = "order" if _is_ecom_pw else "genuine lead"
+        _up = "orders" if _is_ecom_pw else "real enquiries"
         for p in efficient_paused[:3]:
             rc, g, gp = p.get("real_cpa"), p.get("genuine_conv"), p.get("genuine_pct")
             if rc and g:
-                d = f"the '{p['name']}' campaign (£{rc:.0f} per genuine lead from {int(round(g))} real enquiries"
+                d = f"the '{p['name']}' campaign (£{rc:.0f} per {_u1} from {int(round(g))} {_up}"
                 if gp is not None and gp < 70:
-                    d += (f"; note only {gp:.0f}% of its tracked conversions were genuine leads, so its "
+                    d += (f"; note only {gp:.0f}% of its tracked conversions were genuine, so its "
                           f"headline CPA of £{p.get('cpa', 0):.0f} flatters it")
                 d += ")"
             else:
@@ -2423,13 +2466,15 @@ def score_bidding_strategy(data):
         names = ", ".join(descs)
 
         _have_quality = [p for p in efficient_paused[:3] if p.get("genuine_pct") is not None]
+        _genuine_what = ("purchases" if _is_ecom_pw else "genuine leads (form fills, calls and contacts)")
         if _have_quality and all((p.get("genuine_pct") or 0) >= 70 for p in _have_quality):
-            verify = (" We checked the conversion quality: these were genuine leads (form fills, calls and "
-                      "contacts), not page views or engagement actions - so this is real efficient activity "
+            verify = (f" We checked the conversion quality: these were {_genuine_what}, "
+                      "not page views or engagement actions - so this is real efficient activity "
                       "that was switched off, not vanity metrics.")
         else:
             verify = (" Worth confirming the conversion quality before reactivating - some of the apparent "
-                      "efficiency leans on low-value actions (page views, engagement) rather than genuine enquiries.")
+                      "efficiency leans on low-value actions (page views, engagement) rather than "
+                      + ("real orders." if _is_ecom_pw else "genuine enquiries."))
 
         # If the conversion setup shows possible double-counting, those "cheap" historic CPAs
         # may be ~half the true cost - caveat it rather than presenting them at face value.
@@ -2445,9 +2490,11 @@ def score_bidding_strategy(data):
                            "CPAs may be roughly half the true cost - verify against the back-end enquiry count "
                            "before trusting them.")
         issues.append(
-            f"{len(efficient_paused)} paused campaign(s) historically delivered genuine leads below the "
-            f"account's current £{cpa:.0f} CPA: {names}.{verify}{_dup_caveat} Worth reviewing whether lead "
-            "quality, not cost, drove the pause before deciding on reactivation."
+            f"{len(efficient_paused)} paused campaign(s) historically delivered "
+            f"{'orders' if _is_ecom_pw else 'genuine leads'} below the "
+            f"account's current £{cpa:.0f} CPA: {names}.{verify}{_dup_caveat} Worth reviewing whether "
+            f"{'product profitability' if _is_ecom_pw else 'lead quality'}, not cost, drove the pause "
+            "before deciding on reactivation."
         )
         if rag == "green":
             rag = "amber"
@@ -2650,6 +2697,111 @@ def score_efficiency(data):
                 "how order values are passed to the conversion tag. Segment recent sales by product line "
                 "and sanity-check the conversion value settings to pin down which it is - and if cheaper "
                 "products are genuinely taking over, margin-based bidding (POAS) matters all the more."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    # ── Product coverage: how much of the catalogue is on the bench (Shopping/PMax) ──
+    # Two reads from the Merchant Center estate: IN-STOCK products not eligible to serve
+    # anywhere (catalogue sitting idle - out-of-stock exclusions are fine), and products
+    # with real 12-month revenue that now get NO impressions ('gone dark' - proven
+    # sellers quietly switched off). Gastronomica head-to-head, 11 June 2026.
+    _pc = data.get("product_coverage") or {}
+    if account_type in ("ecommerce", "mixed") and (_pc.get("total") or 0) >= 20:
+        _instock = max((_pc["total"] - (_pc.get("out_of_stock") or 0)), 1)
+        _benched = _pc.get("not_eligible_in_stock") or 0
+        _dark_txt = ""
+        if (_pc.get("dark_count") or 0) >= 3 and (_pc.get("dark_revenue_12m") or 0) >= 100:
+            _top = (_pc.get("dark_products") or [{}])[0]
+            _dark_txt = (f" On top of that, {_pc['dark_count']} products that generated about "
+                         f"£{_pc['dark_revenue_12m']:.0f} of revenue in the last 12 months have had no "
+                         f"impressions at all in the last 30 days - the biggest, '{_top.get('title', '?')}', "
+                         f"earned £{_top.get('revenue_12m', 0):.0f} in the past year and is now silent.")
+        if _benched >= 0.3 * _instock:
+            issues.append(
+                f"Most of the product catalogue is not being advertised: only {_pc.get('eligible', 0)} of "
+                f"{_pc['total']} products are eligible to serve, and {_benched} IN-STOCK products are not in "
+                f"any live campaign ({_pc.get('out_of_stock', 0)} more are out of stock, which is fine to "
+                f"exclude).{_dark_txt} Every benched product is demand the account cannot capture. Review why "
+                "they were excluded and reintroduce the proven sellers first."
+            )
+            if rag == "green":
+                rag = "amber"
+        elif _dark_txt:
+            issues.append(
+                "Proven sellers have gone quiet despite past revenue." + _dark_txt +
+                " Check stock, feed status and campaign inclusion for these first - they are the "
+                "lowest-risk revenue to win back."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    # ── PMax + standard Shopping running side by side ──────────────────────────
+    # Product data learnings split across two formats; usually one (typically PMax)
+    # clearly outperforms and the estate should consolidate towards it deliberately.
+    _en_camps = [c for c in campaigns if c.get("status") == "ENABLED"]
+    _pmax_c = [c for c in _en_camps if c.get("type") == "PERFORMANCE_MAX" and (c.get("spend_30d") or 0) >= 25]
+    _shop_c = [c for c in _en_camps if c.get("type") == "SHOPPING" and (c.get("spend_30d") or 0) >= 25]
+    if _pmax_c and _shop_c:
+        _pm = max(_pmax_c, key=lambda c: c.get("spend_30d") or 0)
+        _sh = max(_shop_c, key=lambda c: c.get("spend_30d") or 0)
+
+        def _camp_roas(c):
+            s = c.get("spend_30d") or 0
+            v = c.get("conv_value_30d") or 0
+            return (v / s) if s and v else None
+        _pr, _sr = _camp_roas(_pm), _camp_roas(_sh)
+        _cmp = ""
+        if _pr and _sr:
+            _better = "Performance Max" if _pr >= _sr else "the Shopping campaign"
+            _cmp = (f" On tracked revenue, '{_pm['name']}' (PMax) runs at {_pr:.1f}x against "
+                    f"{_sr:.1f}x for '{_sh['name']}' - {_better} is currently the stronger format.")
+        issues.append(
+            "Products are split between Performance Max and a standard Shopping campaign running side by "
+            f"side.{_cmp} Split estates split the learning data, so products take longer to reach their "
+            "potential, and the weaker format quietly absorbs budget. Consolidate the estate towards the "
+            "better performer deliberately - keeping a deliberate test split is fine, an accidental one "
+            "is not."
+        )
+        if rag == "green":
+            rag = "amber"
+
+    # ── Break-even ROAS vs the client's own margin (ecommerce) ────────────────
+    # The questionnaire gives profit margin (and often LTV). Break-even ROAS is
+    # 100/margin: at 30% margin every £1 of spend needs £3.33 back just to break
+    # even on the first order. Two failure modes, worst first: the BIDDING TARGET
+    # itself is set below break-even (Google is being asked to buy loss-making
+    # orders), or actual ROAS is below break-even (fine only as a deliberate
+    # LTV/new-customer play - a decision, not a drift).
+    _margin = data.get("stated_margin_pct")
+    if account_type == "ecommerce" and _margin and 5 <= _margin <= 95:
+        _be = 100.0 / _margin
+        _ltv = data.get("stated_ltv_gbp")
+        _ltv_txt = (f" With your £{_ltv:,.0f} customer lifetime value, first-order loss can be a "
+                    "deliberate acquisition play - but it should be a decision made with the numbers "
+                    "in view, not a setting nobody revisits." if _ltv else "")
+        _low_tgt = [c for c in (data.get("campaigns") or [])
+                    if c.get("status") == "ENABLED" and (c.get("spend_30d") or 0) >= 50
+                    and c.get("target_roas") and float(c["target_roas"]) < 0.85 * _be]
+        _roas30 = ((data.get("performance_summary") or {}).get("_raw", {}).get("t30", {}) or {}).get("roas")
+        if _low_tgt:
+            _c = max(_low_tgt, key=lambda c: c.get("spend_30d") or 0)
+            issues.append(
+                f"The bidding target is set below break-even: at your stated {_margin:.0f}% profit margin, "
+                f"break-even ROAS is about {_be:.1f}x, yet the '{_c['name']}' campaign has a target ROAS of "
+                f"{float(_c['target_roas']):.1f}x - Google is being asked to chase orders that lose money "
+                f"on the margin.{_ltv_txt} Review the target against margin economics and raise it "
+                "deliberately (in steps, watching volume) or document why a below-break-even target is "
+                "intentional."
+            )
+            if rag == "green":
+                rag = "amber"
+        elif _roas30 and _roas30 < _be:
+            issues.append(
+                f"Return is below break-even on your own numbers: at your stated {_margin:.0f}% margin, "
+                f"break-even ROAS is about {_be:.1f}x, and the last 30 days delivered {_roas30:.1f}x - so "
+                f"each first order is currently bought at a loss.{_ltv_txt} Anchor the account's ROAS "
+                "target to this break-even line and track progress against it."
             )
             if rag == "green":
                 rag = "amber"

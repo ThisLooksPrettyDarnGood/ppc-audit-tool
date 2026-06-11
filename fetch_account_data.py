@@ -246,6 +246,63 @@ def get_campaign_conversion_split(client, cid):
     return out
 
 
+def get_product_coverage(client, cid):
+    """
+    Product-estate coverage for Shopping/PMax accounts (Gastronomica head-to-head,
+    11 June 2026 - the human auditor's '83 of 432 products promoted' catch, built
+    deterministically). Three reads:
+      - shopping_product: how much of the Merchant Center estate is actually eligible
+        to serve, split by stock status (out-of-stock = fine; IN-STOCK but not
+        eligible = catalogue sitting on the bench);
+      - 30d shopping_performance_view: products actually getting impressions;
+      - 12m: products with revenue that now get NO impressions ('gone dark'), with
+        titles and 12-month revenue so the slide can name the money left behind.
+    Caller wraps in try/except (accounts without Shopping/PMax simply error out).
+    """
+    from datetime import datetime, timedelta
+    out = {}
+    statuses = run_query(client, cid, """
+        SELECT shopping_product.item_id, shopping_product.status, shopping_product.availability
+        FROM shopping_product
+    """)
+    if not statuses:
+        return {}
+    out["total"] = len(statuses)
+    out["eligible"] = sum(1 for r in statuses if r.shopping_product.status.name == "ELIGIBLE")
+    out["not_eligible_in_stock"] = sum(
+        1 for r in statuses if r.shopping_product.status.name != "ELIGIBLE"
+        and r.shopping_product.availability.name == "IN_STOCK")
+    out["out_of_stock"] = sum(
+        1 for r in statuses if r.shopping_product.availability.name == "OUT_OF_STOCK")
+
+    rows30 = run_query(client, cid, """
+        SELECT segments.product_item_id, metrics.impressions
+        FROM shopping_performance_view WHERE segments.date DURING LAST_30_DAYS
+    """)
+    active30 = {r.segments.product_item_id for r in rows30 if r.metrics.impressions > 0}
+    out["active_30d"] = len(active30)
+
+    today = datetime.today()
+    start = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    rows12 = run_query(client, cid, f"""
+        SELECT segments.product_item_id, segments.product_title, metrics.conversions_value
+        FROM shopping_performance_view
+        WHERE segments.date BETWEEN '{start}' AND '{today.strftime("%Y-%m-%d")}'
+    """)
+    rev = {}
+    for r in rows12:
+        if r.metrics.conversions_value > 0:
+            d = rev.setdefault(r.segments.product_item_id,
+                               {"title": r.segments.product_title, "revenue_12m": 0.0})
+            d["revenue_12m"] = round(d["revenue_12m"] + r.metrics.conversions_value, 2)
+    dark = sorted((d for k, d in rev.items() if k not in active30),
+                  key=lambda d: -d["revenue_12m"])
+    out["dark_count"] = len(dark)
+    out["dark_revenue_12m"] = round(sum(d["revenue_12m"] for d in dark), 2)
+    out["dark_products"] = dark[:5]
+    return out
+
+
 def get_conversion_tracking_setting(client, cid):
     """
     Account-level conversion tracking settings. enhanced_conversions_for_leads_enabled
@@ -1455,6 +1512,16 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (per-action value query failed: {e})")
         # leave empty → analyser skips the zero-value check (cautious default)
 
+    print("  → Product coverage (Merchant Center estate vs advertised)...")
+    product_coverage = {}
+    try:
+        product_coverage = get_product_coverage(client, cid)
+        if product_coverage:
+            print(f"    {product_coverage.get('eligible', 0)} of {product_coverage.get('total', 0)} "
+                  f"products eligible; {product_coverage.get('dark_count', 0)} gone dark")
+    except Exception as e:
+        print(f"    (product coverage query failed - fine for non-Shopping accounts: {e})")
+
     print("  → Conversion actions per campaign (12m, duplicate-tag evidence)...")
     campaign_conversion_split = {}
     try:
@@ -1726,6 +1793,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "network_split": network_split,
         "conversion_value_by_action": conversion_value_by_action,
         "campaign_conversion_split": campaign_conversion_split,
+        "product_coverage": product_coverage,
         "brand_leakage": brand_leakage,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
