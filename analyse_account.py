@@ -139,6 +139,44 @@ def parse_ltv_note(text):
     return ""
 
 
+def _decorate_perf_trends(perf):
+    """Add '*_trend' keys ('▲ +12%' / '▼ -8%' / '▶ +2%') to the performance summary,
+    comparing the last 30 days against the 12-month run-rate so the deck can anchor
+    'improving vs declining' at a glance (Dan, 11 June 2026).
+
+    Volume metrics (spend, impressions, clicks, conversions) compare against 1/12th of
+    the 12-month total; rate metrics (CVR, CPA, SIS, ROAS) compare against the 12-month
+    value directly. Skipped entirely for young accounts (12m spend < 2.5x 30d spend),
+    where 'a twelfth of the total' would scream growth that is really just account age.
+    """
+    raw = perf.get("_raw") or {}
+    t30, t12 = raw.get("t30") or {}, raw.get("t12") or {}
+    if not t30 or not t12:
+        return perf
+    if (t12.get("spend") or 0) < 2.5 * (t30.get("spend") or 0):
+        return perf
+
+    def _trend(cur, base):
+        if not cur or not base:
+            return ""
+        pct = (cur - base) / base * 100
+        arrow = "▲" if pct >= 3 else ("▼" if pct <= -3 else "▶")
+        # Beyond +200% a percentage stops reading naturally ('+3414%') - show a multiple.
+        if pct >= 200:
+            return f"{arrow} {cur / base:.1f}x"
+        return f"{arrow} {pct:+.0f}%"
+
+    for key, formatted in (("spend", "spend_30d"), ("impressions", "impr_30d"),
+                           ("clicks", "clicks_30d"), ("conversions", "convs_30d")):
+        if perf.get(formatted) not in (None, "", "N/A"):
+            perf[f"{formatted}_trend"] = _trend(t30.get(key), (t12.get(key) or 0) / 12.0)
+    for key, formatted in (("cvr", "cvr_30d"), ("cpa", "cpa_30d"),
+                           ("sis", "sis_30d"), ("roas", "roas_30d")):
+        if perf.get(formatted) not in (None, "", "N/A"):
+            perf[f"{formatted}_trend"] = _trend(t30.get(key), t12.get(key))
+    return perf
+
+
 def analyse_account(data, raw_questionnaire=""):
     # The questionnaire carries the client's stated competitors + product value; the analyser
     # needs both - competitors to flag rival search terms (don't sell a rival's name as "new
@@ -164,7 +202,7 @@ def analyse_account(data, raw_questionnaire=""):
         "strengths":           build_strengths(data),
         "summary_stats":       build_summary_stats(data),
         "account_type":        account_type,
-        "performance_summary": data.get("performance_summary", {}),
+        "performance_summary": _decorate_perf_trends(data.get("performance_summary", {})),
     }
 
     # ── App-only accounts (Dan's call, 10 June 2026): don't build full App support.
@@ -179,7 +217,11 @@ def analyse_account(data, raw_questionnaire=""):
                       "looks well-structured", "No Search or Performance Max",
                       # OCI wording is lead-gen/web framed; app conversion depth (in-app
                       # events, Firebase) is covered by the manual-review banner instead.
-                      "offline conversion imports (OCI)")
+                      "offline conversion imports (OCI)",
+                      # App accounts track one action per platform (Android + iOS) by design,
+                      # so same-category primaries are parallel coverage, not double-counting.
+                      "Possible conversion double-counting",
+                      "appear to track different parts of the business")
         for _sec in ("targeting_keywords", "efficiency", "account_structure", "conversion_tracking"):
             _d = findings.get(_sec) or {}
             if _d.get("issues"):
@@ -222,6 +264,7 @@ _ISSUE_SIGNATURES = [
     ("PRIMARY conversions are dominated by low-value", 84, "amber_red", "Conversion Tracking"),  # quantified inflation - root cause
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs
+    ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams (e.g. two storefronts) - verify, not alarm
     ("paid some very expensive single clicks",     60, "amber",     "Bidding Strategy"),  # CPC spikes hidden by averages
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
@@ -244,6 +287,7 @@ _ISSUE_SIGNATURES = [
     # Efficiency / coverage / settings (expert checks)
     ("set to 'Presence or interest' on low-spend", 34, "amber",     "Budget & Coverage"),  # small leak -> Observations
     ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak (material)
+    ("A network setting worth tidying",            36, "amber",     "Budget & Coverage"),  # opt-in confirmed tiny -> Observations
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("losing a large share of impressions to Ad Rank", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank
@@ -632,8 +676,54 @@ def score_conversion_tracking(data):
         # covers it), NOT active double-counting - so when we have attribution data, base this on the
         # counting actions only. (Falls back to all primary actions when attribution is unavailable.)
         _basis = [ca for ca in primary_actions if _is_counting(ca)] if _has_attr else primary_actions
-        _primary_cats = _Counter(ca.get("category", "") for ca in _basis if ca.get("category"))
+        # DOWNLOAD is excluded: one install action per platform (Android + iOS) is how app
+        # tracking is MEANT to be set up - two of them is parallel coverage, not duplication.
+        _primary_cats = _Counter(ca.get("category", "") for ca in _basis
+                                 if ca.get("category") and ca.get("category") != "DOWNLOAD")
         _dup_cats = {c: n for c, n in _primary_cats.items() if n >= 2}
+
+        # Same-category primaries are only DOUBLE-counting if both tags fire on the same
+        # journey. The monthly series is the tell: tags on the same checkout rise and fall
+        # together; tags on different parts of the business (two storefronts, two product
+        # lines - SAIC's 'SAIC Purchase' vs 'DynaShop Purchase') move independently. Score
+        # overlap as sum(per-month minima) / sum(per-month maxima): ~1 = mirrored, ~0 =
+        # disjoint. Only trust the verdict with enough volume to be a real pattern.
+        def _dup_series_overlap(cat):
+            _monthly = data.get("conversion_volume_by_month") or {}
+            series = [_monthly.get(ca.get("name")) for ca in _basis if ca.get("category") == cat]
+            series = [s for s in series if s]
+            if len(series) < 2:
+                return None
+            months = set().union(*(set(s) for s in series))
+            lo = sum(min(s.get(m, 0) for s in series) for m in months)
+            hi = sum(max(s.get(m, 0) for s in series) for m in months)
+            total = sum(v for s in series for v in s.values())
+            if not hi or total < 12:
+                return None
+            return lo / hi
+        _dup_divergent = {}   # cat -> action names; independent streams, NOT double-counting
+        _dup_overlap = {}     # cat -> overlap score (None = not enough data to judge)
+        for _c in list(_dup_cats):
+            _ov = _dup_series_overlap(_c)
+            _dup_overlap[_c] = _ov
+            if _ov is not None and _ov < 0.5:
+                _dup_divergent[_c] = [ca.get("name") for ca in _basis if ca.get("category") == _c]
+                del _dup_cats[_c]
+        if _dup_divergent:
+            for _c, _names in _dup_divergent.items():
+                _pretty = _cat_pretty.get(_c, _c.replace("_", " ").lower())
+                _named = " and ".join(f"'{n}'" for n in _names[:3])
+                issues.append(
+                    f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
+                    "but their monthly volumes move independently, so they appear to track different parts of "
+                    "the business (for example two websites or product lines) rather than double-counting the "
+                    "same orders. Worth a quick confirmation inside the account that each order can only ever "
+                    "fire one of these tags - if both can fire on the same checkout, sales and revenue are "
+                    "overstated and CPAs understated. If they are genuinely separate, keep both but label them "
+                    "clearly so reporting can split performance by site."
+                )
+                if rag == "green":
+                    rag = "amber"
         # True call/contact actions only - GET_DIRECTIONS is deliberately excluded: a directions
         # tap isn't a phone enquiry, so counting it here would overstate the call double-counting.
         _call_cluster = [ca for ca in _basis
@@ -650,9 +740,15 @@ def score_conversion_tracking(data):
                 _call_note = (f" In particular, {len(_call_cluster)} call/contact actions are {_count_word} "
                               f"conversions ({_cnames}{_more}), so a single phone enquiry can be counted several times.")
             _lead_txt = (_dup_txt if _dup_txt else f"{len(_call_cluster)} overlapping call/contact actions")
+            # When the duplicate actions' monthly volumes rise and fall TOGETHER, say so - that
+            # is positive evidence of the same orders being counted twice, not just a setup smell.
+            _mirror_note = ""
+            if any(v is not None and v >= 0.7 for c, v in _dup_overlap.items() if c in _dup_cats):
+                _mirror_note = (" Their monthly volumes rise and fall together, which is exactly the "
+                                "pattern you would expect if the same orders are being counted twice.")
             issues.append(
                 f"Possible conversion double-counting: {_lead_txt} are {_count_word} conversions, which can count "
-                f"the same lead more than once.{_call_note} Double-counting makes cost per lead look artificially "
+                f"the same lead more than once.{_mirror_note}{_call_note} Double-counting makes cost per lead look artificially "
                 "LOW, so historic figures (including the paused PMax CPAs) may be around half the true cost. "
                 "Consolidate to one clean primary action per genuine lead type (ideally the form fill), move the "
                 "rest to secondary, and reconcile against the back-end enquiry count so there is a single source of truth."
@@ -870,7 +966,10 @@ def score_conversion_tracking(data):
                 "click - actual margin, returns and cancellations, or new-versus-returning customer "
                 "value. Importing true order outcomes (even a periodic spreadsheet upload) lets smart "
                 "bidding optimise towards profit rather than top-line order value, which matters most "
-                "when target-ROAS bidding is steering spend."
+                "when target-ROAS bidding is steering spend. We roll this out for clients as POAS "
+                "(profit on ad spend): if a £100 order carries a 40% margin, bidding optimises towards "
+                "the £40 of profit rather than the £100 of revenue - so Google stops chasing "
+                "high-revenue, low-margin products and you see clearly which products actually pay."
             )
             if rag == "green":
                 rag = "amber"
@@ -2441,12 +2540,43 @@ def score_efficiency(data):
             bits.append("Search Partners (" + ", ".join("'%s'" % n for n in sp[:2]) + ")")
         if disp:
             bits.append("the Display Network (" + ", ".join("'%s'" % n for n in disp[:2]) + ")")
-        issues.append(
-            f"{len(set(sp) | set(disp))} Search campaign(s) are opted into " + " and ".join(bits) + ". "
-            "These send a share of your budget to lower-intent placements beyond Google search results, "
-            "often at a worse cost per lead. Unless they are proven to convert, turn them off so budget "
-            "concentrates on high-intent search traffic."
-        )
+        # Quantify what the opt-in actually cost (last 30 days) when the network split is
+        # available - '£62 went to Display and produced 0 conversions' lands much harder
+        # than 'some budget can go to lower-intent placements' (Dan, 11 June 2026).
+        _split = data.get("network_split") or {}
+        _spent_note = ""
+        _d_spend = sum((_split.get(n) or {}).get("display_spend", 0) for n in disp)
+        _d_conv = sum((_split.get(n) or {}).get("display_conversions", 0) for n in disp)
+        _p_spend = sum((_split.get(n) or {}).get("partners_spend", 0) for n in sp)
+        _p_conv = sum((_split.get(n) or {}).get("partners_conversions", 0) for n in sp)
+        _parts = []
+        if disp and _split:
+            _parts.append(f"£{_d_spend:.0f} went to Display placements and produced "
+                          f"{_d_conv:.0f} conversion(s)" if _d_spend >= 1 else
+                          "effectively nothing has been spent on Display yet, so this is exposure rather than waste")
+        if sp and _split:
+            _parts.append(f"£{_p_spend:.0f} went to Search Partner sites and produced "
+                          f"{_p_conv:.0f} conversion(s)" if _p_spend >= 1 else
+                          "effectively nothing has been spent on Search Partners yet, so this is exposure rather than waste")
+        if _parts:
+            _spent_note = " In the last 30 days " + "; ".join(_parts) + "."
+        # Severity follows the money: when the network split CONFIRMS the leak is still
+        # tiny (<£10 in 30 days), this is a settings tidy-up for Additional Observations,
+        # not a headline slide. No split data = can't confirm = keep the stronger framing.
+        if _split and (_d_spend + _p_spend) < 10:
+            issues.append(
+                f"A network setting worth tidying: {len(set(sp) | set(disp))} Search campaign(s) include "
+                + " and ".join(bits) +
+                ", which can send budget to lower-intent placements beyond Google search results."
+                f"{_spent_note} Untick the network boxes so it stays that way as budgets grow."
+            )
+        else:
+            issues.append(
+                f"{len(set(sp) | set(disp))} Search campaign(s) are opted into " + " and ".join(bits) + ". "
+                "These send a share of your budget to lower-intent placements beyond Google search results, "
+                f"often at a worse cost per lead.{_spent_note} Unless they are proven to convert, turn them off "
+                "so budget concentrates on high-intent search traffic."
+            )
         if rag == "green":
             rag = "amber"
 

@@ -22,6 +22,15 @@ from audit_style_examples import (
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+# Fixed credibility close appended to the score verdict on slide 4 (Dan, 11 June 2026:
+# the boilerplate decks close on "our extensive experience" - mirror that next to the
+# dial). Deliberately a constant, never GPT-written, so we can't invent awards we
+# haven't won. DAN TO CONFIRM the Premier Partner wording (and add awards if wanted).
+CREDIBILITY_LINE = (
+    "Fixing this is what we do all day: we are a Google Premier Partner with extensive "
+    "lead generation and e-commerce experience, and most of our clients stay with us for years."
+)
+
 _total_tokens = 0  # module-level token counter, reset per generate_narrative() call
 
 
@@ -504,7 +513,7 @@ Rules:
 - If "Things the account already does WELL" are provided, OPEN the COMMERCIAL_IMPACT with a brief, genuine one-clause acknowledgement of 1-2 of them (e.g. "The fundamentals are sound - X and Y are well set up - but..."), then pivot. Where it is true from the findings, be explicit and direct that these good foundations are being HELD BACK or STRANGLED by the issues - e.g. solid groundwork is being throttled while budget is capped on winning campaigns and leaks into non-converting searches. Honest and pointed beats vague. Keep the strengths to one short clause; the focus stays on the opportunities being missed.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - TERMINOLOGY: when referring to importing real lead outcomes (booked jobs / sales) back into Google Ads, name it "offline conversion import (OCI)" - not vague wording like "sales outcomes are not imported".
-- SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close on a forward-looking note (the sections that follow show where the gains are). {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human.
+- SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close by NAMING the one or two most important fixes in plain words (e.g. "starting with consolidating conversion tracking and tightening location targeting") - the client should finish the sentence knowing exactly where the gains will come from, not just that "fixes are clear". {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human.
 - Use British English spelling.{escalation_note}
 
 Respond in EXACTLY this format (no extra text, no markdown):
@@ -531,13 +540,16 @@ SCORE_SUMMARY: <2 - 3 sentence plain-English verdict matching the overall score>
             key, _, val = line.partition(":")
             lines[key.strip().upper()] = val.strip()
 
+    _score = lines.get("SCORE_SUMMARY", "")
+    if _score:
+        _score = f"{_score} {CREDIBILITY_LINE}".strip()
     return {
         "headline":          lines.get("EXEC_HEADLINE", ""),
         "bullet_1":          lines.get("BULLET_1", ""),
         "bullet_2":          lines.get("BULLET_2", ""),
         "bullet_3":          lines.get("BULLET_3", ""),
         "commercial_impact": lines.get("COMMERCIAL_IMPACT", ""),
-        "score_summary":     lines.get("SCORE_SUMMARY", ""),
+        "score_summary":     _score,
     }
 
 
@@ -1188,6 +1200,8 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "takeaways":         takeaways,
         "performance_summary": perf,
         "perf_commentary":   perf_commentary,
+        # populate_slides uses this to swap the Imp. Share row for ROAS on ecommerce decks.
+        "account_type":      findings.get("account_type", "unknown"),
         "website_url":       objectives.get("website_url", ""),
     }
 

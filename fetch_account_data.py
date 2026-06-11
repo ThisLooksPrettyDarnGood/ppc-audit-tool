@@ -1095,6 +1095,35 @@ def get_search_network_settings(client, cid):
     return out
 
 
+def get_network_split(client, cid):
+    """
+    Per ENABLED campaign: last-30-day spend and conversions split by ad network
+    (Display / Search Partners). Puts a real number on the 'opted into Display'
+    finding - how much budget actually went there and what it produced - instead
+    of 'some budget can go to lower-intent placements'. Caller wraps in try/except.
+    """
+    gaql = """
+        SELECT campaign.name,
+               segments.ad_network_type,
+               metrics.cost_micros,
+               metrics.conversions
+        FROM campaign
+        WHERE campaign.status = 'ENABLED'
+          AND segments.date DURING LAST_30_DAYS
+    """
+    rows = run_query(client, cid, gaql)
+    out = {}
+    _keys = {"CONTENT": "display", "SEARCH_PARTNERS": "partners"}
+    for r in rows:
+        net = _keys.get(r.segments.ad_network_type.name)
+        if not net:
+            continue
+        c = out.setdefault(r.campaign.name, {})
+        c[f"{net}_spend"] = round(c.get(f"{net}_spend", 0) + r.metrics.cost_micros / 1_000_000, 2)
+        c[f"{net}_conversions"] = round(c.get(f"{net}_conversions", 0) + r.metrics.conversions, 2)
+    return out
+
+
 def get_ad_assets(client, cid):
     """
     Which ad-extension (asset) TYPES are live across the account (account-level + campaign-level),
@@ -1489,6 +1518,12 @@ def fetch_account_data(client_cid: str) -> dict:
     except Exception as e:
         print(f"    (network-settings query failed: {e})"); network_settings = None
 
+    print("  → Spend/conversions by network (Display & Search Partners)...")
+    try:
+        network_split = get_network_split(client, cid)
+    except Exception as e:
+        print(f"    (network-split query failed: {e})"); network_split = None
+
     print("  → Account name (for brand detection)...")
     account_name = ""
     try:
@@ -1558,6 +1593,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "geo_user_location": geo_user_location,
         "ad_assets": ad_assets,
         "network_settings": network_settings,
+        "network_split": network_split,
         "brand_leakage": brand_leakage,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,

@@ -276,20 +276,35 @@ def main():
                             exec_sum.get("score_summary") or exec_sum.get("commercial_impact", "")))
 
     # ── Performance Summary slide ──
-    requests.append(replace("{{PERF_SPEND_30D}}",  perf.get("spend_30d",  "N/A")))
-    requests.append(replace("{{PERF_IMPR_30D}}",   perf.get("impr_30d",   "N/A")))
-    requests.append(replace("{{PERF_CLICKS_30D}}", perf.get("clicks_30d", "N/A")))
-    requests.append(replace("{{PERF_CONVS_30D}}",  perf.get("convs_30d",  "N/A")))
-    requests.append(replace("{{PERF_CVR_30D}}",    perf.get("cvr_30d",    "N/A")))
-    requests.append(replace("{{PERF_CPA_30D}}",    perf.get("cpa_30d",    "N/A")))
-    requests.append(replace("{{PERF_SIS_30D}}",    perf.get("sis_30d",    "N/A")))
+    # 30-day cells carry a trend marker vs the 12-month run-rate (e.g. '£1,377  ▲ +3%')
+    # so the table itself anchors what is improving vs declining (Dan, 11 June 2026).
+    def _v30(key):
+        val = perf.get(key, "N/A")
+        trend = perf.get(f"{key}_trend", "")
+        return f"{val}  {trend}" if trend else val
+
+    # On ecommerce decks the Imp. Share row becomes ROAS - the commercial headline.
+    # The row label is static template text (not a token), so swap it with a targeted
+    # replaceAllText. Insert it FIRST so no GPT-written copy filled earlier in the
+    # batch can ever contain a matching "Imp. Share" and be rewritten.
+    _use_roas = (data.get("account_type") == "ecommerce"
+                 and perf.get("roas_30d") not in (None, "", "N/A"))
+    if _use_roas:
+        requests.insert(0, replace("Imp. Share", "ROAS"))
+    requests.append(replace("{{PERF_SPEND_30D}}",  _v30("spend_30d")))
+    requests.append(replace("{{PERF_IMPR_30D}}",   _v30("impr_30d")))
+    requests.append(replace("{{PERF_CLICKS_30D}}", _v30("clicks_30d")))
+    requests.append(replace("{{PERF_CONVS_30D}}",  _v30("convs_30d")))
+    requests.append(replace("{{PERF_CVR_30D}}",    _v30("cvr_30d")))
+    requests.append(replace("{{PERF_CPA_30D}}",    _v30("cpa_30d")))
+    requests.append(replace("{{PERF_SIS_30D}}",    _v30("roas_30d") if _use_roas else _v30("sis_30d")))
     requests.append(replace("{{PERF_SPEND_12M}}",  perf.get("spend_12m",  "N/A")))
     requests.append(replace("{{PERF_IMPR_12M}}",   perf.get("impr_12m",   "N/A")))
     requests.append(replace("{{PERF_CLICKS_12M}}", perf.get("clicks_12m", "N/A")))
     requests.append(replace("{{PERF_CONVS_12M}}",  perf.get("convs_12m",  "N/A")))
     requests.append(replace("{{PERF_CVR_12M}}",    perf.get("cvr_12m",    "N/A")))
     requests.append(replace("{{PERF_CPA_12M}}",    perf.get("cpa_12m",    "N/A")))
-    requests.append(replace("{{PERF_SIS_12M}}",    perf.get("sis_12m",    "N/A")))
+    requests.append(replace("{{PERF_SIS_12M}}",    perf.get("roas_12m", "N/A") if _use_roas else perf.get("sis_12m", "N/A")))
     requests.append(replace("{{PERF_COMMENTARY}}", perf_commentary))
 
     # ── Issue slides (ISSUE-LED: up to 6, ranked by severity) ──
