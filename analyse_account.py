@@ -94,6 +94,12 @@ def detect_account_type(data):
                    for ca in conversion_actions)
     if has_purchase and not has_lead:
         return "ecommerce"
+    if has_purchase and data.get("claims_ecom"):
+        # Nothing money-shaped is recording, but purchase actions exist AND the client
+        # says the business is pure ecommerce: that's an ecommerce account whose sales
+        # tracking is broken, not a lead-gen account (The Beatles Story, June 2026 -
+        # only £1-valued page-view actions recorded; the ticket purchase action was silent).
+        return "ecommerce"
     if has_lead:
         return "lead_gen"
     return "unknown"
@@ -192,6 +198,27 @@ def analyse_account(data, raw_questionnaire=""):
         _m = _re.search(r'e[- ]?com(?:merce)?\s+or\s+lead\s*gen[^:]*:\s*(.+)',
                         str(raw_questionnaire or ""), _re.I)
         data["claims_lead_gen"] = bool(_m and _re.search(r'lead|both', _m.group(1), _re.I))
+        # Pure-ecommerce claim - used by detect_account_type when conversion volumes
+        # can't decide (e.g. only page views are recording).
+        data["claims_ecom"] = bool(_m and _re.search(r'e[- ]?com', _m.group(1), _re.I)
+                                   and not _re.search(r'lead|both', _m.group(1), _re.I))
+    if not str(data.get("account_name") or "").strip() and raw_questionnaire:
+        # The API's descriptive_name can come back blank - fall back to the client name
+        # on the questionnaire's first line so brand detection still works (Beatles
+        # Story, June 2026: blank name meant every brand search read as a competitor's).
+        _first = next((ln.strip() for ln in str(raw_questionnaire).splitlines()
+                       if ln.strip()), "")
+        if _first and len(_first) <= 60 and ":" not in _first:
+            data["account_name"] = _first
+    if "client_keywords" not in data:
+        # The keywords the client SAYS they want ("Keywords:" questionnaire line). These
+        # are their own demand by definition - the competitor-term check must never
+        # classify them as somebody else's business name.
+        import re as _re
+        _km = _re.search(r'^Keywords?\s*:\s*(.+)$', str(raw_questionnaire or ""),
+                         _re.I | _re.M)
+        data["client_keywords"] = ([k.strip().lower() for k in _km.group(1).split(",")
+                                    if k.strip()] if _km else [])
     if "stated_roas_target" not in data:
         # The client's own ROAS bar (e.g. "Target ROAS 4:1 minimum") - lets bidding
         # findings anchor recommendations to THEIR number rather than a generic one.
@@ -334,6 +361,7 @@ _ISSUE_SIGNATURES = [
     ("without converting",                         63, "amber",     "Targeting & Keywords"),  # wasted SQR spend (material)
     ("are blocking searches that have CONVERTED",  73, "amber_red", "Targeting & Keywords"),  # negative conflict - silent sabotage
     ("an unusually large list",                    33, "amber",     "Targeting & Keywords"),  # huge negative list, no conflicts -> Observations
+    ("repeatedly generated page-view 'conversions'", 45, "amber",   "Targeting & Keywords"),  # keyword candidates, but evidence is page views (purchase tracking silent)
     ("are NOT added as active keywords",           68, "amber",     "Targeting & Keywords"),  # converting queries, 3+ conv (high-value "dropped ball")
     ("early signals rather than statistical proof", 52, "amber",    "Targeting & Keywords"),  # converting queries, 1-2 conv each (watch-and-test)
     ("without audience signals",                   56, "amber",     "Targeting & Keywords"),
@@ -349,6 +377,7 @@ _ISSUE_SIGNATURES = [
     ("No keyword click data",                      48, "amber",     "Targeting & Keywords"),
     ("CTR is",                                     40, "amber",     "Targeting & Keywords"),
     # Conversion tracking (amber)
+    ("No purchases are reaching Google Ads",       88, "red",       "Conversion Tracking"),  # ecom purchase tag silent all year; page views steer bidding (Beatles Story)
     ("offline conversion imports (OCI)",           70, "amber",     "Conversion Tracking"),  # the elephant (lead gen) - paramount
     ("Revenue feedback loop",                      64, "amber",     "Conversion Tracking"),  # the ecommerce OCI equivalent
     ("appear set up but have recorded nothing",    58, "amber",     "Conversion Tracking"),  # dead genuine action (broken tag)
@@ -650,6 +679,10 @@ def score_conversion_tracking(data):
     # the CPA" caveat. Stays False for latent setup risk where the reported numbers are genuine.
     conversions_inflated = False
     revenue_undertracked = []   # (name, orders) of purchase actions counting orders at £0 value
+    # True when an ecommerce account's purchase actions recorded NOTHING all year while
+    # low-value primaries hold all the volume - reported revenue/ROAS is then an artifact
+    # of their default values, and the dedicated check below owns the whole story.
+    _purchase_silent = False
     conversion_actions = data.get("conversion_actions", [])
     summary = data.get("account_summary_30d", {})
     total_conversions = summary.get("conversions", 0)
@@ -699,6 +732,91 @@ def score_conversion_tracking(data):
         # Count only PRIMARY actions (the ones bidding actually optimises towards).
         primary_actions = [ca for ca in active_actions if _is_primary(ca)]
 
+        # ── Ecommerce account whose PURCHASE tracking is silent (owns the headline) ──
+        # Purchase actions exist but recorded nothing across 12 months while other
+        # primaries (page views and similar) hold ALL the volume: bidding optimises
+        # towards page views and the reported 'revenue' is their default values, not
+        # sales. The low-value-primary, dead-action and revenue-feedback checks stand
+        # down where they overlap so the deck tells ONE story (The Beatles Story,
+        # June 2026: ticket purchase action silent all year; 'Checked opening times' and
+        # 'Checked prices' page views at about £1 each made up all 14,909 'conversions').
+        _monthly_all = data.get("conversion_volume_by_month") or {}
+        _purch_actions = [ca for ca in conversion_actions if ca.get("category") == "PURCHASE"]
+        if (_purch_actions and detect_account_type(data) == "ecommerce"
+                and (total_conversions or 0) >= 50 and _monthly_all):
+            _p_12m = sum(sum((_monthly_all.get(ca.get("name")) or {}).values())
+                         for ca in _purch_actions)
+            # AD-ATTRIBUTED purchases only: 0.0 is a real reading, so never let it fall
+            # through to the site-event count (all_conversions) - the whole point is that
+            # those two can differ (Beatles Story: 321 site-event purchases, 0 attributed).
+            def _p_attr(ca):
+                v = ca.get("attributed_conversions_30d")
+                return (ca.get("conversions_30d") if v is None else v) or 0
+            _p_30d = sum(_p_attr(ca) for ca in _purch_actions)
+            # Purchases firing as SITE events on those same actions (GA4/website tag):
+            # proof the business takes orders even though no ad click gets the credit.
+            _p_site_30d = sum((ca.get("conversions_30d") or 0) for ca in _purch_actions
+                              if ca.get("attributed_conversions_30d") is not None)
+            if _p_12m < 1 and _p_30d < 1:
+                _purchase_silent = True
+                conversions_inflated = True
+                # Later sections (evaluated after this one) read the flag off the data
+                # dict to soften any "converting term" claims built on page-view counts.
+                data["_purchase_silent"] = True
+                _enabled_p = [ca for ca in _purch_actions
+                              if str(ca.get("status", "")) == "ENABLED"] or _purch_actions
+                _pname = _enabled_p[0].get("name", "purchase")
+                _others = len(_purch_actions) - 1
+                _rec = sorted([ca for ca in conversion_actions
+                               if ca.get("category") != "PURCHASE"
+                               and ((_attr(ca) if _has_attr else ca.get("conversions_30d")) or 0) >= 1],
+                              key=lambda ca: (_attr(ca) if _has_attr else ca.get("conversions_30d")) or 0,
+                              reverse=True)
+                _rec_str = ", ".join(
+                    f"'{ca.get('name')}' "
+                    f"({int(round((_attr(ca) if _has_attr else ca.get('conversions_30d')) or 0)):,})"
+                    for ca in _rec[:3])
+                # Per-conversion value across 12 months - when it is pocket change (a £1
+                # default, say), name it so the revenue artifact is concrete on the slide.
+                _t12_all = sum(sum(m.values()) for m in _monthly_all.values())
+                _ps_raw = data.get("performance_summary") or {}
+                _t12v = ((_ps_raw.get("t12") or {}).get("value")
+                         or ((_ps_raw.get("_raw") or {}).get("t12") or {}).get("value") or 0)
+                _val_note = ""
+                if _t12_all >= 50 and _t12v and 0 < (_t12v / _t12_all) <= 5:
+                    _val_note = (f", each carrying a small default value of about "
+                                 f"£{max(1, round(_t12v / _t12_all))}")
+                _other_note = (f", and the other {_others} purchase action(s) in the account are "
+                               "switched off or silent too" if _others else "")
+                if _p_site_30d >= 5:
+                    # Purchases ARE firing as website events - the break is between the ad
+                    # CLICK and the purchase (cross-domain checkout, GA4 link or similar).
+                    # State the two measured facts; hedge the cause.
+                    _opening = (
+                        f"No purchases are reaching Google Ads: the '{_pname}' conversion action "
+                        f"records purchases as website events (about {int(round(_p_site_30d)):,} in "
+                        "the last 30 days), but not one has been attributed to a Google Ads click in "
+                        "12 months. The trail between the ad click and the checkout is being lost "
+                        "along the way - on third-party booking or checkout domains this is usually a "
+                        "cross-domain tracking gap, which a tag specialist can confirm. "
+                    )
+                else:
+                    _opening = (
+                        f"No purchases are reaching Google Ads: the '{_pname}' conversion action has "
+                        f"recorded nothing in the last 12 months{_other_note}. "
+                    )
+                issues.append(
+                    _opening +
+                    f"What Google Ads IS recording is page activity: {_rec_str} 'conversions' in the "
+                    f"last 30 days{_val_note}. Two knock-on effects. First, smart bidding is "
+                    "optimising towards page views, not buyers. Second, the account's reported "
+                    "revenue and ROAS are built from those page-view values, not sales money - so "
+                    "they cannot be read as a real return. Reconnecting the purchase tag so real "
+                    "orders and order values flow into Google Ads is the single most important fix "
+                    "in this audit; until then the account cannot see which ads actually sell."
+                )
+                rag = "red"
+
         # ── Possible double-counting: multiple PRIMARY actions of the same category, or an
         # overlapping cluster of call/contact actions, can count one interaction several times -
         # a classic cause of an artificially LOW CPA. It undermines every CPA/ROAS figure, so
@@ -717,6 +835,12 @@ def score_conversion_tracking(data):
         _primary_cats = _Counter(ca.get("category", "") for ca in _basis
                                  if ca.get("category") and ca.get("category") != "DOWNLOAD")
         _dup_cats = {c: n for c, n in _primary_cats.items() if n >= 2}
+        if _purchase_silent:
+            # The purchase-silent headline already covers the page-view/engagement junk -
+            # flagging those same actions as 'double-counting' would tell the junk story
+            # twice, and 'the same lead counted twice' is the wrong frame for page views.
+            _dup_cats = {c: n for c, n in _dup_cats.items()
+                         if c not in {"PAGE_VIEW", "ENGAGEMENT", "OUTBOUND_CLICK"}}
 
         # Same-category primaries are only DOUBLE-counting if both tags fire on the same
         # journey. The monthly series is the tell: tags on the same checkout rise and fall
@@ -911,7 +1035,9 @@ def score_conversion_tracking(data):
                          "DOWNLOAD": "a download action", "OUTBOUND_CLICK": "an outbound-click action"}
         primary_spammable = [ca for ca in active_actions
                              if _is_primary(ca) and ca.get("category", "") in spammable_categories]
-        if primary_spammable:
+        # When the purchase-silent check above fired, it already tells the page-view
+        # story - running this block too would put the same fact on two slides.
+        if primary_spammable and not _purchase_silent:
             plain = ", ".join(_lowval_plain.get(ca.get("category", ""), "a low-value action")
                               for ca in primary_spammable)
             _vols_all = [ca.get("conversions_30d") for ca in primary_spammable]   # all_conversions
@@ -1074,7 +1200,9 @@ def score_conversion_tracking(data):
             )
             if rag == "green":
                 rag = "amber"
-        elif not has_oci and detect_account_type(data) == "ecommerce":
+        elif not has_oci and detect_account_type(data) == "ecommerce" and not _purchase_silent:
+            # (When the purchase action is silent, the copy below would falsely say
+            # "conversion tracking records orders" - the purchase-silent finding owns it.)
             # The ecommerce equivalent of the OCI elephant: orders are tracked, but what
             # they were WORTH after the click (margin, returns, new-vs-returning) is not
             # fed back, so value bidding steers on top-line order value only.
@@ -1142,7 +1270,9 @@ def score_conversion_tracking(data):
                              "REQUEST_QUOTE", "PHONE_CALL_LEAD", "LEAD", "IMPORTED_LEAD"}
             _dead = [ca for ca in primary_actions
                      if ca.get("category") in _GENUINE_CATS
-                     and sum((_monthly.get(ca.get("name")) or {}).values()) < 1]
+                     and sum((_monthly.get(ca.get("name")) or {}).values()) < 1
+                     # the purchase-silent finding already names silent purchase actions
+                     and not (_purchase_silent and ca.get("category") == "PURCHASE")]
             if _dead:
                 _dnames = ", ".join(f"'{ca.get('name')}'" for ca in _dead[:3])
                 issues.append(
@@ -1205,6 +1335,9 @@ def score_conversion_tracking(data):
         "issues": issues,
         "conversions_inflated": conversions_inflated,
         "revenue_undertracked": [n for n, _ in revenue_undertracked],
+        # Purchase actions silent all year while page-view primaries hold the volume:
+        # drives the performance-commentary caveat that revenue/ROAS is NOT sales money.
+        "revenue_artifact": _purchase_silent,
         "tracking_change": tracking_change,
         "data_points": {
             "conversion_actions_count": len(conversion_actions),
@@ -1420,8 +1553,12 @@ def score_account_structure(data):
     # of low-risk AAR types; flag only types enabled OUTSIDE that approved set.
     auto_apply = data.get("auto_apply_recommendations", None)
     auto_apply_types = data.get("auto_apply_types") or []
-    # Drop UNKNOWN/UNSPECIFIED enum values - they'd render as a bare "Unknown" on the client
-    # deck (a recommendation type newer than the API client's enum). No actionable meaning.
+    # Drop UNKNOWN/UNSPECIFIED enum values from the labels - they'd render as a bare
+    # "Unknown" on the client deck (a recommendation type newer than the API client's
+    # enum). But REMEMBER they existed: an unidentified type means we cannot say
+    # "nothing risky is on", so the all-clear wording below has to hedge.
+    _unidentified_aar = [t for t in auto_apply_types
+                         if str(t).upper() in ("UNKNOWN", "UNSPECIFIED")]
     auto_apply_types = [t for t in auto_apply_types
                         if str(t).upper() not in ("UNKNOWN", "UNSPECIFIED")]
     if auto_apply_types:
@@ -1454,6 +1591,13 @@ def score_account_structure(data):
                 f"Auto-Apply is enabled for: {labelled}. Worth confirming each of these is a type "
                 "you're happy to let Google change automatically  -  some can affect keywords, "
                 "bidding, or where your ads show."
+            )
+        elif _unidentified_aar:
+            issues.append(
+                f"Auto-Apply is enabled for low-risk types ({labelled}), plus at least one setting "
+                "our reporting could not identify by name. Worth a quick look at the Auto-Apply "
+                "settings page (Recommendations > Auto-Apply) to confirm nothing higher-risk is "
+                "switched on."
             )
         else:
             issues.append(
@@ -1723,16 +1867,28 @@ def score_targeting_keywords(data):
                      "residential", "portable", "plastic", "mini", "kids", "childrens", "my",
                      "bespoke", "custom", "modern", "traditional", "cost", "price", "prices"}
 
+    # The client's stated keywords and brand words are THEIR demand - a competitor token
+    # match must never be built from them. (Beatles Story, June 2026: competitor
+    # 'Liverpool Beatles Museum' shares every word with the client's own keywords, so
+    # token matching flagged 'beatles museum' and even 'museums in liverpool' - the
+    # client's stated keyword - as competitor names.)
+    _client_kw = [k for k in (data.get("client_keywords") or []) if k]
+    _client_kw_tokens = {tok for k in _client_kw for tok in k.split()}
+
     def _competitor_reason(term):
         """Return 'listed' (named competitor), 'possible' (heuristic), or None."""
         t = str(term).lower()
         if _is_brand(t):
             return None
+        for k in _client_kw:
+            if k in t or t in k:
+                return None
         for full in _comp_full:
             if full in t:
                 return "listed"
         toks = t.split()
-        if any(tok in _comp_tokens for tok in toks):
+        if any(tok in _comp_tokens and tok not in _client_kw_tokens
+               and tok not in brand_tokens for tok in toks):
             return "listed"
         # Heuristic: "<proper-noun-ish modifier> pool(s) ..." (e.g. 'southern pools heathfield')
         for i, w in enumerate(toks):
@@ -1843,7 +1999,12 @@ def score_targeting_keywords(data):
             spend = t.get("spend", 0) or 0
             kw, mt = t.get("keyword"), str(t.get("keyword_match_type") or "").lower()
             via = (f", currently caught loosely by the {mt}-match keyword '{kw}'" if kw and mt else "")
-            cpl = f" at ~£{round(spend / conv)} each" if conv else ""
+            cpl = ""
+            if conv:
+                _pp = spend / conv
+                # Sub-£1 unit costs read as pence, never a rounded-to-zero "~£0".
+                cpl = (f" at ~£{round(_pp)} each" if _pp >= 1
+                       else f" at ~{max(1, round(_pp * 100))}p each")
             return f"'{t.get('term', '?')}' ({conv} conversion{'s' if conv != 1 else ''}{cpl}{via})"
         # Statistical honesty (Dan, 11 June 2026): one conversion from a couple of clicks is an
         # early SIGNAL, not proof - a £1 click that converted once can read as a £1 CPA and be
@@ -1854,14 +2015,28 @@ def score_targeting_keywords(data):
             eg_text = " For example " + ", ".join(_ck_eg(t) for t in _proven[:3]) + "."
             _early_note = (f" A further {len(_early)} term(s) converted only once or twice - "
                            "early signals worth watching for a repeat, not yet proof.") if _early else ""
-            sqr_issues.append(
-                f"{len(_proven)} search terms have repeatedly generated conversions over the last 90 days "
-                f"but are NOT added as active keywords.{eg_text} Proven, money-making demand is being captured "
-                "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
-                "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
-                "cannot be added and are better captured by a closely related theme - to gain control over bids, "
-                f"ad copy and landing pages.{_early_note}{_quality_caveat}"
-            )
+            _n, _s = len(_proven), ("s" if len(_proven) != 1 else "")
+            _hv = "have" if len(_proven) != 1 else "has"
+            if data.get("_purchase_silent"):
+                # The 'conversions' behind these terms are page views (the tracking finding
+                # owns that story) - so this is interest evidence, not money evidence, and
+                # must not be sold as "proven, money-making demand".
+                sqr_issues.append(
+                    f"{_n} search term{_s} {_hv} repeatedly generated page-view 'conversions' over the "
+                    f"last 90 days but are NOT added as active keywords.{eg_text} With purchase tracking "
+                    "disconnected these counts show interest, not sales - but the terms are still "
+                    "keyword candidates: adding the closest fits gives control over bids, ad copy and "
+                    f"landing pages, and they can be judged properly once real orders are tracked.{_early_note}"
+                )
+            else:
+                sqr_issues.append(
+                    f"{_n} search term{_s} {_hv} repeatedly generated conversions over the last 90 days "
+                    f"but are NOT added as active keywords.{eg_text} Proven, money-making demand is being captured "
+                    "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
+                    "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
+                    "cannot be added and are better captured by a closely related theme - to gain control over bids, "
+                    f"ad copy and landing pages.{_early_note}{_quality_caveat}"
+                )
         else:
             eg_text = " For example " + ", ".join(_ck_eg(t) for t in _sorted_conv[:3]) + "."
             sqr_issues.append(
@@ -2298,6 +2473,9 @@ def score_bidding_strategy(data):
                   if (p.get("cpc", 0) or 0) >= 3 * _acct_cpc and (p.get("clicks") or 0) <= 3]
         spikes = sorted(spikes, key=lambda x: x.get("cpc", 0) or 0, reverse=True)[:3]
         if spikes:
+            # Sub-£1 average CPCs render as pence ("19p"), never a rounded-to-zero "£0".
+            _cpc_label = (f"£{_acct_cpc:.0f}" if _acct_cpc >= 1
+                          else f"{max(1, round(_acct_cpc * 100))}p")
             egs = []
             for p in spikes:
                 mult = (p["cpc"] / _acct_cpc) if _acct_cpc else 0
@@ -2305,7 +2483,7 @@ def score_bidding_strategy(data):
                 conv_note = " and produced no conversions" if (p.get("conversions") or 0) == 0 else ""
                 egs.append(
                     f"'{p['term']}' paid £{p['cpc']:.0f} for {single} on {_pretty_date(p.get('date'))} "
-                    f"({mult:.0f}x the account's ~£{_acct_cpc:.0f} average CPC){conv_note}"
+                    f"({mult:.0f}x the account's ~{_cpc_label} average CPC){conv_note}"
                 )
             issues.append(
                 "Automated bidding paid some very expensive single clicks last month that the average CPC "
@@ -2955,13 +3133,24 @@ def score_efficiency(data):
         elif material:
             local_note = (" For a local business this is a silent leak worth closing."
                           if account_type in ("lead_gen", "unknown", "mixed") else "")
+            # Buyers of an ecommerce/booking business do NOT have to be near the venue:
+            # blanket "switch to Presence" advice on a city-level target would cut off
+            # customers planning ahead from elsewhere. Anchor the fix to matching the
+            # TARGETS to where customers are when they buy (Beatles Story, June 2026).
+            catchment_note = (
+                " One check before switching: make sure the targeted locations match where "
+                "customers actually are when they order or book - if buyers purchase ahead "
+                "from elsewhere (a visitor attraction, say), the right fix is 'Presence' "
+                "across the whole catchment country, not just the venue's own town."
+                if account_type == "ecommerce" else "")
             issues.append(
                 f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
                 f"{names}.{_mag} The setting shows your ads to people merely INTERESTED in your area, not only "
                 f"those actually in it - so with it active across {_pct:.0%} of your spend, your whole budget is "
                 f"EXPOSED to out-of-area clicks.{_real}"
                 f"{local_note} Switching to 'Presence (people in, or regularly in, your locations)' is one of "
-                "the highest-ROI fixes there is - it typically cuts wasted spend and lowers cost per lead."
+                f"the highest-ROI fixes there is - it typically cuts wasted spend and lowers cost per "
+                f"{'sale' if account_type == 'ecommerce' else 'lead'}.{catchment_note}"
             )
         else:
             issues.append(
@@ -3087,8 +3276,26 @@ def build_strengths(data):
     if assets and {"SITELINK", "CALLOUT", "CALL"}.issubset(set(assets.keys())):
         s.append("strong ad-extension coverage (sitelinks, callouts, call and more)")
     summary = data.get("account_summary_30d", {})
+    # Only call tracking a strength when something business-meaningful is recording
+    # (sales or enquiries) - an account counting only page views must never be told
+    # its tracking is a strength (The Beatles Story, June 2026).
+    _BIZ_LEAD_CATS = {"LEAD", "CONTACT", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT",
+                      "REQUEST_QUOTE", "SIGNUP", "PHONE_CALL_LEAD", "IMPORTED_LEAD",
+                      "DEFAULT", "OTHER"}  # DEFAULT/OTHER: webpage actions often land here
+    def _vol30(ca):
+        v = ca.get("attributed_conversions_30d")
+        return (ca.get("conversions_30d") if v is None else v) or 0
+    _cas = data.get("conversion_actions") or []
+    _sales_vol = sum(_vol30(ca) for ca in _cas if ca.get("category") == "PURCHASE")
+    _enq_vol = sum(_vol30(ca) for ca in _cas if ca.get("category") in _BIZ_LEAD_CATS)
+    _install_vol = sum(_vol30(ca) for ca in _cas if ca.get("category") == "DOWNLOAD")
     if (summary.get("conversions", 0) or 0) > 0:
-        s.append("conversion tracking live and recording enquiries")
+        if _sales_vol > 0:
+            s.append("conversion tracking live and recording sales")
+        elif _enq_vol > 0:
+            s.append("conversion tracking live and recording enquiries")
+        elif _install_vol > 0:
+            s.append("conversion tracking live and recording app installs")
     # Spend discipline: when we LOOKED for the classic waste signals and found none, say
     # so - "no significant wasted spend" is a verified finding, not an omission (Dan,
     # 11 June 2026: a tracking-heavy deck must still show the waste angle was checked).

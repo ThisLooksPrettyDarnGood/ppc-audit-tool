@@ -890,7 +890,8 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
     _t30c, _t12c = (t30.get("conversions") or 0), (t12.get("conversions") or 0)
     # Blended revenue-per-order is itself a measurement artifact when a purchase action
     # records orders at £0 value - don't hand GPT a number we know is corrupted.
-    _value_clean = "revenue is UNDER-tracked" not in (conversion_caveat or "")
+    _value_clean = ("revenue is UNDER-tracked" not in (conversion_caveat or "")
+                    and "NOT sales revenue" not in (conversion_caveat or ""))
     if (_value_clean and (t30.get("value") or 0) > 0 and (t12.get("value") or 0) > 0
             and _t30c >= 5 and _t12c >= 30):
         _aov_line = (f"\nAverage tracked revenue per order: £{t30['value'] / _t30c:.0f} (last 30 days) "
@@ -902,7 +903,16 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
                     "performance as 'strong', 'stronger' or 'good' - say it is improving but still "
                     "below break-even (each order is still bought at a loss). The break-even line is "
                     "the yardstick, not the 12-month average.")
-    if _is_ecom:
+    if _is_ecom and "NOT sales revenue" in (conversion_caveat or ""):
+        # Purchase tracking is silent: there IS no revenue story to lead with. The
+        # revenue-artifact caveat (appended below) owns the wording; here we just stop
+        # the usual lead-with-ROAS instruction from fighting it.
+        _ecom_instr = (
+            "\nThis is an ECOMMERCE account but its purchase tracking is not connected, so do NOT "
+            "lead with revenue or ROAS. Lead with what the spend bought (clicks, visibility, "
+            "impression share) and the fact that the business cannot yet see which of it turned "
+            "into ticket or product sales.")
+    elif _is_ecom:
         _ecom_instr = (
             "\nThis is an ECOMMERCE account: lead with revenue and ROAS (return on ad spend) - that is "
             "the commercial story. Treat conversion counts and CPA as secondary detail. If ROAS has "
@@ -1341,6 +1351,20 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                 "that detail), do NOT present the ROAS decline as a clean performance read, and do NOT "
                 "quote or derive any revenue-per-order/average-order-value figure - the blend is corrupted "
                 "by the £0-value orders.")
+        # Revenue ARTIFACT: no purchase action recorded anything all year - the revenue
+        # and ROAS on the slide are page-view default values, not sales money. Stronger
+        # than under-tracking: there is no real revenue read at all.
+        if (findings.get("conversion_tracking", {}) or {}).get("revenue_artifact"):
+            _conv_caveat += (
+                "\nIMPORTANT: the revenue and ROAS figures here are NOT sales revenue - no purchase "
+                "action recorded anything in the last 12 months, and the 'conversions' shown are "
+                "page-view actions carrying small default values. Treat conversion counts as page "
+                "views, not orders or sales. Say plainly, in one short clause, that revenue and ROAS "
+                "on this account reflect page-view values because purchase tracking is not connected, "
+                "so no real return can be calculated until it is. Never present ROAS or revenue as a "
+                "real return, never call these figures 'strong' or an improvement in earnings, and do "
+                "NOT derive any revenue-per-order figure. Read the trend through spend, clicks and "
+                "impression share instead.")
         _margin = findings.get("stated_margin_pct")
         _be = (100.0 / _margin) if _margin and 5 <= _margin <= 95 else 0.0
         perf_commentary = _retry(
@@ -1377,6 +1401,9 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "perf_commentary":   perf_commentary,
         # populate_slides uses this to swap the Imp. Share row for ROAS on ecommerce decks.
         "account_type":      findings.get("account_type", "unknown"),
+        # True when revenue/ROAS is page-view default values, not sales - populate_slides
+        # then keeps the Imp. Share row instead of swapping in a meaningless ROAS row.
+        "revenue_artifact":  bool((findings.get("conversion_tracking") or {}).get("revenue_artifact")),
         "website_url":       objectives.get("website_url", ""),
     }, str(findings.get("account_type") or ""))
 

@@ -287,7 +287,11 @@ def main():
     # The row label is static template text (not a token), so swap it with a targeted
     # replaceAllText. Insert it FIRST so no GPT-written copy filled earlier in the
     # batch can ever contain a matching "Imp. Share" and be rewritten.
+    # ...but never when the 'revenue' is a tracking artifact (page-view default values,
+    # no purchase action recording): a ROAS row would put a meaningless number centre
+    # stage, so the deck keeps the real Imp. Share row instead.
     _use_roas = (data.get("account_type") == "ecommerce"
+                 and not data.get("revenue_artifact")
                  and perf.get("roas_30d") not in (None, "", "N/A"))
     if _use_roas:
         requests.insert(0, replace("Imp. Share", "ROAS"))
