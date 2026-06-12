@@ -758,6 +758,61 @@ TK5_FUTURE: <future state>
     ]
 
 
+# ── Style lint: deterministic enforcement of Dan's accumulated copy rules ─────
+# GPT re-rolls every render, so a prompt rule followed last time can silently
+# lapse the next (Dan, 11 June 2026: "it was fine six iterations ago but now
+# it's crept back in"). This pass makes the non-negotiables CODE, not vibes:
+# safe substitutions are applied automatically, riskier smells are printed as
+# warnings for the human eye. Runs over every string in the narrative output.
+
+_LINT_SUBS = [
+    # (pattern, replacement) - conservative, grammar-safe swaps only.
+    (re.compile(r"—"), " - "),                                  # em-dash ban (house style)
+    (re.compile(r"undervalued", re.I), "under-reported"),            # £0 = not reported, not valued low
+    (re.compile(r"undervaluing", re.I), "under-reporting"),
+    (re.compile(r"misdirected", re.I), "wrongly matched"),           # internal jargon ban
+    (re.compile(r"most of our clients stay with us for years\.?", re.I), ""),
+]
+_LINT_SUBS_ECOM = [
+    (re.compile(r"lead demand", re.I), "shopper demand"),            # ecommerce vocabulary
+    (re.compile(r"cost per lead", re.I), "cost per order"),
+]
+_LINT_WARN = [
+    (re.compile(r"\b\d{2,}(?:-\d{2,})?\+? conversions(?:/| per )month\b", re.I),
+     "hard conversion-volume minimum stated"),
+    (re.compile(r"£\d+\.\d{2}\b"), "pence shown in a £ figure (house style: whole pounds)"),
+]
+
+
+def _lint_narrative(narr, account_type: str = ""):
+    """Apply the deterministic copy rules to every string in the narrative dict."""
+    subs = list(_LINT_SUBS) + (list(_LINT_SUBS_ECOM) if account_type == "ecommerce" else [])
+
+    def _fix(s):
+        if not isinstance(s, str):
+            return s
+        out = s
+        for pat, rep in subs:
+            if pat.search(out):
+                print(f"  ✎ style-lint: replacing {pat.pattern!r}")
+                out = pat.sub(rep, out)
+        for pat, why in _LINT_WARN:
+            if pat.search(out):
+                print(f"  ⚠ style-lint warning: {why}: ...{pat.search(out).group(0)}...")
+        return re.sub(r"  +", " ", out).strip()
+
+    def _walk(x):
+        if isinstance(x, str):
+            return _fix(x)
+        if isinstance(x, list):
+            return [_walk(v) for v in x]
+        if isinstance(x, dict):
+            return {k: _walk(v) for k, v in x.items()}
+        return x
+
+    return _walk(narr)
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def _narrative_objectives(client: OpenAI, raw_questionnaire: str) -> dict:
@@ -1306,7 +1361,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         findings.get("bidding_strategy", {}).get("rag", "amber"),
     ]
 
-    return {
+    return _lint_narrative({
         "client_name":       client_name,
         "account_cid":       findings.get("account_cid", ""),
         "overall_rag":       overall_rag,
@@ -1323,7 +1378,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         # populate_slides uses this to swap the Imp. Share row for ROAS on ecommerce decks.
         "account_type":      findings.get("account_type", "unknown"),
         "website_url":       objectives.get("website_url", ""),
-    }
+    }, str(findings.get("account_type") or ""))
 
 
 # ── Quick test ────────────────────────────────────────────────────────────────
