@@ -115,6 +115,37 @@ _SVG_MAX_SIDE = 2000       # clamp so a pathological viewBox can't explode the r
 _WHITE_FILLS = {"white", "#fff", "#ffffff"}
 
 
+def _inline_css_fills(svg: str) -> str:
+    """Inline CSS class fills as explicit fill="" attributes BEFORE rasterising.
+
+    Illustrator exports its colours as CSS rules in a <style> block (`.cls-3 { fill: #003a78 }`)
+    and tags paths with class="cls-3" rather than a fill attribute. PyMuPDF does not apply CSS
+    class rules, so every path falls back to black - the whole logo renders as a solid black
+    blob (The Beatles Story, June 2026: their navy roundel came out a black circle). We read the
+    `.clsN { fill: X }` rules and rewrite each class="clsN" to fill="X". fill:none and url()
+    gradient fills are left on the class so we never paint over a cut-out or a gradient."""
+    rules: dict[str, str] = {}
+    for block in re.findall(r'<style[^>]*>(.*?)</style>', svg, re.IGNORECASE | re.DOTALL):
+        for sel, body in re.findall(r'([^{}]+)\{([^}]*)\}', block):
+            fill = re.search(r'fill\s*:\s*([^;]+)', body, re.IGNORECASE)
+            if not fill:
+                continue
+            val = fill.group(1).strip()
+            for cls in re.findall(r'\.([A-Za-z0-9_-]+)', sel):
+                rules[cls] = val
+    if not rules:
+        return svg
+
+    def _repl(m):
+        for c in m.group(1).split():
+            v = rules.get(c)
+            if v and v.lower() != "none" and not v.lower().startswith("url("):
+                return f'fill="{v}"'
+        return m.group(0)
+
+    return re.sub(r'class=["\']([^"\']+)["\']', _repl, svg)
+
+
 def _recolour_white_svg(svg: str) -> str:
     """Many brand logos are pure-white SVGs built for a dark site header (IB Masters is one).
     On slide 1's white logo box a white logo is invisible, so if EVERY explicit fill is white
@@ -127,6 +158,30 @@ def _recolour_white_svg(svg: str) -> str:
     return svg
 
 
+def _render_is_degenerate(pix) -> bool:
+    """True when a rasterised SVG collapsed to a single colour (PyMuPDF could not apply its
+    styling) - a useless logo we should reject so the caller falls back to a clean raster icon.
+    Samples a grid, ignores the near-white background, and bails when one colour owns almost
+    everything left. Uses PyMuPDF's own pixel reader - no Pillow dependency."""
+    try:
+        w, h = pix.width, pix.height
+        sx, sy = max(1, w // 40), max(1, h // 40)
+        counts: dict = {}
+        for x in range(0, w, sx):
+            for y in range(0, h, sy):
+                p = pix.pixel(x, y)[:3]
+                if min(p) > 240:           # near-white background, not ink
+                    continue
+                counts[p] = counts.get(p, 0) + 1
+        total = sum(counts.values())
+        if total == 0:
+            return True
+        # A solid disc is ~99% one colour; a real logo's anti-aliased detail spreads wider.
+        return max(counts.values()) / total >= 0.97
+    except Exception:
+        return False
+
+
 def _rasterise_svg(svg_bytes: bytes) -> bytes | None:
     """Rasterise an SVG logo to a crisp PNG via PyMuPDF (self-contained wheel, no system
     libs - so it works on Streamlit Cloud from requirements.txt alone). Returns PNG bytes
@@ -135,12 +190,15 @@ def _rasterise_svg(svg_bytes: bytes) -> bytes | None:
     try:
         import fitz  # PyMuPDF
         svg = svg_bytes.decode("utf-8", "ignore")
+        svg = _inline_css_fills(svg)     # turn Illustrator CSS-class fills into attributes FIRST
         svg = _recolour_white_svg(svg)
         doc = fitz.open(stream=svg.encode("utf-8"), filetype="svg")
         page = doc[0]
         w = page.rect.width or _SVG_TARGET_W
         zoom = max(1.0, min(_SVG_TARGET_W / w, _SVG_MAX_SIDE / max(page.rect.height, 1)))
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        if _render_is_degenerate(pix):   # collapsed to a blob - let the caller use a raster icon
+            return None
         png = pix.tobytes("png")
         return png if 100 < len(png) <= MAX_LOGO_BYTES else None
     except Exception:

@@ -219,6 +219,20 @@ def analyse_account(data, raw_questionnaire=""):
                          _re.I | _re.M)
         data["client_keywords"] = ([k.strip().lower() for k in _km.group(1).split(",")
                                     if k.strip()] if _km else [])
+    if "international_audience" not in data:
+        # Does the client say their audience is INTERNATIONAL / they sell to visitors from
+        # abroad? A destination attraction or tourist business genuinely wants overseas
+        # interest, so out-of-country clicks are not automatically "wasted" - the geo
+        # findings below reframe to "decide, then run a dedicated international campaign
+        # and budget" instead of "cut it" (The Beatles Story, June 2026: questionnaire
+        # said "Our audience is international ... they book when in the country").
+        import re as _re
+        _geo_q = _re.search(r'Geograph\w*\s*Target[^:]*:\s*(.+)', str(raw_questionnaire or ""), _re.I)
+        _aud_q = _re.search(r'Audience\s+to\s+target[^:]*:\s*(.+)', str(raw_questionnaire or ""), _re.I)
+        _intl_blob = " ".join(m.group(1) for m in (_geo_q, _aud_q) if m).lower()
+        data["international_audience"] = bool(
+            _re.search(r'\b(international|worldwide|overseas|abroad|tourist|visitor|holiday|'
+                       r'travel)\w*', _intl_blob))
     if "stated_roas_target" not in data:
         # The client's own ROAS bar (e.g. "Target ROAS 4:1 minimum") - lets bidding
         # findings anchor recommendations to THEIR number rather than a generic one.
@@ -3143,6 +3157,17 @@ def score_efficiency(data):
                 "from elsewhere (a visitor attraction, say), the right fix is 'Presence' "
                 "across the whole catchment country, not just the venue's own town."
                 if account_type == "ecommerce" else "")
+            if data.get("international_audience"):
+                # Client told us their audience is international - don't imply the overseas
+                # share is pure waste. Point to a dedicated, separately-budgeted campaign.
+                catchment_note = (
+                    " A nuance here: you have told us your audience is international, so some of "
+                    "this interest from outside the area will be people planning a visit - real "
+                    "prospects. The fix is not to cut it blindly but to separate it: set the "
+                    "home-market campaigns to 'Presence' so they stop paying for distant 'interest' "
+                    "clicks, and if you want the overseas demand, run it as its own campaign with "
+                    "its own budget and trip-planning messaging so the two never compete for the "
+                    "same money.")
             issues.append(
                 f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
                 f"{names}.{_mag} The setting shows your ads to people merely INTERESTED in your area, not only "
@@ -3172,12 +3197,30 @@ def score_efficiency(data):
         _fc = _geo["top_foreign_countries"]
         _named = ", ".join(f"{c['country']} (£{c['spend']:.0f})" for c in _fc[:3])
         _fpct = _geo.get("foreign_country_pct") or 0
-        issues.append(
-            f"£{_foreign:.0f} ({_fpct:.0%} of spend) in the last 30 days reached people physically located "
-            f"OUTSIDE {_geo.get('target_country') or 'your target country'} - top sources: {_named}. Unless you "
-            "knowingly sell abroad, this is wasted reach. Tighten location targeting to your service country and "
-            "add the worst offenders as negative locations."
-        )
+        _country = _geo.get("target_country") or "your target country"
+        if data.get("international_audience"):
+            # The client TOLD us their audience is international (a destination/tourist
+            # business). These overseas clicks may be people planning a visit - real
+            # prospects, not waste - so the move is to decide deliberately, not blanket-cut.
+            issues.append(
+                f"£{_foreign:.0f} ({_fpct:.0%} of spend) in the last 30 days reached people physically located "
+                f"OUTSIDE {_country} - top sources: {_named}. You have told us your audience is "
+                "international, so some of this could be genuine interest from people planning a visit, not "
+                "waste. The point is that it is happening by accident rather than by design: right now overseas "
+                "clicks share the same campaigns and budget as your home-market ads, so the two compete for the "
+                "same money and neither is tuned for its audience. If you want the international demand, give it "
+                "its own campaign with its own budget and messaging (for people booking ahead of a trip) and "
+                "keep it OUT of the home-market campaigns - then you can see what each market is worth and grow "
+                "the one that pays. If you do not want it, tighten location targeting to your home market and "
+                "add the worst offenders as negative locations."
+            )
+        else:
+            issues.append(
+                f"£{_foreign:.0f} ({_fpct:.0%} of spend) in the last 30 days reached people physically located "
+                f"OUTSIDE {_country} - top sources: {_named}. Unless you "
+                "knowingly sell abroad, this is wasted reach. Tighten location targeting to your service country and "
+                "add the worst offenders as negative locations."
+            )
         if rag == "green":
             rag = "amber"
 
