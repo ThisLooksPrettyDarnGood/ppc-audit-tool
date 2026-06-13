@@ -839,6 +839,17 @@ def get_location_targeting(client, cid):
             "geo_target": cc.location.geo_target_constant,
             "is_negative": cc.negative,
         })
+    # Resolve the geo IDs to readable names so the deck can NAME what the account targets
+    # (the client asks "what are my target locations?" - "90% out of area" is useless without
+    # saying what the area IS). Best-effort: leave the raw entries untouched if resolution fails.
+    try:
+        _ids = {l["geo_target"].split("/")[-1] for l in locations if l.get("geo_target")}
+        _names = _resolve_geo_names(client, cid, list(_ids))
+        for l in locations:
+            gid = l["geo_target"].split("/")[-1] if l.get("geo_target") else ""
+            l["location_name"] = (_names.get(gid) or {}).get("name", "")
+    except Exception as e:
+        print(f"    (location-name resolution failed: {e})")
     return locations
 
 

@@ -475,6 +475,17 @@ REC3: <third recommendation>
         _enforce_entity_labels(detail, r) for r in parsed.get("recommendations", [])
     ]
 
+    # Deterministic guarantee (the linter is law): the geo finding NAMES the targeted
+    # locations because clients ask "what am I targeting?" - but GPT reliably drops it from
+    # its two bullets in favour of the spend percentages, no matter where it sits in the
+    # source. Force it in as the first what's-happening bullet (Dan, 13 Jun 2026).
+    _loc_m = re.search(r"campaigns target (\d+ different locations?[^.]*?)(?:\.|$)", detail, re.I)
+    if _loc_m:
+        _loc_bullet = "• You currently target " + _loc_m.group(1).strip()
+        _existing = [b for b in parsed.get("whats_happening", "").split("\n")
+                     if b.strip() and "currently target" not in b.lower()]
+        parsed["whats_happening"] = "\n".join([_loc_bullet] + _existing[:1])
+
     parsed["rag"] = issue.get("rag", "amber")
     parsed["category"] = cat
     return parsed

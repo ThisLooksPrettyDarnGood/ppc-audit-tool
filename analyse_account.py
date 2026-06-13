@@ -358,7 +358,7 @@ _ISSUE_SIGNATURES = [
     ("A network setting worth tidying",            36, "amber",     "Budget & Coverage"),  # opt-in confirmed tiny -> Observations
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
-    ("losing a large share of impressions to Ad Rank", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank
+    ("reach only a small slice of the demand that is already out there", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank (SIS/TAM framing)
     ("disapproved and silently not serving",       78, "amber_red", "Ads & Assets"),       # disapproved ads - dark ad groups
     ("approved but LIMITED by policy",             38, "amber",     "Ads & Assets"),       # policy-limited -> Observations
     ("No changes have been made to the account",   67, "amber",     "Account Structure"),  # unmanaged account (neglect)
@@ -3088,17 +3088,33 @@ def score_efficiency(data):
         # Always label the entity ("the X campaign", never a bare name) and, when these
         # campaigns already convert, say what the missed share IS: proven demand being
         # left to competitors - profitable volume, not extra spend (Dan, 11 June 2026).
-        names = ", ".join(f"the '{c['campaign']}' campaign ({c['lost_rank']:.0f}%)" for c in rank_lost[:3])
+        # Quantify Search impression share (SIS) as "about X in 10" - the share of the demand
+        # ALREADY out there that the campaign actually reaches. SIS is the addressable market
+        # made concrete: people typing these searches who never see the ad (Dan, 13 Jun 2026 -
+        # always state SIS, split it into its two elements, and give it in plain X-in-10 terms).
+        def _in_ten(pct):
+            n = pct / 10.0
+            return f"{n:.1f}".rstrip("0").rstrip(".")
+        def _rank_eg(c):
+            r = c.get("lost_rank", 0) or 0
+            s = c.get("sis")
+            if s is not None:
+                return (f"the '{c['campaign']}' campaign shows on only about {s:.0f}% of the searches it is "
+                        f"eligible for (roughly {_in_ten(s)} in 10), losing {r:.0f}% of the rest to Ad Rank")
+            return f"the '{c['campaign']}' campaign loses {r:.0f}% of impressions to Ad Rank"
+        names = "; ".join(_rank_eg(c) for c in rank_lost[:3])
         _conv_by_camp = {c.get("name"): (c.get("conversions_30d") or 0) for c in campaigns}
         _opp = ("" if not any(_conv_by_camp.get(c["campaign"], 0) > 0 for c in rank_lost[:3]) else
-                " These campaigns already convert, so the missed impressions are demand you are proven to "
-                "win - recovering rank unlocks profitable volume from budget already being spent, rather "
-                "than needing new spend.")
+                " These campaigns already record conversions, so the missed impressions are demand you are "
+                "proven to win - recovering rank unlocks volume from budget already being spent, not new spend.")
         issues.append(
-            f"{len(rank_lost)} Search campaign(s) are losing a large share of impressions to Ad Rank, "
-            f"not budget: {names}. Ad Rank is driven by bids, ad relevance and Quality Score - so this is "
-            f"a quality/bid problem, not a money one.{_opp} Tighter keyword-to-ad relevance, stronger ad "
-            "copy and better landing pages recover this visibility without simply spending more."
+            f"{len(rank_lost)} Search campaign(s) reach only a small slice of the demand that is already out "
+            f"there, because they lose impressions to Ad Rank rather than budget: {names}. Search impression "
+            "share is your share of the searches people are ALREADY making for what you offer - that is your "
+            "addressable market, and a low share means most of those people never see your ad at all. Ad Rank "
+            "is driven by bids, ad relevance and Quality Score, so this is a quality and bid problem, not a "
+            f"money one.{_opp} Tighter keyword-to-ad relevance, stronger ad copy and better landing pages "
+            "recover this visibility without simply spending more."
         )
         if rag == "green":
             rag = "amber"
@@ -3108,6 +3124,23 @@ def score_efficiency(data):
     poi = [c for c in loc if c.get("geo") == "PRESENCE_OR_INTEREST" and c.get("type") not in AWARENESS]
     if poi:
         names = ", ".join(f"'{c['campaign']}'" for c in poi[:3])
+        # Name WHAT the account targets - the client asks "what are my target locations?" and
+        # "90% out of area" is useless without saying what the area is (Dan, 13 Jun 2026). Built
+        # from the resolved location names; ordered by how many campaigns use each, named up to 4.
+        # _target_lead opens the finding so the named locations survive GPT's 2-bullet
+        # condensation (a buried "for reference" sentence was dropped - Dan, 13 Jun 2026).
+        _target_lead = ""
+        _lt = data.get("location_targeting") or []
+        _pos_locs = [l.get("location_name") for l in _lt
+                     if not l.get("is_negative") and l.get("location_name")]
+        if _pos_locs:
+            from collections import Counter as _LC
+            _ordered = [n for n, _ in _LC(_pos_locs).most_common()]
+            _top = ", ".join(_ordered[:4])
+            _more = f", and {len(_ordered) - 4} more" if len(_ordered) > 4 else ""
+            _plc = "location" if len(_ordered) == 1 else "locations"
+            _target_lead = (f"Across the account your campaigns target {len(_ordered)} different {_plc} - "
+                            f"most often {_top}{_more}. ")
         # Magnitude: how much do these campaigns actually spend? A leak on a £20/mo campaign is
         # a footnote; on the account's main campaigns it's a headline. Severity follows the money.
         _camps = data.get("campaigns", [])
@@ -3179,8 +3212,9 @@ def score_efficiency(data):
                 _route = (f" The campaigns target {_geo['target_country']}, so these clicks arrive via the "
                           "'interest' route - people elsewhere showing interest in the targeted area.")
             issues.append(
-                f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
-                f"{names}. The geographic report shows the actual leak is small so far: {_size}.{_areas}"
+                f"{_target_lead}{len(poi)} campaign(s) use the 'Presence or interest' location setting - "
+                f"Google's default: {names}. The geographic report shows the actual leak is small so far: "
+                f"{_size}.{_areas}"
                 f"{_route} Not a needle-mover at today's spend - switch to 'Presence (people in, or regularly "
                 "in, your locations)' as a free tidy-up that stops the leak growing as budgets scale."
             )
@@ -3208,20 +3242,22 @@ def score_efficiency(data):
                     "clicks, and if you want the overseas demand, run it as its own campaign with "
                     "its own budget and trip-planning messaging so the two never compete for the "
                     "same money.")
+            _poi_open = (f"{_target_lead}But {len(poi)} of these campaign(s) use" if _target_lead
+                         else f"{len(poi)} campaign(s) use")
             issues.append(
-                f"{len(poi)} campaign(s) use the 'Presence or interest' location setting - Google's default: "
-                f"{names}.{_mag} The setting shows your ads to people merely INTERESTED in your area, not only "
-                f"those actually in it - so with it active across {_pct:.0%} of your spend, your whole budget is "
-                f"EXPOSED to out-of-area clicks.{_real}"
+                f"{_poi_open} the 'Presence or interest' location "
+                f"setting - Google's default: {names}.{_mag} It shows your ads to people merely INTERESTED in "
+                f"those places, not only those actually in them - so with it active across {_pct:.0%} of your "
+                f"spend, your whole budget is EXPOSED to out-of-area clicks.{_real}"
                 f"{local_note} Switching to 'Presence (people in, or regularly in, your locations)' is one of "
                 f"the highest-ROI fixes there is - it typically cuts wasted spend and lowers cost per "
                 f"{'sale' if account_type == 'ecommerce' else 'lead'}.{catchment_note}"
             )
         else:
             issues.append(
-                f"Location targeting is set to 'Presence or interest' on low-spend campaigns: {names}.{_mag} "
-                "The leak is small for now, but worth switching to 'Presence (people in, or regularly in, your "
-                "locations)' as a tidy-up - and revisit it if you scale these budgets."
+                f"{_target_lead}Location targeting is set to 'Presence or interest' on low-spend campaigns: "
+                f"{names}.{_mag} The leak is small for now, but worth switching to 'Presence (people in, or "
+                "regularly in, your locations)' as a tidy-up - and revisit it if you scale these budgets."
             )
         rag = "amber"
 
