@@ -64,5 +64,5 @@ app.py                  → Streamlit front end (Dan presses the button)
 Dan numbers chats "step 8, 8.1 … 9, 10" (steps 1–7 were in Cowork, consolidated
 into the step-8 handoff). Detailed running history lives in the auto-memory
 (`~/.claude/projects/...ppc-audit-tool/memory/` — read MEMORY.md index first).
-Pending Dan decisions: Premier-Partner wording confirmation; em-dashes in the
-static template sales slides (Max's original copy).
+Pending Dan decisions: em-dashes in the static template sales slides (Max's
+original copy). (Premier-Partner wording confirmed fine, 13 Jun 2026.)
