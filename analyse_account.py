@@ -326,7 +326,7 @@ _ISSUE_SIGNATURES = [
     ("counting orders without passing their value", 75, "amber_red", "Conversion Tracking"), # £0-value purchase action - ROAS understated
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs
     ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams (e.g. two storefronts) - verify, not alarm
-    ("paid some very expensive single clicks",     60, "amber",     "Bidding Strategy"),  # CPC spikes hidden by averages
+    ("paid some very expensive single clicks",     50, "amber",     "Bidding Strategy"),  # CPC spike = exposure/risk, not measured waste -> below substantive findings (Dan, 13 Jun)
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
     ("uses Maximise Clicks (optimising for traffic",  60, "amber",  "Bidding Strategy"),  # material spend, capped, wrong strategy
@@ -366,6 +366,7 @@ _ISSUE_SIGNATURES = [
     ("a device that is not converting",            52, "amber",     "Budget & Coverage"),  # device gap
     ("usually comes from an automated feed",       30, "amber",     "Account Structure"),  # SKU-scale structure -> Observations
     ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions
+    ("Call extensions are not set up",             42, "amber",     "Ads & Assets"),       # ecom: optional, Observation tier (Dan, 13 Jun)
     ("have a LOW score (4 or below)",              54, "amber",     "Ad Rank & Quality"),  # low Quality Score
     # Targeting & keywords
     ("look like competitor business names",         63, "amber",     "Targeting & Keywords"),  # competitor terms (reframe)
@@ -2515,17 +2516,22 @@ def score_bidding_strategy(data):
             for p in spikes:
                 mult = (p["cpc"] / _acct_cpc) if _acct_cpc else 0
                 single = "a single click" if (p.get("clicks") or 0) == 1 else f"{p.get('clicks')} clicks"
-                conv_note = " and produced no conversions" if (p.get("conversions") or 0) == 0 else ""
+                # NO "produced no conversions" clause: a single click almost never converts
+                # regardless, so 0 conversions on 1 click is not evidence of waste - and on an
+                # account with broken/low-value conversion tracking it means nothing at all
+                # (Dan, 13 Jun 2026: a 7x click on a relevant term is money well spent, not junk).
                 egs.append(
                     f"'{p['term']}' paid £{p['cpc']:.0f} for {single} on {_pretty_date(p.get('date'))} "
-                    f"({mult:.0f}x the account's ~{_cpc_label} average CPC){conv_note}"
+                    f"({mult:.0f}x the account's ~{_cpc_label} average CPC)"
                 )
             issues.append(
                 "Automated bidding paid some very expensive single clicks last month that the average CPC "
                 "hides: " + "; ".join(egs) + ". The search term report only shows an average CPC per term, so "
-                f"a one-off £{spikes[0]['cpc']:.0f} click sits unnoticed beside cheaper ones. This is how smart "
-                "bidding can quietly spend budget - worth a maximum-CPC sense-check and tighter negatives so the "
-                "algorithm cannot overpay for low-intent or competitor clicks."
+                f"a one-off £{spikes[0]['cpc']:.0f} click sits unnoticed beside cheaper ones. These may well be "
+                "relevant searches worth bidding on - the point is not the search, it is the price: with no "
+                "sensible maximum-CPC ceiling in place, automated bidding can occasionally pay far more for a "
+                "single click than it is worth. Worth a maximum-CPC sense-check so an outlier click cannot "
+                "quietly cost many times your average."
             )
             if rag == "green":
                 rag = "amber"
@@ -3315,18 +3321,41 @@ def score_efficiency(data):
         labels = {"SITELINK": "sitelinks", "CALLOUT": "callouts", "STRUCTURED_SNIPPET": "structured snippets",
                   "CALL": "call (click-to-call) extensions", "AD_IMAGE": "image extensions",
                   "LEAD_FORM": "lead-form extensions", "PRICE": "price extensions", "PROMOTION": "promotion extensions"}
-        core = {"SITELINK", "CALLOUT", "STRUCTURED_SNIPPET", "CALL", "AD_IMAGE"}
-        missing_core = [labels[t] for t in ("CALL", "AD_IMAGE", "SITELINK", "CALLOUT", "STRUCTURED_SNIPPET")
-                        if t not in present]
+        _acct_type = detect_account_type(data)
+        # Sitelinks, callouts, structured snippets and images help ANY account. Call
+        # extensions are core for lead gen (a phone enquiry IS the conversion) but OPTIONAL
+        # for an online-checkout/ticketing business, where most buyers never call - so we
+        # never headline a missing CALL extension on an ecommerce account (Dan, 13 Jun 2026:
+        # it is 50/50 and depends what the client wants). Hedge it there instead.
+        missing_universal = [labels[t] for t in ("AD_IMAGE", "SITELINK", "CALLOUT", "STRUCTURED_SNIPPET")
+                             if t not in present]
+        call_missing = "CALL" not in present
+        _call_is_core = call_missing and _acct_type in ("lead_gen", "mixed", "unknown")
+        missing_core = ([labels["CALL"]] if _call_is_core else []) + missing_universal
         if missing_core:
+            _booster = ("Call and image extensions in particular" if _call_is_core
+                        else "Image and sitelink extensions in particular")
+            _ecom_call_note = ""
+            if _acct_type == "ecommerce" and call_missing:
+                _ecom_call_note = (" Call extensions are absent too, but for an online-booking business "
+                                   "those are optional - worth adding only if you want to encourage phone "
+                                   "bookings (group visits or accessibility enquiries, say).")
             issues.append(
                 f"Your ads are missing high-value extension types: {', '.join(missing_core)}. Extensions "
                 "make ads bigger and more clickable and feed Ad Rank - all at no extra cost per click. "
-                "Call and image extensions in particular tend to lift click-through rate by 10-20%. Add the "
-                "missing types across your campaigns."
+                f"{_booster} tend to lift click-through rate by 10-20%. Add the missing types across your "
+                f"campaigns.{_ecom_call_note}"
             )
             if rag == "green":
                 rag = "amber"
+        elif _acct_type == "ecommerce" and call_missing:
+            # Only call extensions missing on an ecommerce account - genuinely optional, so a
+            # light note rather than a "high-value gap". Never escalates the section RAG.
+            issues.append(
+                "Call extensions are not set up. For an online-booking business this is optional - most "
+                "customers book online and never call - so add them only if phone bookings (group visits, "
+                "school trips, accessibility enquiries) are something you actively want to encourage."
+            )
 
     if not issues:
         issues.append("Coverage and settings look healthy: location targeting, impression share and ad "
