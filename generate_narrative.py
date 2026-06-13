@@ -1415,6 +1415,9 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         # True when revenue/ROAS is page-view default values, not sales - populate_slides
         # then keeps the Imp. Share row instead of swapping in a meaningless ROAS row.
         "revenue_artifact":  bool((findings.get("conversion_tracking") or {}).get("revenue_artifact")),
+        # Optional structured geo breakdown - populate_slides renders it as a table on the
+        # geo issue slide when that finding made the deck (13 Jun 2026 table POC).
+        "geo_table":         (findings.get("efficiency") or {}).get("geo_table"),
         "website_url":       objectives.get("website_url", ""),
     }, str(findings.get("account_type") or ""))
 

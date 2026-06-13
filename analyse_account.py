@@ -2822,6 +2822,7 @@ def score_efficiency(data):
     """
     issues = []
     rag = "green"
+    geo_table = None   # optional structured geo breakdown for an on-slide table
     campaigns = data.get("campaigns", [])
     account_type = detect_account_type(data)
     AWARENESS = {"DISPLAY", "VIDEO", "DEMAND_GEN", "MULTI_CHANNEL"}
@@ -3130,6 +3131,7 @@ def score_efficiency(data):
         # _target_lead opens the finding so the named locations survive GPT's 2-bullet
         # condensation (a buried "for reference" sentence was dropped - Dan, 13 Jun 2026).
         _target_lead = ""
+        _ordered = []
         _lt = data.get("location_targeting") or []
         _pos_locs = [l.get("location_name") for l in _lt
                      if not l.get("is_negative") and l.get("location_name")]
@@ -3259,6 +3261,25 @@ def score_efficiency(data):
                 f"{names}.{_mag} The leak is small for now, but worth switching to 'Presence (people in, or "
                 "regularly in, your locations)' as a tidy-up - and revisit it if you scale these budgets."
             )
+        # Structured geo breakdown for an OPTIONAL on-slide table (populate_slides renders it
+        # only when the geo finding makes the deck). Same numbers as the prose, as label/value
+        # rows - the "perfect table" Dan asked to see on the slide (13 Jun 2026).
+        _gt_total = _geo.get("total_spend") or 0
+        if _gt_total:
+            _gt_in = _geo.get("in_area_spend") or 0
+            _gt_ooa = _geo.get("out_of_area_spend") or 0
+            _gt_for = _geo.get("foreign_country_spend") or 0
+            _rows = []
+            if _ordered:
+                _n3 = ", ".join(_ordered[:3])
+                _extra = len(_ordered) - 3
+                _rows.append(["Targeted locations",
+                              f"{len(_ordered)} ({_n3}{', +%d more' % _extra if _extra > 0 else ''})"])
+            _rows.append(["Spend inside targeted locations", f"£{_gt_in:,.0f} ({_gt_in / _gt_total:.0%})"])
+            _rows.append(["Shown on 'interest', outside them", f"£{_gt_ooa:,.0f} ({_gt_ooa / _gt_total:.0%})"])
+            if _gt_for >= 1:
+                _rows.append(["...of which overseas", f"£{_gt_for:,.0f} ({_gt_for / _gt_total:.0%})"])
+            geo_table = {"header": ["Your location targeting", "Last 30 days"], "rows": _rows}
         rag = "amber"
 
     # ── Cross-border spend (users physically in a DIFFERENT country) ──────────
@@ -3397,7 +3418,8 @@ def score_efficiency(data):
         issues.append("Coverage and settings look healthy: location targeting, impression share and ad "
                       "extensions are in good shape - no change needed here.")
 
-    return {"rag": rag, "headline": "Coverage & settings", "issues": issues, "data_points": {}}
+    return {"rag": rag, "headline": "Coverage & settings", "issues": issues,
+            "geo_table": geo_table, "data_points": {}}
 
 
 def build_strengths(data):

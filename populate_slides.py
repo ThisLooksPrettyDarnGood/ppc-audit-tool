@@ -159,6 +159,92 @@ def bullets(items):
         return "\n".join(f"• {item}" for item in items)
     return str(items)
 
+
+def _shape_text(el):
+    """All text in a page element's shape (concatenated text runs)."""
+    runs = el.get("shape", {}).get("text", {}).get("textElements", [])
+    return "".join(r.get("textRun", {}).get("content", "") for r in runs if "textRun" in r)
+
+
+def _insert_geo_table(slides_service, presentation_id, issue_n, geo_table):
+    """Replace the geo issue slide's 'what's happening' box with a real table.
+
+    Finds the box by its {{ISSUE_n_HAPPENING}} marker (left unfilled on purpose), reuses
+    its exact position and size so the table lands where the bullets would have, builds a
+    2-column label/value table, then deletes the marker box. Raises on any failure so the
+    caller falls back to plain bullets - the table is a nicety, never a way to lose the slide.
+    """
+    token = f"{{{{ISSUE_{issue_n}_HAPPENING}}}}"
+    deck = slides_service.presentations().get(presentationId=presentation_id).execute()
+    slide_id = marker = None
+    for slide in deck.get("slides", []):
+        for el in slide.get("pageElements", []):
+            if token in _shape_text(el):
+                slide_id, marker = slide["objectId"], el
+                break
+        if marker:
+            break
+    if not marker:
+        raise RuntimeError(f"{token} marker not found")
+
+    header = geo_table.get("header") or []
+    rows = geo_table.get("rows") or []
+    all_rows = ([header] if header else []) + rows
+    n_rows, n_cols = len(all_rows), 2
+    if n_rows < 2:
+        raise RuntimeError("not enough rows for a table")
+    table_id = f"geo_tbl_{issue_n}"
+
+    # createTable demands an unscaled transform (scaleX/scaleY must be 1), so bake the
+    # marker box's scale into the table SIZE and keep only its translation (position).
+    t = marker.get("transform", {})
+    sz = marker.get("size", {})
+    sx, sy = t.get("scaleX", 1) or 1, t.get("scaleY", 1) or 1
+    w_unit = sz.get("width", {}).get("unit", "EMU")
+    h_unit = sz.get("height", {}).get("unit", "EMU")
+    table_size = {
+        "width":  {"magnitude": sz.get("width", {}).get("magnitude", 0) * sx,  "unit": w_unit},
+        "height": {"magnitude": sz.get("height", {}).get("magnitude", 0) * sy, "unit": h_unit},
+    }
+    table_transform = {
+        "scaleX": 1, "scaleY": 1,
+        "translateX": t.get("translateX", 0), "translateY": t.get("translateY", 0),
+        "unit": t.get("unit", "EMU"),
+    }
+
+    # 1) Create the table at the marker's position/size, then remove the marker box.
+    slides_service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": [
+        {"createTable": {
+            "objectId": table_id,
+            "elementProperties": {
+                "pageObjectId": slide_id,
+                "size": table_size,
+                "transform": table_transform,
+            },
+            "rows": n_rows, "columns": n_cols,
+        }},
+        {"deleteObject": {"objectId": marker["objectId"]}},
+    ]}).execute()
+
+    # 2) Fill cells, then style (small font; bold header row + bold label column).
+    fill, style = [], []
+    for r, row in enumerate(all_rows):
+        for c in range(n_cols):
+            text = str(row[c]) if c < len(row) else ""
+            if text:
+                loc = {"rowIndex": r, "columnIndex": c}
+                fill.append({"insertText": {"objectId": table_id, "cellLocation": loc,
+                                            "text": text, "insertionIndex": 0}})
+                style.append({"updateTextStyle": {
+                    "objectId": table_id, "cellLocation": loc,
+                    "textRange": {"type": "ALL"},
+                    "style": {"fontSize": {"magnitude": 9, "unit": "PT"},
+                              "bold": (r == 0 or c == 0)},
+                    "fields": "fontSize,bold",
+                }})
+    slides_service.presentations().batchUpdate(
+        presentationId=presentation_id, body={"requests": fill + style}).execute()
+
 def rag_dot(rag_str):
     return RAG_DOT.get(str(rag_str).upper(), "🟠")
 
@@ -317,6 +403,11 @@ def main():
     # deleted after population (see _delete_unused_issue_slides) so the client never
     # sees a blank  -  find 3 issues, get 3 slides; find 6, get 6.
     MAX_ISSUE_SLIDES = 6
+    # NOTE (geo table, 13 Jun 2026): the data for an on-slide geo table is ready
+    # (data["geo_table"], _insert_geo_table below), but these issue slides keep all three
+    # sections - What's happening / Why it matters / Recommendations - in ONE text box, so a
+    # table cannot replace just the "what's happening" part without deleting the rest. Wiring
+    # it in is gated OFF until the template splits "what's happening" into its own box.
     for i in range(1, MAX_ISSUE_SLIDES + 1):
         n = str(i)
         if i <= len(issues):
