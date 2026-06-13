@@ -3123,14 +3123,27 @@ def score_efficiency(data):
             # Name where the out-of-area spend actually landed - concrete substance for the slide
             # (and it lets the client decide which areas, if any, they want to keep).
             _fc = _geo.get("top_foreign_countries") or []
+            _tgt = _geo.get("target_country") or "your target country"
+            # The two figures measure DIFFERENT things and must never be juxtaposed bare, or
+            # the slide reads as a contradiction (Dan, 13 Jun 2026: "90% then 10% - which is
+            # right?"). out_of_area = not in the targeted LOCATIONS (the headline). The named
+            # countries are the top of the smaller ABROAD subset - state that nesting plainly.
+            _fspend = _geo.get("foreign_country_spend") or 0
+            _fpct = _geo.get("foreign_country_pct") or 0
+            # Explain what MAKES UP the 90% (abroad vs in-country interest) WITHOUT listing
+            # individual countries here - a top-3 country list (~£187) sitting next to a
+            # 90%-of-spend figure reads as a contradiction. The named countries live in the
+            # separate cross-border finding, which owns the overseas detail.
             _areas = ""
-            if _fc:
-                _areas = (f" The top countries reached outside {_geo.get('target_country') or 'your target country'} "
-                          "were " + ", ".join(f"{c['country']} (£{c['spend']:.0f})" for c in _fc[:3]) + ".")
+            if _fspend >= 1:
+                _areas = (f" That 90% is made up of two parts: about a third of it (£{_fspend:.0f}, "
+                          f"{_fpct:.0%} of all spend) reached people physically in other countries, and "
+                          f"the rest reached people inside {_tgt} who were shown your ads through the "
+                          "'interest' setting without being in the locations you target.")
             if _ooa_spend >= max(20.0, 0.02 * _geo["total_spend"]):
                 _real = (f" The geographic report confirms the leak is real: in the last 30 days "
                          f"£{_ooa_spend:.0f} ({_ooa_pct:.0%} of spend) went to clicks from people "
-                         f"NOT physically in your targeted area.{_areas}")
+                         f"NOT physically inside the specific locations these campaigns target.{_areas}")
             elif _ooa_spend < 1:
                 _real = (" Encouragingly, the geographic report shows this exposure has not turned "
                          "into waste yet - effectively none of your spend reached people outside "
