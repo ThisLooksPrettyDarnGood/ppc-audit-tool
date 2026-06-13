@@ -409,6 +409,7 @@ _ISSUE_SIGNATURES = [
     ("received zero impressions",                  46, "amber",     "Account Structure"),
     ("ad groups across",                           45, "amber",     "Account Structure"),
     ("No Search or Performance Max",               50, "amber",     "Account Structure"),
+    ("No Customer Match list is set up",           46, "amber",     "Account Structure"),  # first-party audience opportunity (Observation)
     ("split across",                               48, "amber",     "Account Structure"),  # budget too thin
     ("smart bidding cannot learn",                 50, "amber",     "Account Structure"),
     ("change bidding and targeting automatically", 62, "amber",     "Account Structure"),  # risky auto-applies (bid/targeting)
@@ -1621,6 +1622,26 @@ def score_account_structure(data):
         issues.append(
             "Auto-Apply Recommendations are enabled. Worth a quick check that only recommendation "
             "types you're comfortable with are active."
+        )
+
+    # ── Customer Match: the one first-party audience that feeds Smart Bidding ─────
+    # Customer Match (uploading your own customer list) is the audience type that gives
+    # Smart Bidding and PMax/Demand Gen Audience Signals real first-party data - auto-
+    # created remarketing and rule-based lists do not. An established account with NONE
+    # set up is leaving a free, low-effort signal on the table (the human PPC Geeks deck
+    # flags "only automatically created Customer Lists"). An opportunity, not waste - so
+    # it sits at Observation level and never escalates the section RAG on its own.
+    _cm = data.get("customer_match")
+    if (isinstance(_cm, dict) and _cm.get("customer_match_lists") == 0
+            and (summary.get("spend") or 0) >= 300):
+        issues.append(
+            "No Customer Match list is set up: the account uses only auto-created and remarketing "
+            "audiences, not a list of your own customers. Customer Match (uploading the email or "
+            "phone list of past ticket buyers, securely hashed) is the one first-party signal that "
+            "sharpens Smart Bidding and gives Performance Max and Demand Gen a real Audience Signal "
+            "to learn from - it also opens up retargeting past visitors and finding new people who "
+            "look like them. It is a low-effort, one-off upload for a measurable gain in how well "
+            "bidding understands your customers."
         )
 
     # CTR check

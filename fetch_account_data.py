@@ -887,6 +887,40 @@ def get_audience_signals(client, cid):
     }
 
 
+def get_customer_match(client, cid):
+    """User lists on the account, split by whether any are Customer Match (CRM_BASED).
+
+    Customer Match (uploading your own customer email/phone lists) is the one audience
+    type that feeds Smart Bidding and PMax/Demand Gen Audience Signals with first-party
+    data - auto-created remarketing and rule-based lists do not. The human PPC Geeks deck
+    flags an account that has 'only automatically created Customer Lists'. We report the
+    count of CRM_BASED lists so the analyser can spot when none is set up. Read-only."""
+    gaql = """
+        SELECT
+            user_list.name,
+            user_list.type,
+            user_list.size_for_search,
+            user_list.eligible_for_search
+        FROM user_list
+    """
+    rows = run_query(client, cid, gaql)
+    lists = []
+    for r in rows:
+        lists.append({
+            "name": r.user_list.name,
+            "type": r.user_list.type_.name if hasattr(r.user_list.type_, "name")
+                    else str(r.user_list.type_),
+            "size_for_search": r.user_list.size_for_search,
+        })
+    crm = [l for l in lists if l["type"] == "CRM_BASED"]
+    return {
+        "total_lists": len(lists),
+        "customer_match_lists": len(crm),
+        # Names of any Customer Match lists (for "you have X set up" wording, if ever present).
+        "customer_match_names": [l["name"] for l in crm][:5],
+    }
+
+
 def get_quality_scores(client, cid):
     gaql = """
         SELECT
@@ -1692,6 +1726,13 @@ def fetch_account_data(client_cid: str) -> dict:
     print("  → Audience signals...")
     audience_signals = get_audience_signals(client, cid)
 
+    print("  → Customer Match / user lists...")
+    try:
+        customer_match = get_customer_match(client, cid)
+    except Exception as e:
+        print(f"    (customer-match query failed: {e})")
+        customer_match = None
+
     print("  → Quality scores...")
     quality_scores = get_quality_scores(client, cid)
 
@@ -1798,6 +1839,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "converting_unkeyworded_terms": converting_unkeyworded_terms,
         "location_targeting": location_targeting,
         "audience_signals": audience_signals,
+        "customer_match": customer_match,
         "quality_scores": quality_scores,
         "impression_share_lost": impression_share_lost,
         "location_target_types": location_target_types,
