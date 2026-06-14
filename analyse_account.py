@@ -696,6 +696,57 @@ def _product_overlap_table(data, account_type):
     }
 
 
+def _impression_share_table(data):
+    """Emitter: Search campaigns appearing on only a fraction of the searches they are
+    eligible for (low search impression share). Combines the budget-vs-rank loss into one
+    'Most lost to' column so it fits 3 columns. Caps at 4 data rows. Any account type.
+    Returns a table payload or None. Materiality matches the two IS findings:
+    lost-to-budget >= 10% or lost-to-rank >= 30%."""
+    isl = data.get("impression_share_lost") or []
+    material = [c for c in isl
+               if (c.get("lost_budget", 0) or 0) >= 10 or (c.get("lost_rank", 0) or 0) >= 30]
+    if not material:
+        return None
+    # Worst visibility first: the lowest share of eligible searches.
+    material.sort(key=lambda c: (c.get("sis") if c.get("sis") is not None else 100))
+    if len(material) <= 4:
+        shown, extra = material, 0
+    else:
+        shown, extra = material[:3], len(material) - 3
+    rows = []
+    for c in shown:
+        s = c.get("sis")
+        b = c.get("lost_budget", 0) or 0
+        r = c.get("lost_rank", 0) or 0
+        share = f"{s:.0f}%" if s is not None else "-"
+        lost_to = f"{r:.0f}% to Ad Rank" if r >= b else f"{b:.0f}% to budget"
+        rows.append([_truncate_cell(c.get("campaign", "")), share, lost_to])
+    if extra:
+        rows.append([f"...and {extra} more campaign(s)", "", ""])
+    worst = shown[0]
+    ws = worst.get("sis")
+    worst_share = f"{ws:.0f}%" if ws is not None else "a small share"
+    happening = (
+        f"{len(material)} Search campaign(s) appear on only a fraction of the searches people "
+        f"already make for what you offer. '{_truncate_cell(worst.get('campaign', ''))}' shows on "
+        f"just {worst_share}. 'Shown on' is your share of those searches; 'Most lost to' is why "
+        "the rest are missed:"
+    )
+    recommendation = (
+        "Where a campaign loses share to budget and converts well, raise its budget to capture the "
+        "demand. Where it loses to Ad Rank, that is a quality and bid problem, not money - improve "
+        "keyword-to-ad relevance, ad copy and landing pages. Both recover searches you are already "
+        "eligible to win, without simply spending more."
+    )
+    return {
+        "title": "Campaigns missing searches they could win",
+        "happening": happening,
+        "header": ["Campaign", "Shown on", "Most lost to"],
+        "rows": rows,
+        "recommendation": recommendation,
+    }
+
+
 def collect_table_candidates(findings, data):
     """Gather every per-finding table payload available for this account. Each candidate
     carries the severity it would headline at, a fixed priority for deterministic
@@ -716,6 +767,16 @@ def collect_table_candidates(findings, data):
     if overlap_table:
         candidates.append({**overlap_table, "severity": 61, "priority": 1,
                            "topic_signatures": ["receiving spend from more than one campaign"]})
+
+    # impression share / SIS split (priority 2) - covers BOTH IS findings (budget + rank),
+    # so exclude both. Severity follows the dominant loss: budget (66) outranks rank (58).
+    is_table = _impression_share_table(data)
+    if is_table:
+        _isl = data.get("impression_share_lost") or []
+        _has_budget = any((c.get("lost_budget", 0) or 0) >= 10 for c in _isl)
+        candidates.append({**is_table, "severity": 66 if _has_budget else 58, "priority": 2,
+                           "topic_signatures": ["reach only a small slice of the demand that is already out there",
+                                                "lost impressions to budget"]})
 
     return candidates
 
