@@ -166,6 +166,29 @@ def _shape_text(el):
     return "".join(r.get("textRun", {}).get("content", "") for r in runs if "textRun" in r)
 
 
+def _trim_table_rows(slides_service, presentation_id, title_text, used_rows):
+    """Delete the data-table's unused trailing rows so no empty rows show on the slide.
+    Finds the table by the slide carrying the (filled) title text, so it never touches the
+    Key Takeaways table. Best-effort: any failure just leaves the blank rows in place."""
+    try:
+        deck = slides_service.presentations().get(presentationId=presentation_id).execute()
+        for slide in deck.get("slides", []):
+            texts = " ".join(_shape_text(el) for el in slide.get("pageElements", []) if "shape" in el)
+            if title_text and title_text in texts:
+                for el in slide.get("pageElements", []):
+                    if "table" in el:
+                        total = el["table"]["rows"]
+                        reqs = [{"deleteTableRow": {"tableObjectId": el["objectId"],
+                                                    "cellLocation": {"rowIndex": r}}}
+                                for r in range(total - 1, used_rows - 1, -1)]
+                        if reqs:
+                            slides_service.presentations().batchUpdate(
+                                presentationId=presentation_id, body={"requests": reqs}).execute()
+                        return
+    except Exception as e:
+        print(f"  ⚠ Could not trim table rows ({e}); leaving blank rows.")
+
+
 def _insert_geo_table(slides_service, presentation_id, issue_n, geo_table):
     """Replace the geo issue slide's 'what's happening' box with a real table.
 
@@ -264,7 +287,8 @@ def _delete_unused_issue_slides(slides_service, presentation_id):
         return
 
     issue_ph = _re.compile(
-        r"\{\{(?:ISSUE_\d+_(?:TITLE|RAG|HAPPENING|MATTERS|RECOMMENDATION)|ADDITIONAL_OBSERVATIONS)\}\}"
+        r"\{\{(?:ISSUE_\d+_(?:TITLE|RAG|HAPPENING|MATTERS|RECOMMENDATION)|ADDITIONAL_OBSERVATIONS"
+        r"|TABLE_TITLE|TBL_[A-Z0-9_]+)\}\}"
     )
     delete_requests = []
     for slide in deck.get("slides", []):
@@ -440,6 +464,23 @@ def main():
         requests.append(replace(f"{{{{TK_{n}_CHANGES}}}}", tk.get("changes_needed", "")))
         requests.append(replace(f"{{{{TK_{n}_FUTURE}}}}",  tk.get("future_state", "")))
 
+    # ── Optional data-table slide (filled when a finding has tabular data) ──
+    # The template carries one table slide (title + "what's happening" line + a 6x3 table +
+    # a recommendation line). We fill it from data["geo_table"] when present; otherwise every
+    # token stays unfilled and the whole slide is trimmed (same pattern as unused issue slides).
+    gt = data.get("geo_table")
+    if gt:
+        requests.append(replace("{{TABLE_TITLE}}",       gt.get("title", "A closer look")))
+        requests.append(replace("{{TBL_HAPPENING}}",     gt.get("happening", "")))
+        requests.append(replace("{{TBL_RECOMMENDATION}}", gt.get("recommendation", "")))
+        table_rows = ([gt["header"]] if gt.get("header") else []) + gt.get("rows", [])
+        for r in range(1, 7):           # 6 rows in the template table
+            row = table_rows[r - 1] if r - 1 < len(table_rows) else []
+            for c in range(1, 4):       # 3 columns
+                val = row[c - 1] if c - 1 < len(row) else ""
+                requests.append(replace(f"{{{{TBL_R{r}C{c}}}}}", val))
+    # else: leave the table slide's tokens unfilled  -  it gets trimmed below.
+
     print("Populating slides...")
     result = slides_service.presentations().batchUpdate(
         presentationId=new_id,
@@ -448,6 +489,12 @@ def main():
 
     # ── Delete any unused issue slides (issue-led: found fewer than the template holds) ──
     _delete_unused_issue_slides(slides_service, new_id)
+
+    # ── Trim the data-table's unused rows (only when we filled it) ──
+    if gt:
+        _used = (1 if gt.get("header") else 0) + len(gt.get("rows", []))
+        if _used < 6:
+            _trim_table_rows(slides_service, new_id, gt.get("title", ""), _used)
 
     # ── Swap the dial image based on the headline RAG ─────────────────────────
     dial_url = pick_dial(data.get("overall_rag", "amber"))

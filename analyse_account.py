@@ -3264,22 +3264,40 @@ def score_efficiency(data):
         # Structured geo breakdown for an OPTIONAL on-slide table (populate_slides renders it
         # only when the geo finding makes the deck). Same numbers as the prose, as label/value
         # rows - the "perfect table" Dan asked to see on the slide (13 Jun 2026).
+        # Only build the table when the leak is material (it shares the dedicated table
+        # slide, which is trimmed when empty) and we have the spend split.
         _gt_total = _geo.get("total_spend") or 0
-        if _gt_total:
+        if _gt_total and (_geo.get("out_of_area_spend") or 0) >= max(50.0, 0.05 * _gt_total):
             _gt_in = _geo.get("in_area_spend") or 0
             _gt_ooa = _geo.get("out_of_area_spend") or 0
             _gt_for = _geo.get("foreign_country_spend") or 0
-            _rows = []
+            _rows = [
+                ["Inside your targeted locations", f"£{_gt_in:,.0f}", f"{_gt_in / _gt_total:.0%}"],
+                ["Shown on 'interest', outside them", f"£{_gt_ooa:,.0f}", f"{_gt_ooa / _gt_total:.0%}"],
+            ]
+            if _gt_for >= 1:
+                _rows.append(["...of which, overseas", f"£{_gt_for:,.0f}", f"{_gt_for / _gt_total:.0%}"])
+            # Context line above the table names the targeted locations (answers "what am I
+            # targeting?"); the recommendation line below carries the fix.
             if _ordered:
                 _n3 = ", ".join(_ordered[:3])
                 _extra = len(_ordered) - 3
-                _rows.append(["Targeted locations",
-                              f"{len(_ordered)} ({_n3}{', +%d more' % _extra if _extra > 0 else ''})"])
-            _rows.append(["Spend inside targeted locations", f"£{_gt_in:,.0f} ({_gt_in / _gt_total:.0%})"])
-            _rows.append(["Shown on 'interest', outside them", f"£{_gt_ooa:,.0f} ({_gt_ooa / _gt_total:.0%})"])
-            if _gt_for >= 1:
-                _rows.append(["...of which overseas", f"£{_gt_for:,.0f} ({_gt_for / _gt_total:.0%})"])
-            geo_table = {"header": ["Your location targeting", "Last 30 days"], "rows": _rows}
+                _hap = (f"You target {len(_ordered)} locations ({_n3}{', and %d more' % _extra if _extra > 0 else ''}). "
+                        "The 'Presence or interest' setting then shows your ads to people merely interested in "
+                        "those places, wherever they actually are - so most of your spend lands outside them:")
+            else:
+                _hap = ("The 'Presence or interest' setting shows your ads to people merely interested in your "
+                        "targeted places, wherever they actually are - so most of your spend lands outside them:")
+            _rec = ("Switch your home-market campaigns to 'Presence (people in, or regularly in, your "
+                    "locations)'. If you want overseas visitors planning a trip, run them as a separate "
+                    "campaign with its own budget, rather than letting them share the home-market budget.")
+            geo_table = {
+                "title": "Location targeting: where your budget actually goes",
+                "happening": _hap,
+                "header": ["Where your budget went", "Spend (30 days)", "Share"],
+                "rows": _rows,
+                "recommendation": _rec,
+            }
         rag = "amber"
 
     # ── Cross-border spend (users physically in a DIFFERENT country) ──────────
