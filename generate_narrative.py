@@ -1101,18 +1101,18 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     account_type = findings.get("account_type", "unknown")
 
     # ── ISSUE-LED: pick the top problems and narrate each one individually ────
-    # When the dedicated geo TABLE slide is in play, geo is told there in full - so drop the
-    # geo findings (the 'Presence or interest' issue and the cross-border observation) from the
+    # When the dedicated TABLE slide is in play, ONE tabular finding (the highest-severity
+    # one - geo, product overlap, etc.) is told there in full - so drop THAT finding from the
     # issue slides AND the observations, and let the next-ranked findings fill the freed slots
     # (Dan, 13 Jun 2026: make the table a single 'super slide', not a repeat of an issue slide).
-    _has_geo_table = bool((findings.get("efficiency") or {}).get("geo_table"))
-    def _is_geo_table_topic(detail):
+    _table = findings.get("table")
+    _table_sigs = (_table or {}).get("topic_signatures") or []
+    def _is_table_topic(detail):
         d = detail or ""
-        return _has_geo_table and ("Presence or interest" in d
-                                   or "reached people physically located OUTSIDE" in d)
+        return any(sig in d for sig in _table_sigs)
 
     selected = [i for i in select_top_issues(findings, max_issues=8)
-                if not _is_geo_table_topic(i.get("detail"))][:6]
+                if not _is_table_topic(i.get("detail"))][:6]
     if not selected:
         # Genuinely clean account  -  fall back so the deck still has a slide.
         selected = [{
@@ -1259,7 +1259,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     # Excludes what made the deck - so a finding whose narration failed lands here.
     _deck_details = {i.get("detail") for i in _narrated_ok}
     _below_cut = [i for i in _all_ranked
-                  if i.get("detail") not in _deck_details and not _is_geo_table_topic(i.get("detail"))]
+                  if i.get("detail") not in _deck_details and not _is_table_topic(i.get("detail"))]
     if _below_cut:
         print(f"  → Summarising {min(len(_below_cut), 6)} additional observation(s)...")
         additional_observations = _retry(
@@ -1427,8 +1427,10 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         # True when revenue/ROAS is page-view default values, not sales - populate_slides
         # then keeps the Imp. Share row instead of swapping in a meaningless ROAS row.
         "revenue_artifact":  bool((findings.get("conversion_tracking") or {}).get("revenue_artifact")),
-        # Optional structured geo breakdown - populate_slides renders it as a table on the
-        # geo issue slide when that finding made the deck (13 Jun 2026 table POC).
+        # The chosen tabular finding (geo, product overlap, ...) - populate_slides fills the
+        # dedicated table slide from it, or trims that slide when None. geo_table kept for
+        # backward-compat with older saved narratives (repopulate path).
+        "table":             _table,
         "geo_table":         (findings.get("efficiency") or {}).get("geo_table"),
         "website_url":       objectives.get("website_url", ""),
     }, str(findings.get("account_type") or ""))

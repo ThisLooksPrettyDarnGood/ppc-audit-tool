@@ -299,6 +299,11 @@ def analyse_account(data, raw_questionnaire=""):
         if findings["account_structure"].get("rag") == "green":
             findings["account_structure"]["rag"] = "amber"
 
+    # The single tabular finding that wins the dedicated table slide (highest severity,
+    # geo first on ties). None when no finding has table data. generate_narrative reads
+    # this both to fill the slide and to drop the chosen finding from the issue slides.
+    findings["table"] = select_table(findings, data)
+
     return findings
 
 
@@ -623,6 +628,106 @@ def overall_rag_from_issues(issues):
     if not issues:
         return "green"
     return min((i.get("rag", "amber") for i in issues), key=lambda r: order.get(r, 1))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA-TABLE EMITTERS
+# The deck has ONE dedicated table slide. A single tabular finding wins it: the
+# highest-severity finding that can be shown as a table fills it and is dropped
+# from the 6 issue slides (the next-ranked finding backfills) - exactly how geo
+# has always worked. Each emitter returns a table payload
+# {title, happening, header (3 cols), rows (<=4 data rows), recommendation} or None.
+# The template table is 5 rows x 3 cols (header + 4 data rows), so emitters MUST
+# cap at 4 data rows and 3 columns, and truncate long cell text.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _truncate_cell(text, n=28):
+    """Collapse whitespace and trim a cell value so it stays on ONE line in a table cell.
+    Wrapping doubles a row's height and the table then collides with the recommendation
+    box below it, so keep the cap tight (~28 chars fits the 3-column template's width)."""
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= n else text[:n].rstrip() + "..."
+
+
+def _product_overlap_table(data, account_type):
+    """Emitter: products taking spend in more than one campaign at once (Shopping/PMax).
+    Ecommerce only. Caps at 4 data rows (top 3 + a '...and N more' row when there are
+    more), 3 columns. Returns a table payload or None."""
+    if account_type != "ecommerce":
+        return None
+    overlap = data.get("product_overlap") or []
+    if not overlap:
+        return None
+    overlap = sorted(overlap, key=lambda p: p.get("total_spend", 0) or 0, reverse=True)
+    # Row cap: the template holds 4 data rows. Show the top 4 when that's all there is,
+    # otherwise the top 3 plus a summary row so the count is never hidden.
+    if len(overlap) <= 4:
+        shown, extra = overlap, 0
+    else:
+        shown, extra = overlap[:3], len(overlap) - 3
+    rows = []
+    for p in shown:
+        n_camp = len(p.get("campaigns") or [])
+        rows.append([
+            _truncate_cell(p.get("title", "")),     # one-line cap (default 28)
+            f"{n_camp} campaigns",
+            f"£{(p.get('total_spend', 0) or 0):,.0f}",
+        ])
+    if extra:
+        rows.append([f"...and {extra} more product(s)", "", ""])
+    worst = overlap[0]
+    worst_n = len(worst.get("campaigns") or [])
+    happening = (
+        f"{len(overlap)} product(s) are taking spend from more than one campaign at the "
+        f"same time, so your own campaigns bid against each other. The worst, "
+        f"'{_truncate_cell(worst.get('title', ''), 40)}', ran in {worst_n} campaigns at once:"
+    )
+    recommendation = (
+        "Give each product a single home campaign and exclude it from the others. That "
+        "pools its performance data and stops your campaigns competing in the same "
+        "auctions, which brings click costs back down."
+    )
+    return {
+        "title": "Products splitting spend across campaigns",
+        "happening": happening,
+        "header": ["Product", "Campaigns", "Spend (30 days)"],
+        "rows": rows,
+        "recommendation": recommendation,
+    }
+
+
+def collect_table_candidates(findings, data):
+    """Gather every per-finding table payload available for this account. Each candidate
+    carries the severity it would headline at, a fixed priority for deterministic
+    tie-breaks (geo > product-overlap > ...), and the detail substrings that identify the
+    finding so the CHOSEN one can be excluded from the issue slides + observations."""
+    account_type = findings.get("account_type") or detect_account_type(data)
+    candidates = []
+
+    # geo (priority 0) - the original emitter, built in score_efficiency.
+    geo_table = (findings.get("efficiency") or {}).get("geo_table")
+    if geo_table:
+        candidates.append({**geo_table, "severity": 76, "priority": 0,
+                           "topic_signatures": ["Presence or interest",
+                                                "reached people physically located OUTSIDE"]})
+
+    # product overlap (priority 1) - ecommerce self-competition.
+    overlap_table = _product_overlap_table(data, account_type)
+    if overlap_table:
+        candidates.append({**overlap_table, "severity": 61, "priority": 1,
+                           "topic_signatures": ["receiving spend from more than one campaign"]})
+
+    return candidates
+
+
+def select_table(findings, data):
+    """Pick the single table that wins the dedicated table slide: highest severity, then
+    the fixed priority for ties. Returns the payload (with its metadata) or None."""
+    candidates = collect_table_candidates(findings, data)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda c: (-c["severity"], c["priority"]))[0]
+
 
 # ─────────────────────────────────────────────
 # SECTION 1: CONVERSION TRACKING

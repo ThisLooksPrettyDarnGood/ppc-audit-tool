@@ -465,16 +465,18 @@ def main():
         requests.append(replace(f"{{{{TK_{n}_FUTURE}}}}",  tk.get("future_state", "")))
 
     # ── Optional data-table slide (filled when a finding has tabular data) ──
-    # The template carries one table slide (title + "what's happening" line + a 6x3 table +
-    # a recommendation line). We fill it from data["geo_table"] when present; otherwise every
-    # token stays unfilled and the whole slide is trimmed (same pattern as unused issue slides).
-    gt = data.get("geo_table")
+    # The template carries one table slide (title + "what's happening" line + a 5x3 table
+    # = header + 4 data rows + a recommendation line). We fill it from data["table"] (the
+    # chosen tabular finding - geo, product overlap, ...), falling back to the legacy
+    # data["geo_table"] key for older saved narratives. When neither is present every token
+    # stays unfilled and the whole slide is trimmed (same pattern as unused issue slides).
+    gt = data.get("table") or data.get("geo_table")
     if gt:
         requests.append(replace("{{TABLE_TITLE}}",       gt.get("title", "A closer look")))
         requests.append(replace("{{TBL_HAPPENING}}",     gt.get("happening", "")))
         requests.append(replace("{{TBL_RECOMMENDATION}}", gt.get("recommendation", "")))
         table_rows = ([gt["header"]] if gt.get("header") else []) + gt.get("rows", [])
-        for r in range(1, 7):           # 6 rows in the template table
+        for r in range(1, 6):           # 5 rows in the template table (header + 4 data)
             row = table_rows[r - 1] if r - 1 < len(table_rows) else []
             for c in range(1, 4):       # 3 columns
                 val = row[c - 1] if c - 1 < len(row) else ""
@@ -493,7 +495,7 @@ def main():
     # ── Trim the data-table's unused rows (only when we filled it) ──
     if gt:
         _used = (1 if gt.get("header") else 0) + len(gt.get("rows", []))
-        if _used < 6:
+        if _used < 5:
             _trim_table_rows(slides_service, new_id, gt.get("title", ""), _used)
 
     # ── Swap the dial image based on the headline RAG ─────────────────────────
