@@ -364,7 +364,7 @@ _ISSUE_SIGNATURES = [
     ("use the 'Presence or interest' location",    76, "amber",     "Budget & Coverage"),  # #1 local waste leak (confirmed big or unmeasured)
     ("A network setting worth tidying",            36, "amber",     "Budget & Coverage"),  # opt-in confirmed tiny -> Observations
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
-    ("are capped by budget",                       66, "amber",     "Budget & Coverage"),  # IS lost to budget
+    ("lost impressions to budget",                 66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("reach only a small slice of the demand that is already out there", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank (SIS/TAM framing)
     ("disapproved and silently not serving",       78, "amber_red", "Ads & Assets"),       # disapproved ads - dark ad groups
     ("approved but LIMITED by policy",             38, "amber",     "Ads & Assets"),       # policy-limited -> Observations
