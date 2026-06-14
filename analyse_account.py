@@ -3277,22 +3277,32 @@ def score_efficiency(data):
             ]
             if _gt_for >= 1:
                 _rows.append(["...of which, overseas", f"£{_gt_for:,.0f}", f"{_gt_for / _gt_total:.0%}"])
-            # Context line above the table names the targeted locations (answers "what am I
-            # targeting?"); the recommendation line below carries the fix.
+            # This is now the single 'super slide' for geo (no separate issue slide), so the
+            # context line carries the real insight: the locations are not SPLIT OUT - distant
+            # markets are lumped into the home-market campaigns and budgets, so nobody can see
+            # whether they pay. The recommendation names the fix AND the assess-each-market step
+            # (Dan, 13 Jun 2026: targeting Brazil is fine, but give it its own budget and check
+            # it is profitable, do not just leave it lumped in).
+            # Copy kept TIGHT so it fits the fixed template boxes: a one-line headline, a ~2-line
+            # context line (locations + the interest mechanism), and the real insight (markets
+            # not split out -> own budget + profitability check) in the recommendation, which
+            # has more room below the table (Dan, 13 Jun 2026).
+            _intl_eg = next((c for c in (_ordered[1:] if _ordered else []) if c != "Liverpool"), "")
             if _ordered:
                 _n3 = ", ".join(_ordered[:3])
                 _extra = len(_ordered) - 3
-                _hap = (f"You target {len(_ordered)} locations ({_n3}{', and %d more' % _extra if _extra > 0 else ''}). "
-                        "The 'Presence or interest' setting then shows your ads to people merely interested in "
-                        "those places, wherever they actually are - so most of your spend lands outside them:")
+                _hap = (f"You target {len(_ordered)} locations ({_n3}{', and %d more' % _extra if _extra > 0 else ''}), "
+                        "but most of your budget reaches people only interested in them, not actually in them:")
             else:
-                _hap = ("The 'Presence or interest' setting shows your ads to people merely interested in your "
-                        "targeted places, wherever they actually are - so most of your spend lands outside them:")
-            _rec = ("Switch your home-market campaigns to 'Presence (people in, or regularly in, your "
-                    "locations)'. If you want overseas visitors planning a trip, run them as a separate "
-                    "campaign with its own budget, rather than letting them share the home-market budget.")
+                _hap = ("The 'Presence or interest' setting reaches people only interested in your targeted "
+                        "places, not actually in them - so most of your spend lands outside them:")
+            _eg = f" If you want somewhere like {_intl_eg}," if _intl_eg else " If you want a distant market,"
+            _rec = ("The catch is these markets are not split out - they share one budget, so you cannot tell "
+                    "which pay. Switch your home-market campaigns to 'Presence (people in, or regularly in, "
+                    f"your locations)'.{_eg} give it its own campaign and budget and check it is profitable.")
+            _ooa_pct_lbl = f"{_gt_ooa / _gt_total:.0%}"
             geo_table = {
-                "title": "Location targeting: where your budget actually goes",
+                "title": f"Location targeting is leaking {_ooa_pct_lbl} of spend",
                 "happening": _hap,
                 "header": ["Where your budget went", "Spend (30 days)", "Share"],
                 "rows": _rows,

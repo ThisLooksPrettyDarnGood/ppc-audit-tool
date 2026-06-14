@@ -1101,7 +1101,18 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     account_type = findings.get("account_type", "unknown")
 
     # ── ISSUE-LED: pick the top problems and narrate each one individually ────
-    selected = select_top_issues(findings, max_issues=6)
+    # When the dedicated geo TABLE slide is in play, geo is told there in full - so drop the
+    # geo findings (the 'Presence or interest' issue and the cross-border observation) from the
+    # issue slides AND the observations, and let the next-ranked findings fill the freed slots
+    # (Dan, 13 Jun 2026: make the table a single 'super slide', not a repeat of an issue slide).
+    _has_geo_table = bool((findings.get("efficiency") or {}).get("geo_table"))
+    def _is_geo_table_topic(detail):
+        d = detail or ""
+        return _has_geo_table and ("Presence or interest" in d
+                                   or "reached people physically located OUTSIDE" in d)
+
+    selected = [i for i in select_top_issues(findings, max_issues=8)
+                if not _is_geo_table_topic(i.get("detail"))][:6]
     if not selected:
         # Genuinely clean account  -  fall back so the deck still has a slide.
         selected = [{
@@ -1247,7 +1258,8 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     # the client sees the full picture (the slide is auto-deleted when there are none).
     # Excludes what made the deck - so a finding whose narration failed lands here.
     _deck_details = {i.get("detail") for i in _narrated_ok}
-    _below_cut = [i for i in _all_ranked if i.get("detail") not in _deck_details]
+    _below_cut = [i for i in _all_ranked
+                  if i.get("detail") not in _deck_details and not _is_geo_table_topic(i.get("detail"))]
     if _below_cut:
         print(f"  → Summarising {min(len(_below_cut), 6)} additional observation(s)...")
         additional_observations = _retry(
