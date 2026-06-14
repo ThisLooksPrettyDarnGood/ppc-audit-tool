@@ -812,6 +812,76 @@ def _primary_actions_table(data):
     }
 
 
+def _converting_terms_table(findings, data):
+    """Emitter: search terms that converted in the last 90 days but are NOT added as active
+    keywords, so proven demand is captured loosely (or not at all). Mirrors the converting-
+    terms finding's severity split: 68 when at least one term has 3+ conversions (proven),
+    else 52 (early signals, 1-2 conversions each). Any account type. Cols: Term | Conversions
+    | Caught by keyword. Caps at 4 data rows. Returns a payload or None.
+
+    When purchase tracking is silent the counts are page-view 'conversions' (interest, not
+    sales), so the wording softens to match - we never sell page views as money-making demand."""
+    terms = (findings.get("targeting_keywords") or {}).get("converting_terms") or []
+    if not terms:
+        return None
+    silent = bool(data.get("_purchase_silent"))
+    terms = sorted(terms, key=lambda t: (t.get("conversions", 0) or 0), reverse=True)
+    proven = any((t.get("conversions", 0) or 0) >= 3 for t in terms)
+
+    def _caught(t):
+        kw = (t.get("keyword") or "").strip()
+        mt = str(t.get("keyword_match_type") or "").strip().lower()
+        if not kw:
+            return "-"
+        return _truncate_cell(f"{mt}: {kw}" if mt else kw)
+
+    if len(terms) <= 4:
+        shown, extra = terms, 0
+    else:
+        shown, extra = terms[:3], len(terms) - 3
+    rows = [[_truncate_cell(t.get("term", "")), f"{int(t.get('conversions', 0) or 0):,}", _caught(t)]
+            for t in shown]
+    if extra:
+        rows.append([f"...and {extra} more term(s)", "", ""])
+
+    n = len(terms)
+    conv_word = "page-view 'conversions'" if silent else "conversions"
+    if proven:
+        happening = (
+            f"{n} search term(s) recorded {conv_word} in the last 90 days but are not added as "
+            "active keywords, so the demand is captured loosely or not at all. The busiest, and the "
+            "keyword (if any) loosely catching each:"
+        )
+    else:
+        happening = (
+            f"{n} search term(s) recorded {conv_word} in the last 90 days without being added as "
+            "active keywords. None has more than a couple yet, so these are early signals to test, "
+            "not proof. The pattern is what matters - nobody is harvesting the report:"
+        )
+    if silent:
+        recommendation = (
+            "These counts show interest, not sales, while purchase tracking is disconnected, so judge "
+            "them properly once real orders are tracked. Even so the terms are keyword candidates: add "
+            "the closest fits to gain control over bids, ad copy and landing pages, and make mining the "
+            "search-term report a monthly habit."
+        )
+    else:
+        recommendation = (
+            "Promote the proven terms into dedicated keywords where search volume supports it (very "
+            "low-volume terms are better captured by a closely related theme), to control bids, ad copy "
+            "and landing pages directly. Make mining the search-term report part of the monthly routine "
+            "so winners stop slipping through."
+        )
+    return {
+        "title": "Converting searches not yet keywords",
+        "happening": happening,
+        "header": ["Search term", "Conversions", "Caught by keyword"],
+        "rows": rows,
+        "recommendation": recommendation,
+        "_severity": 68 if proven else 52,
+    }
+
+
 def collect_table_candidates(findings, data):
     """Gather every per-finding table payload available for this account. Each candidate
     carries the severity it would headline at, a fixed priority for deterministic
@@ -843,11 +913,23 @@ def collect_table_candidates(findings, data):
                            "topic_signatures": ["reach only a small slice of the demand that is already out there",
                                                 "lost impressions to budget"]})
 
-    # too many primary conversion actions (priority 3) - Observation-tier (45), so it only
+    # converting terms not yet keywords (priority 3) - severity mirrors the finding: 68 when a
+    # term has 3+ conversions (proven), else 52 (early signals). So it outranks the IS table
+    # (66) only on proven accounts, and never inflates an early-signal account onto the slide.
+    # Exclude BOTH finding variants (proven "are NOT added as active keywords" + the early
+    # "early signals rather than statistical proof").
+    conv_table = _converting_terms_table(findings, data)
+    if conv_table:
+        sev = conv_table.pop("_severity")
+        candidates.append({**conv_table, "severity": sev, "priority": 3,
+                           "topic_signatures": ["are NOT added as active keywords",
+                                                "early signals rather than statistical proof"]})
+
+    # too many primary conversion actions (priority 4) - Observation-tier (45), so it only
     # wins the slide when no higher tabular finding exists. Exclude the matching finding.
     primary_table = _primary_actions_table(data)
     if primary_table:
-        candidates.append({**primary_table, "severity": 45, "priority": 3,
+        candidates.append({**primary_table, "severity": 45, "priority": 4,
                            "topic_signatures": ["set as primary 'Conversions'"]})
 
     return candidates
