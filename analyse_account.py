@@ -747,6 +747,71 @@ def _impression_share_table(data):
     }
 
 
+_CONV_CATEGORY_LABELS = {
+    "PURCHASE": "Purchase", "SUBMIT_LEAD_FORM": "Lead form", "LEAD": "Lead",
+    "CONTACT": "Contact", "PHONE_CALL_LEAD": "Phone call", "BOOK_APPOINTMENT": "Booking",
+    "REQUEST_QUOTE": "Quote request", "SIGNUP": "Sign-up", "PAGE_VIEW": "Page view",
+    "ENGAGEMENT": "Engagement", "DOWNLOAD": "Download", "OUTBOUND_CLICK": "Outbound click",
+    "GET_DIRECTIONS": "Get directions", "BEGIN_CHECKOUT": "Begin checkout",
+    "ADD_TO_CART": "Add to cart", "IMPORTED_LEAD": "Imported lead", "STORE_VISIT": "Store visit",
+}
+
+
+def _pretty_category(cat):
+    """Plain-English label for a conversion-action category (PAGE_VIEW -> Page view)."""
+    return _CONV_CATEGORY_LABELS.get(cat) or (str(cat or "").replace("_", " ").capitalize() or "Other")
+
+
+def _primary_actions_table(data):
+    """Emitter: too many conversion actions set as primary, so bidding chases them all
+    equally. Fires on the same threshold as the finding (>10 primary). Any account type.
+    Cols: Conversion action | Type | Count (30 days). Caps at 4 data rows. Returns a
+    payload or None."""
+    cas = data.get("conversion_actions") or []
+    active = [ca for ca in cas if ca.get("status") == "ENABLED"]
+    primary = [ca for ca in active if (ca.get("primary_for_goal") or ca.get("include_in_conversions"))]
+    if len(primary) <= 10:
+        return None
+
+    def _vol(ca):
+        v = ca.get("attributed_conversions_30d")
+        if v is None:
+            v = ca.get("conversions_30d")
+        return v or 0
+
+    primary.sort(key=_vol, reverse=True)
+    # Show the actions that actually record volume (a 0-count row reads as broken under a
+    # 'busiest' framing); the summary row absorbs the rest. Fall back to the top few if none
+    # record anything. The gate is >10 primary, so there is always a '...and N more' row.
+    nonzero = [ca for ca in primary if _vol(ca) > 0]
+    pool = nonzero if nonzero else primary
+    shown = pool[:3]
+    extra = len(primary) - len(shown)
+    rows = []
+    for ca in shown:
+        rows.append([_truncate_cell(ca.get("name", "")),
+                     _pretty_category(ca.get("category", "")),
+                     f"{_vol(ca):,.0f}"])
+    if extra > 0:
+        rows.append([f"...and {extra} more action(s)", "", ""])
+    happening = (
+        f"{len(primary)} conversion actions are all set as primary, so bidding treats them as "
+        "equally important when it decides what to chase. The ones recording the most:"
+    )
+    recommendation = (
+        "Keep the single action that represents a real sale or enquiry as your one primary "
+        "'Conversion' and move the rest to secondary. Bidding then optimises towards what actually "
+        "makes you money, and your reporting stops counting soft signals as conversions."
+    )
+    return {
+        "title": "Too many actions set as primary conversions",
+        "happening": happening,
+        "header": ["Conversion action", "Type", "Count (30 days)"],
+        "rows": rows,
+        "recommendation": recommendation,
+    }
+
+
 def collect_table_candidates(findings, data):
     """Gather every per-finding table payload available for this account. Each candidate
     carries the severity it would headline at, a fixed priority for deterministic
@@ -777,6 +842,13 @@ def collect_table_candidates(findings, data):
         candidates.append({**is_table, "severity": 66 if _has_budget else 58, "priority": 2,
                            "topic_signatures": ["reach only a small slice of the demand that is already out there",
                                                 "lost impressions to budget"]})
+
+    # too many primary conversion actions (priority 3) - Observation-tier (45), so it only
+    # wins the slide when no higher tabular finding exists. Exclude the matching finding.
+    primary_table = _primary_actions_table(data)
+    if primary_table:
+        candidates.append({**primary_table, "severity": 45, "priority": 3,
+                           "topic_signatures": ["set as primary 'Conversions'"]})
 
     return candidates
 
