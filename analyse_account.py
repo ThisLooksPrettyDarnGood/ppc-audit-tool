@@ -281,6 +281,7 @@ def analyse_account(data, raw_questionnaire=""):
                       # App accounts track one action per platform (Android + iOS) by design,
                       # so same-category primaries are parallel coverage, not double-counting.
                       "Possible conversion double-counting",
+                      "call or contact actions set as primary conversions",
                       "appear to track different parts of the business")
         for _sec in ("targeting_keywords", "efficiency", "account_structure", "conversion_tracking"):
             _d = findings.get(_sec) or {}
@@ -324,7 +325,8 @@ _ISSUE_SIGNATURES = [
     ("PRIMARY conversions are dominated by low-value", 84, "amber_red", "Conversion Tracking"),  # quantified inflation - root cause
     ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
     ("counting orders without passing their value", 75, "amber_red", "Conversion Tracking"), # £0-value purchase action - ROAS understated
-    ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs
+    ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs (volumes move TOGETHER)
+    ("call or contact actions set as primary conversions", 45, "amber", "Conversion Tracking"),  # multiple call actions, volumes INDEPENDENT -> tidy-up, not confirmed double-count
     ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams (e.g. two storefronts) - verify, not alarm
     ("paid some very expensive single clicks",     50, "amber",     "Bidding Strategy"),  # CPC spike = exposure/risk, not measured waste -> below substantive findings (Dan, 13 Jun)
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
@@ -857,6 +859,11 @@ def score_conversion_tracking(data):
             # twice, and 'the same lead counted twice' is the wrong frame for page views.
             _dup_cats = {c: n for c, n in _dup_cats.items()
                          if c not in {"PAGE_VIEW", "ENGAGEMENT", "OUTBOUND_CLICK"}}
+        # Call/contact dups are owned by the dedicated call-cluster check below (it runs its own
+        # volume-overlap evidence test), so exclude them here to avoid a duplicate message and the
+        # wrong "two websites/product lines" framing for phone calls (Dan, 14 Jun 2026).
+        _dup_cats = {c: n for c, n in _dup_cats.items()
+                     if c not in {"PHONE_CALL_LEAD", "CONTACT", "CALL"}}
 
         # Same-category primaries are only DOUBLE-counting if both tags fire on the same
         # journey. The monthly series is the tell: tags on the same checkout rise and fall
@@ -930,34 +937,58 @@ def score_conversion_tracking(data):
         # tap isn't a phone enquiry, so counting it here would overstate the call double-counting.
         _call_cluster = [ca for ca in _basis
                          if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "CALL"}]
-        if _dup_cats or len(_call_cluster) >= 2:
+        # EVIDENCE GATE (Dan, 14 Jun 2026): never assert "the same call counted twice" on action
+        # COUNT alone. Two call actions whose monthly volumes move INDEPENDENTLY are tracking
+        # different call routes (Smart-campaign calls vs call-asset calls), not one call doubled -
+        # Mermaid had exactly this. Assert double-counting only when volumes move TOGETHER;
+        # otherwise it is a tidy-up to confirm, not measured waste.
+        def _cluster_overlap(actions):
+            _monthly = data.get("conversion_volume_by_month") or {}
+            series = [s for s in (_monthly.get(a.get("name")) for a in actions) if s]
+            if len(series) < 2:
+                return None
+            months = set().union(*(set(s) for s in series))
+            hi = sum(max(s.get(m, 0) for s in series) for m in months)
+            lo = sum(min(s.get(m, 0) for s in series) for m in months)
+            total = sum(v for s in series for v in s.values())
+            return (lo / hi) if hi and total >= 12 else None
+        _call_overlap = _cluster_overlap(_call_cluster) if len(_call_cluster) >= 2 else None
+        _mirrored = (any(v is not None and v >= 0.6 for c, v in _dup_overlap.items() if c in _dup_cats)
+                     or (_call_overlap is not None and _call_overlap >= 0.6))
+        if _mirrored:
+            # Volumes move TOGETHER -> positive evidence the same lead is counted twice.
             _dup_txt = "; ".join(
                 f"{n} separate primary '{_cat_pretty.get(c, c.replace('_', ' ').lower())}' actions"
                 for c, n in sorted(_dup_cats.items(), key=lambda x: -x[1]))
-            _count_word = "recording" if _has_attr else "set up as"
-            _call_note = ""
-            if len(_call_cluster) >= 2:
-                _cnames = ", ".join(f"'{ca.get('name')}'" for ca in _call_cluster[:3])
-                _more = "" if len(_call_cluster) <= 3 else " among others"
-                _call_note = (f" In particular, {len(_call_cluster)} call/contact actions are {_count_word} "
-                              f"conversions ({_cnames}{_more}), so a single phone enquiry can be counted several times.")
-            _lead_txt = (_dup_txt if _dup_txt else f"{len(_call_cluster)} overlapping call/contact actions")
-            # When the duplicate actions' monthly volumes rise and fall TOGETHER, say so - that
-            # is positive evidence of the same orders being counted twice, not just a setup smell.
-            _mirror_note = ""
-            if any(v is not None and v >= 0.7 for c, v in _dup_overlap.items() if c in _dup_cats):
-                _mirror_note = (" Their monthly volumes rise and fall together, which is exactly the "
-                                "pattern you would expect if the same orders are being counted twice.")
+            _lead_txt = _dup_txt or f"{len(_call_cluster)} call/contact actions"
+            _cnames = ", ".join(f"'{ca.get('name')}'" for ca in _call_cluster[:3])
+            _call_note = (f" In particular, {len(_call_cluster)} call/contact actions record conversions "
+                          f"({_cnames})." if len(_call_cluster) >= 2 else "")
             issues.append(
-                f"Possible conversion double-counting: {_lead_txt} are {_count_word} conversions, which can count "
-                f"the same lead more than once.{_mirror_note}{_call_note} Double-counting makes cost per lead look artificially "
-                "LOW, so historic figures (including the paused PMax CPAs) may be around half the true cost. "
-                "Consolidate to one clean primary action per genuine lead type (ideally the form fill), move the "
-                "rest to secondary, and reconcile against the back-end enquiry count so there is a single source of truth."
+                f"Possible conversion double-counting: {_lead_txt} record conversions and their monthly volumes "
+                f"rise and fall together, the pattern of the same lead being counted more than once.{_call_note} "
+                "This makes cost per lead look artificially LOW, so historic figures (including the paused PMax "
+                "CPAs) may be around half the true cost. Consolidate to one clean primary action per genuine lead "
+                "type (ideally the form fill), move the rest to secondary, and reconcile against the back-end count."
             )
             conversions_inflated = True
             if rag not in ("red",):
                 rag = "amber_red"
+        elif _dup_cats or len(_call_cluster) >= 2:
+            # Multiple primary call/lead actions, but volumes move INDEPENDENTLY (or too little
+            # data to tell). Probably different routes, not one lead twice - a tidy-up to confirm,
+            # NOT asserted waste, so do not claim inflation or that CPAs are halved.
+            _cnames = ", ".join(f"'{ca.get('name')}'" for ca in _call_cluster[:3])
+            _n = len(_call_cluster) if len(_call_cluster) >= 2 else sum(_dup_cats.values())
+            issues.append(
+                f"You have {_n} call or contact actions set as primary conversions ({_cnames}). Their monthly "
+                "volumes move independently, so they look like different call routes (for example Smart-campaign "
+                "calls versus call-asset calls) rather than the same call counted twice. It is still worth "
+                "confirming one enquiry cannot trigger more than one of them, and consolidating to a single "
+                "primary call action keeps reporting and bidding clean."
+            )
+            if rag == "green":
+                rag = "amber"
 
         # ── Orders counted, revenue not passed (ROAS understated) ────────────────
         # A primary PURCHASE action recording material orders but £0 of conversion value
