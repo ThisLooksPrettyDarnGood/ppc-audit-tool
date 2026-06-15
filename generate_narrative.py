@@ -547,7 +547,7 @@ Rules:
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - TERMINOLOGY: when referring to importing real lead outcomes (booked jobs / sales) back into Google Ads, name it "offline conversion import (OCI)" - not vague wording like "sales outcomes are not imported".
 - VOCABULARY follows the business: on an ecommerce account say "shoppers", "orders" and "demand" - never "leads" or "lead demand"; on a lead-gen account say "leads" and "enquiries", not "orders".
-- SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close by NAMING the one or two most important fixes in plain words (e.g. "starting with consolidating conversion tracking and tightening location targeting") - the client should finish the sentence knowing exactly where the gains will come from, not just that "fixes are clear". {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human.
+- SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close by NAMING the one or two most important fixes in plain words (e.g. "starting with consolidating conversion tracking and tightening location targeting") - the client should finish the sentence knowing exactly where the gains will come from, not just that "fixes are clear". {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human. Separate the verdict (the genuine strength and the single biggest reason for the score) from the closing fixes with the token ||PARA|| on its own, so the slide can show two short, easy-to-read paragraphs.
 - Use British English spelling.{escalation_note}
 
 Respond in EXACTLY this format (no extra text, no markdown):
@@ -580,7 +580,15 @@ SCORE_SUMMARY: <2 - 3 sentence plain-English verdict matching the overall score>
 
     _score = lines.get("SCORE_SUMMARY", "")
     if _score:
-        _score = f"{_score} {_credibility_line(findings.get('account_type'))}".strip()
+        # Two-paragraph layout for readability (Dan, 15 Jun 2026): GPT marks the split between the
+        # verdict and the closing fixes with ||PARA||; the credibility line joins the second
+        # paragraph (the fixes). Falls back to a single paragraph if the token is absent.
+        _cred = _credibility_line(findings.get('account_type'))
+        if "||PARA||" in _score:
+            _head, _, _tail = _score.partition("||PARA||")
+            _score = f"{_head.strip()}\n\n{_tail.strip()} {_cred}".strip()
+        else:
+            _score = f"{_score} {_cred}".strip()
     return {
         "headline":          lines.get("EXEC_HEADLINE", ""),
         "bullet_1":          lines.get("BULLET_1", ""),
@@ -788,6 +796,8 @@ _LINT_SUBS = [
     # margin-judgment advice. The prompt avoids generating it; this is the law backstop.
     (re.compile(r"ROAS[^.]*?top-line order value[^.]*\.", re.I),
      "Judge ROAS against your margins to gauge true profitability."),
+    # Missing-verb slip GPT sometimes makes: "the trend unreliable" -> needs a verb (Dan, 15 Jun).
+    (re.compile(r"\bthe trend unreliable\b", re.I), "the trend will be unreliable"),
 ]
 _LINT_SUBS_ECOM = [
     (re.compile(r"lead demand", re.I), "shopper demand"),            # ecommerce vocabulary
@@ -1382,7 +1392,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
                 + ", ".join(f"'{n}'" for n in _rut[:2]) +
                 " record orders but pass NO revenue value, so the revenue and ROAS figures exclude that part "
                 "of the business entirely. In ONE short clause, say that true ROAS is higher than shown and "
-                "the trend is unreliable until the value tag is fixed - then move on to the performance "
+                "the trend will be unreliable until the value tag is fixed - then move on to the performance "
                 "story. Do NOT re-quote the order counts or £0 figures (the purchase-tag issue slide owns "
                 "that detail), do NOT present the ROAS decline as a clean performance read, and do NOT "
                 "quote or derive any revenue-per-order/average-order-value figure - the blend is corrupted "
