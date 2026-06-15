@@ -131,6 +131,9 @@ Say what actually happened instead: "searches meant for a different company", "s
 brand/body X", or name it plainly as a competitor-brand search.
 When revenue or conversions are missing from reporting, say "under-reported" or "not reported" -
 never "undervalued" (a £0-value order is not valued too low, it is not reported at all).
+When describing the ongoing management/optimisation work in the account (budgets, search terms,
+bids, negatives, ad tests), call it "data-backed optimisation" - NEVER "steering" the budget or
+account. ("Steering" is reserved for how a BID STRATEGY steers spend, nothing else.)
 Each WHATS_HAPPENING bullet: aim 12-18 words, hard max 22  -  one fact, plainly stated.
 Each WHY_IT_MATTERS bullet: aim 12-18 words, hard max 24  -  one commercial consequence.
 Each recommendation must be a single actionable sentence starting with a verb (under 18 words).
@@ -625,6 +628,7 @@ Rules:
 - Be punchy and specific  -  these are punchy value statements, not generic descriptions. Under 18 words each.
 - TERMINOLOGY: if referencing importing real lead outcomes back into Google Ads, call it "offline conversion import (OCI)", not "sales outcomes".
 - ACCURACY: never attach one campaign's historical figure (e.g. a past ROAS like "9:1") to the whole product catalogue or "all products". If a single past campaign returned well, say a past campaign did - do not imply every product achieved it.
+- VOCABULARY: call the ongoing management/optimisation work (budgets, search terms, bids, tests) "data-backed optimisation" - NEVER "steering" the budget or account ("steering" is only for how a bid strategy steers spend).
 - GROUP each opportunity under a THEME so the slide reads in clear buckets. Start every line with ONE theme word from this set, then " - ", then the value statement: Tracking, Structure, Targeting, Bidding, Strategy. (Tracking = conversion setup/OCI; Structure = campaign/keyword build; Targeting = location/audience/search terms; Bidding = bid strategy/CPC; Strategy = budget/scaling/competitor decisions.) Order lines so the same theme sits together. E.g. "Tracking - Make the 20 real form fills primary so bidding optimises for enquiries."
 - Use British English spelling.
 
@@ -805,6 +809,8 @@ _LINT_SUBS = [
     # ("steer bidding", "target-ROAS bidding is steering spend").
     (re.compile(r"\bactive steering\b", re.I), "active data-backed optimisation"),
     (re.compile(r"\bnobody steering\b", re.I), "nobody making data-backed optimisations"),
+    (re.compile(r"\bsteering (?:the )?budget\b", re.I), "optimising the budget"),  # verb-gerund + object
+    (re.compile(r"\bbudget steering\b", re.I), "budget optimisation"),             # noun phrase
 ]
 _LINT_SUBS_ECOM = [
     (re.compile(r"lead demand", re.I), "shopper demand"),            # ecommerce vocabulary
@@ -948,14 +954,16 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
     elif _is_ecom:
         # Closing ROAS caveat. NEVER assert what the value figure includes/excludes - whether the
         # tag passes revenue or margin is not provable from the API, and the client flags it on
-        # sight (Dan, 15 Jun 2026). When the value tracking is broken, the under-tracking/artifact
-        # caveat above already owns the "ROAS unreliable until fixed" message, so add nothing here.
+        # sight (Dan, 15 Jun 2026).
         if _value_clean:
             _roas_caveat = (" Instead of the OCI caveat, end with one short caveat that the ROAS shown is "
                             "based on the conversion value your tracking records, so judge it against your "
                             "margins to gauge true profitability - do not claim what ROAS does or does not include.")
         else:
-            _roas_caveat = ""
+            # Broken/under-tracked value: end on the diagnosis caveat Dan approved (15 Jun 2026).
+            _roas_caveat = (" End with this exact closing sentence, on its own: 'ROAS reporting will remain "
+                            "unreliable until the conversion tracking is properly diagnosed and fixed.' Do not "
+                            "claim what ROAS does or does not include.")
         _ecom_instr = (
             "\nThis is an ECOMMERCE account: lead with revenue and ROAS (return on ad spend) - that is "
             "the commercial story. Treat conversion counts and CPA as secondary detail. If ROAS has "
