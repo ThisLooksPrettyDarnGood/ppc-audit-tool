@@ -332,8 +332,7 @@ _ISSUE_SIGNATURES = [
     ("counting orders without passing their value", 75, "amber_red", "Conversion Tracking"), # £0-value purchase action - ROAS understated
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs (volumes move TOGETHER)
     ("call or contact actions set as primary conversions", 45, "amber", "Conversion Tracking"),  # multiple call actions, volumes INDEPENDENT -> tidy-up, not confirmed double-count
-    ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams (e.g. two storefronts) - verify, not alarm
-    ("advertises two separate storefronts",        58, "amber",     "Conversion Tracking"),  # two-storefronts CONFIRMED from ad destination domains (not a hedge)
+    ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams UNCONFIRMED (could be migration tag) - verify; CONFIRMED two-site is suppressed as structure
     ("paid some very expensive single clicks",     50, "amber",     "Bidding Strategy"),  # CPC spike = exposure/risk, not measured waste -> below substantive findings (Dan, 13 Jun)
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
@@ -720,12 +719,25 @@ def _product_overlap_table(data, account_type):
     }
 
 
+def _sis_rag(s):
+    """RAG for a search impression share % (Dan's bands, 15 Jun 2026): red below 50%,
+    amber 50-70%, green above 70%. Empty for unknown."""
+    if s is None:
+        return ""
+    if s < 50:
+        return "🔴"
+    if s <= 70:
+        return "🟠"
+    return "🟢"
+
+
 def _impression_share_table(data):
     """Emitter: Search campaigns appearing on only a fraction of the searches they are
-    eligible for (low search impression share). Combines the budget-vs-rank loss into one
-    'Most lost to' column so it fits 3 columns. Caps at 4 data rows. Any account type.
-    Returns a table payload or None. Materiality matches the two IS findings:
-    lost-to-budget >= 10% or lost-to-rank >= 30%."""
+    eligible for (low search impression share). Uses the team's house terminology - SIS
+    (search impression share), SLIB (lost to budget), SLIR (lost to rank) - with a RAG on
+    each campaign's SIS. Caps at 4 data rows, 3 columns. Any account type. Returns a table
+    payload or None. Materiality matches the two IS findings: lost-to-budget >= 10% or
+    lost-to-rank >= 30%."""
     isl = data.get("impression_share_lost") or []
     material = [c for c in isl
                if (c.get("lost_budget", 0) or 0) >= 10 or (c.get("lost_rank", 0) or 0) >= 30]
@@ -742,30 +754,36 @@ def _impression_share_table(data):
         s = c.get("sis")
         b = c.get("lost_budget", 0) or 0
         r = c.get("lost_rank", 0) or 0
-        share = f"{s:.0f}%" if s is not None else "-"
-        lost_to = f"{r:.0f}% to Ad Rank" if r >= b else f"{b:.0f}% to budget"
-        rows.append([_truncate_cell(c.get("campaign", "")), share, lost_to])
+        sis_cell = f"{s:.0f}% {_sis_rag(s)}".strip() if s is not None else "-"
+        # Name the loss the way the team does: SLIB (budget) and SLIR (rank). Show the material
+        # ones so the fix is obvious; both fit the cell at any realistic percentages.
+        losses = []
+        if b >= 10:
+            losses.append(f"{b:.0f}% SLIB")
+        if r >= 10:
+            losses.append(f"{r:.0f}% SLIR")
+        rows.append([_truncate_cell(c.get("campaign", "")), sis_cell, " / ".join(losses) or "-"])
     if extra:
         rows.append([f"...and {extra} more campaign(s)", "", ""])
     worst = shown[0]
     ws = worst.get("sis")
     worst_share = f"{ws:.0f}%" if ws is not None else "a small share"
     happening = (
-        f"{len(material)} Search campaign(s) appear on only a fraction of the searches people "
-        f"already make for what you offer. '{_truncate_cell(worst.get('campaign', ''))}' shows on "
-        f"just {worst_share}. 'Shown on' is your share of those searches; 'Most lost to' is why "
-        "the rest are missed:"
+        f"Search impression share (SIS) is your share of the relevant searches your ads could show on - "
+        f"higher is better, except for deliberately broad campaigns. We rate it red below 50%, amber 50-70%, "
+        f"green above 70%. '{_truncate_cell(worst.get('campaign', ''))}' shows on just {worst_share} {_sis_rag(ws)}. "
+        "SLIB is share lost to budget, SLIR is lost to rank:"
     )
     recommendation = (
-        "Where a campaign loses share to budget and converts well, raise its budget to capture the "
-        "demand. Where it loses to Ad Rank, that is a quality and bid problem, not money - improve "
-        "keyword-to-ad relevance, ad copy and landing pages. Both recover searches you are already "
+        "Where a campaign loses share to budget (SLIB) and converts well, raise its budget to capture the "
+        "demand. Where it loses to rank (SLIR), that is a quality and bid problem, not money - improve "
+        "keyword-to-ad relevance, ad copy and landing pages. Both recover relevant searches you are already "
         "eligible to win, without simply spending more."
     )
     return {
-        "title": "Campaigns missing searches they could win",
+        "title": f"Search impression share (SIS) {_sis_rag(ws)}".strip(),
         "happening": happening,
-        "header": ["Campaign", "Shown on", "Most lost to"],
+        "header": ["Campaign", "SIS", "Lost to"],
         "rows": rows,
         "recommendation": recommendation,
     }
@@ -1268,44 +1286,27 @@ def score_conversion_tracking(data):
                 # separate-storefronts read is CONFIRMED from evidence - state it plainly and name
                 # the sites instead of asking the client to "visit the destination sites" (Dan,
                 # 15 Jun 2026: SAIC's Dynabrade Tools -> dynashop.co.uk, abrasives -> saic-uk.co.uk).
-                _storefronts = _material_domains(data)
-                if len(_storefronts) >= 2:
-                    _dnames = " and ".join(_storefronts[:2])
-                    # The only thing still open is double-firing: does ONE campaign record both tags?
-                    _df_note = ""
-                    if _camp_split:
-                        _both2 = [(camp, acts) for camp, acts in _camp_split.items()
-                                  if sum(1 for n in _names if (acts.get(n) or 0) > 0) >= 2]
-                        if _both2:
-                            _bc, _ba = max(_both2, key=lambda x: sum(x[1].get(n, 0) for n in _names))
-                            _cts = " and ".join(f"{int(round(_ba.get(n, 0)))}x '{n}'"
-                                                for n in _names if (_ba.get(n) or 0) > 0)
-                            _df_note = (f" One thing to confirm: the '{_bc}' campaign has recorded both tags "
-                                        f"({_cts}), so check a single order there cannot fire both - if it can, "
-                                        "that campaign's sales and revenue are overstated.")
-                        else:
-                            _df_note = (" Each campaign records only one of the two tags, which is exactly what "
-                                        "a clean two-site setup looks like.")
-                    issues.append(
-                        f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
-                        "and their monthly volumes move independently. The ad destination URLs confirm why: this "
-                        f"account advertises two separate storefronts, {_dnames}, so the two tags track two "
-                        f"different sites rather than double-counting the same orders.{_df_note} Keep both tags, "
-                        "but label them clearly so reporting and bidding can split performance by site instead of "
-                        "blending the two."
-                    )
-                else:
-                    issues.append(
-                        f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
-                        "but their monthly volumes move independently, so they appear to track different parts of "
-                        "the business (for example two websites or product lines) rather than double-counting the "
-                        f"same orders.{_evidence} Two quick confirmations settle it: visit the destination sites "
-                        "behind each conversion action (separate storefronts is usually obvious within a minute), "
-                        "and check inside the account that each order can only ever fire one of these tags - if "
-                        "both can fire on the same checkout, sales and revenue are overstated and CPAs "
-                        "understated. If they are genuinely separate, keep both but label them clearly so "
-                        "reporting can split performance by site."
-                    )
+                # If the ad destination URLs CONFIRM two separate storefronts, this is normal account
+                # STRUCTURE, not an issue: you cannot promote two sites in one ad group, so two sites
+                # simply means separate campaigns, keywords and per-site tags. With the sites proven and
+                # the tags cleanly labelled per site, there is nothing to flag - one site's campaign being
+                # credited with the other's sale is normal cross-sell attribution, not tag double-counting.
+                # Suppress it (Dan, 15 Jun 2026: most accounts run one site, this one runs two - structure).
+                # The unconfirmed case keeps the careful hedge below (could be a leftover migration tag).
+                # Genuine DOUBLE-COUNTING (volumes moving TOGETHER) is a different branch and still fires.
+                if len(_material_domains(data)) >= 2:
+                    continue
+                issues.append(
+                    f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
+                    "but their monthly volumes move independently, so they appear to track different parts of "
+                    "the business (for example two websites or product lines) rather than double-counting the "
+                    f"same orders.{_evidence} Two quick confirmations settle it: visit the destination sites "
+                    "behind each conversion action (separate storefronts is usually obvious within a minute), "
+                    "and check inside the account that each order can only ever fire one of these tags - if "
+                    "both can fire on the same checkout, sales and revenue are overstated and CPAs "
+                    "understated. If they are genuinely separate, keep both but label them clearly so "
+                    "reporting can split performance by site."
+                )
                 if rag == "green":
                     rag = "amber"
         # True call/contact actions only - GET_DIRECTIONS is deliberately excluded: a directions
