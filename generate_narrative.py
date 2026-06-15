@@ -783,6 +783,11 @@ _LINT_SUBS = [
     (re.compile(r"undervaluing", re.I), "under-reporting"),
     (re.compile(r"misdirected", re.I), "wrongly matched"),           # internal jargon ban
     (re.compile(r"most of our clients stay with us for years\.?", re.I), ""),
+    # Never ASSERT what ROAS includes/excludes - revenue vs margin is not provable from the API
+    # and the client flags it on sight (Dan, 15 Jun 2026). Replace the whole claim with safe
+    # margin-judgment advice. The prompt avoids generating it; this is the law backstop.
+    (re.compile(r"ROAS[^.]*?top-line order value[^.]*\.", re.I),
+     "Judge ROAS against your margins to gauge true profitability."),
 ]
 _LINT_SUBS_ECOM = [
     (re.compile(r"lead demand", re.I), "shopper demand"),            # ecommerce vocabulary
@@ -924,14 +929,22 @@ def _narrative_perf_commentary(client: OpenAI, perf: dict, raw_questionnaire: st
             "impression share) and the fact that the business cannot yet see which of it turned "
             "into ticket or product sales.")
     elif _is_ecom:
+        # Closing ROAS caveat. NEVER assert what the value figure includes/excludes - whether the
+        # tag passes revenue or margin is not provable from the API, and the client flags it on
+        # sight (Dan, 15 Jun 2026). When the value tracking is broken, the under-tracking/artifact
+        # caveat above already owns the "ROAS unreliable until fixed" message, so add nothing here.
+        if _value_clean:
+            _roas_caveat = (" Instead of the OCI caveat, end with one short caveat that the ROAS shown is "
+                            "based on the conversion value your tracking records, so judge it against your "
+                            "margins to gauge true profitability - do not claim what ROAS does or does not include.")
+        else:
+            _roas_caveat = ""
         _ecom_instr = (
             "\nThis is an ECOMMERCE account: lead with revenue and ROAS (return on ad spend) - that is "
             "the commercial story. Treat conversion counts and CPA as secondary detail. If ROAS has "
             "moved in the OPPOSITE direction to conversions/conversion rate, use the average revenue "
             "per order figures to say WHY in one plain sentence (e.g. orders are up but each order is "
-            "worth far less) - never leave that divergence unexplained. Instead of the "
-            "OCI caveat, end with one short caveat that ROAS here is TOP-LINE order value: it does not "
-            f"reflect margin, returns or new-versus-returning customers, so true profitability may differ.{_be_note}")
+            f"worth far less) - never leave that divergence unexplained.{_roas_caveat}{_be_note}")
     elif _is_mixed:
         _ecom_instr = (
             "\nThis account does BOTH ecommerce and lead generation: read revenue and ROAS for the "
