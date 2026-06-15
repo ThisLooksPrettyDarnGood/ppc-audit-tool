@@ -345,6 +345,7 @@ _ISSUE_SIGNATURES = [
     ("bidding target is set below break-even",     72, "amber_red", "Bidding Strategy"),  # tROAS below margin break-even - buying losses by design
     ("below break-even on your own numbers",       63, "amber",     "Revenue & Value"),   # actual ROAS below margin break-even
     ("Most of the product catalogue is not being advertised", 69, "amber", "Account Structure"),  # benched in-stock products
+    ("Shopping and Performance Max campaigns are all switched off", 64, "amber", "Account Structure"),  # dormant feed channel on an ecom store - ask why
     ("gone quiet despite past revenue",            56, "amber",     "Account Structure"),  # dark proven sellers only
     ("split between Performance Max and a standard Shopping", 55, "amber", "Account Structure"),  # split estate
     ("steer bidding on an ecommerce account",      57, "amber",     "Conversion Tracking"),  # call/lead primary on pure ecom
@@ -457,6 +458,15 @@ def _theme_for(detail):
     return None
 
 import re as _re
+
+# Findings that quote HISTORICAL or projected pounds as evidence (not a current measured
+# leak) must NOT get the money bump in select_top_issues - otherwise past performance inflates
+# present severity, breaking the "severity follows MEASURED money" rule. Match on a distinctive
+# substring of the finding (e.g. a paused channel's past sales value).
+_NO_MONEY_BUMP_SIGNATURES = (
+    "Shopping and Performance Max campaigns are all switched off",  # dormant-feed: pounds are past sales
+)
+
 
 def _largest_pound(text):
     """Largest £ figure in a finding, used as a small commercial-magnitude tie-break."""
@@ -592,6 +602,8 @@ def select_top_issues(findings, max_issues=6, apply_floor=True):
             if not meta:
                 continue
             mag = _largest_pound(detail)
+            if any(sig in detail for sig in _NO_MONEY_BUMP_SIGNATURES):
+                mag = 0.0   # pounds here are historical evidence, not a current leak
             bump = min(mag / 200.0, 12.0) if mag else 0.0   # up to +12 for big money
             flat.append({
                 "detail": detail,
@@ -3321,6 +3333,45 @@ def score_efficiency(data):
                 "Proven sellers have gone quiet despite past revenue." + _dark_txt +
                 " Check stock, feed status and campaign inclusion for these first - they are the "
                 "lowest-risk revenue to win back."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    # ── Dormant Shopping/PMax on an ecommerce store (Dan, 15 Jun 2026, SAIC) ──────
+    # An online store running Search only, with its Shopping/PMax campaigns all switched off,
+    # is a question worth posing: Shopping/PMax is usually the PRIMARY channel for ecommerce.
+    # We cannot know WHY from the API, so the finding ASKS rather than asserts - and backs the
+    # question with the all-time track record where we have it (a channel that once produced
+    # real sales is a very different story from one that never worked). Sized as a material
+    # OPPORTUNITY, not a confirmed-money headline, because the upside is unmeasured today.
+    if account_type in ("ecommerce", "mixed"):
+        _enabled_feed = any(c.get("status") == "ENABLED"
+                            and c.get("type") in ("SHOPPING", "PERFORMANCE_MAX") for c in campaigns)
+        _paused_feed = [c for c in campaigns if c.get("status") == "PAUSED"
+                        and c.get("type") in ("SHOPPING", "PERFORMANCE_MAX")]
+        if _paused_feed and not _enabled_feed:
+            _pc2 = data.get("product_coverage") or {}
+            _feed_txt = (f" The Merchant Center feed is live with {_pc2['total']:,} products."
+                         if (_pc2.get("total") or 0) >= 1 else "")
+            # Name the best historical EARNER (by recorded value) as proof the channel worked.
+            _earner = next((h for h in sorted((data.get("shopping_history_alltime") or []),
+                                              key=lambda h: (h.get("conversion_value") or 0), reverse=True)
+                            if (h.get("conversion_value") or 0) >= 1 and (h.get("spend") or 0) >= 100), None)
+            _proof = ""
+            if _earner:
+                _ev_s, _ev_v = _earner["spend"], _earner["conversion_value"]
+                _roas_bit = f" (roughly {_ev_v / _ev_s:.0f}:1 by revenue)" if _ev_s else ""
+                _proof = (f" The history shows the channel produced real sales: its biggest, "
+                          f"'{_earner['name']}', recorded about £{_ev_v:,.0f} of value on £{_ev_s:,.0f} "
+                          f"of spend over its life{_roas_bit} before it was paused.")
+            issues.append(
+                f"This is an online store, but its Shopping and Performance Max campaigns are all "
+                f"switched off and the account runs on Search alone.{_feed_txt}{_proof} For an "
+                "ecommerce business, Shopping and Performance Max are usually the main way products get "
+                "found, so it is worth asking why they are off and whether they should return. Do not "
+                "switch them on blind: establish why each was paused, confirm conversion-value tracking "
+                "is solid first (see the tracking finding), then trial the products that sold before, "
+                "checking the return against your margins."
             )
             if rag == "green":
                 rag = "amber"

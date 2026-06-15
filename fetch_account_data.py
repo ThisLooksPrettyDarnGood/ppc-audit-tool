@@ -1095,6 +1095,44 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
     return history
 
 
+def get_shopping_history_alltime(client, cid, lookback_days=3650):
+    """All-time-ish (default ~10 years) Shopping/PMax campaign performance INCLUDING conversion
+    value, so the analyser can ask why an ecommerce store has Shopping switched off: a paused
+    campaign that once produced real sales is a very different story from one that never worked.
+    The 30d/12m pulls show these paused campaigns at ~0, hiding their track record. Returns a
+    list per campaign (name, type, status, lifetime spend / conversions / value), busiest first.
+    Caller wraps in try/except (accounts with no Shopping/PMax history simply return [])."""
+    from datetime import datetime, timedelta
+    today = datetime.today()
+    start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = today.strftime("%Y-%m-%d")
+    gaql = f"""
+        SELECT
+            campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status,
+            metrics.cost_micros, metrics.conversions, metrics.conversions_value
+        FROM campaign
+        WHERE campaign.advertising_channel_type IN ('SHOPPING', 'PERFORMANCE_MAX')
+          AND segments.date BETWEEN '{start}' AND '{end}'
+    """
+    agg = {}
+    for row in run_query(client, cid, gaql):
+        c = row.campaign
+        m = row.metrics
+        key = str(c.id)
+        if key not in agg:
+            agg[key] = {"id": key, "name": c.name, "type": c.advertising_channel_type.name,
+                        "status": c.status.name, "spend": 0.0, "conversions": 0.0,
+                        "conversion_value": 0.0}
+        agg[key]["spend"] += m.cost_micros / 1_000_000
+        agg[key]["conversions"] += m.conversions
+        agg[key]["conversion_value"] += m.conversions_value
+    for v in agg.values():
+        v["spend"] = round(v["spend"], 2)
+        v["conversions"] = round(v["conversions"], 2)
+        v["conversion_value"] = round(v["conversion_value"], 2)
+    return sorted(agg.values(), key=lambda d: d["spend"], reverse=True)
+
+
 def get_impression_share_lost(client, cid):
     """
     Per Search campaign: impression share, and WHY it's being lost  -  to budget (capped,
@@ -1820,6 +1858,15 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (paused campaign history query failed: {e})")
         paused_campaign_history = None
 
+    print("  → Shopping/PMax all-time history (why is it switched off?)...")
+    try:
+        shopping_history_alltime = get_shopping_history_alltime(client, cid)
+        if shopping_history_alltime:
+            print(f"    {len(shopping_history_alltime)} Shopping/PMax campaign(s) in all-time history")
+    except Exception as e:
+        print(f"    (Shopping/PMax all-time history query failed: {e})")
+        shopping_history_alltime = None
+
     print("  → 30-day account summary...")
     account_summary = get_account_summary(client, cid)
 
@@ -1865,6 +1912,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
         "paused_campaign_history": paused_campaign_history,
+        "shopping_history_alltime": shopping_history_alltime,
         "negative_keyword_count": neg_kw_total,
         "negative_keywords": negative_keywords,
         "auto_apply_recommendations": auto_apply_enabled,
