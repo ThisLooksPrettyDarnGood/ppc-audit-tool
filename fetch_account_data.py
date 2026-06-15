@@ -1133,6 +1133,29 @@ def get_shopping_history_alltime(client, cid, lookback_days=3650):
     return sorted(agg.values(), key=lambda d: d["spend"], reverse=True)
 
 
+def get_ad_destination_domains(client, cid):
+    """Distinct destination domains the account actually advertises, from ENABLED ad final
+    URLs - so the analyser can CONFIRM a multi-storefront setup (two separate sites) from
+    evidence rather than hedging ("if they are separate sites..."). Two materially-advertised
+    domains is proof the account runs two storefronts. Returns {domain: ad_count} busiest
+    first. Caller wraps in try/except."""
+    from urllib.parse import urlparse
+    gaql = """
+        SELECT ad_group_ad.ad.final_urls
+        FROM ad_group_ad
+        WHERE ad_group_ad.status = 'ENABLED' AND campaign.status = 'ENABLED'
+    """
+    counts = {}
+    for row in run_query(client, cid, gaql):
+        for u in row.ad_group_ad.ad.final_urls:
+            dom = urlparse(u).netloc.lower()
+            if dom.startswith("www."):
+                dom = dom[4:]
+            if dom:
+                counts[dom] = counts.get(dom, 0) + 1
+    return dict(sorted(counts.items(), key=lambda x: -x[1]))
+
+
 def get_impression_share_lost(client, cid):
     """
     Per Search campaign: impression share, and WHY it's being lost  -  to budget (capped,
@@ -1867,6 +1890,16 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (Shopping/PMax all-time history query failed: {e})")
         shopping_history_alltime = None
 
+    print("  → Ad destination domains (single vs multi storefront)...")
+    try:
+        ad_destination_domains = get_ad_destination_domains(client, cid)
+        if ad_destination_domains:
+            print(f"    {len(ad_destination_domains)} destination domain(s): "
+                  f"{', '.join(list(ad_destination_domains)[:3])}")
+    except Exception as e:
+        print(f"    (ad destination domains query failed: {e})")
+        ad_destination_domains = None
+
     print("  → 30-day account summary...")
     account_summary = get_account_summary(client, cid)
 
@@ -1913,6 +1946,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "rsa_ad_strength": rsa_ad_strength,
         "paused_campaign_history": paused_campaign_history,
         "shopping_history_alltime": shopping_history_alltime,
+        "ad_destination_domains": ad_destination_domains,
         "negative_keyword_count": neg_kw_total,
         "negative_keywords": negative_keywords,
         "auto_apply_recommendations": auto_apply_enabled,

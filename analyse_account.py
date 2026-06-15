@@ -333,6 +333,7 @@ _ISSUE_SIGNATURES = [
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs (volumes move TOGETHER)
     ("call or contact actions set as primary conversions", 45, "amber", "Conversion Tracking"),  # multiple call actions, volumes INDEPENDENT -> tidy-up, not confirmed double-count
     ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams (e.g. two storefronts) - verify, not alarm
+    ("advertises two separate storefronts",        58, "amber",     "Conversion Tracking"),  # two-storefronts CONFIRMED from ad destination domains (not a hedge)
     ("paid some very expensive single clicks",     50, "amber",     "Bidding Strategy"),  # CPC spike = exposure/risk, not measured waste -> below substantive findings (Dan, 13 Jun)
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
@@ -477,6 +478,17 @@ def _largest_pound(text):
         except ValueError:
             pass
     return max(vals) if vals else 0.0
+
+
+def _material_domains(data, min_share=0.10, min_count=5):
+    """Destination domains the account MATERIALLY advertises (from enabled ad final URLs).
+    Filters out stray off-domain links (a redirect, a one-off partner page) so two domains
+    here is solid proof of two storefronts. Returns the domains, busiest first."""
+    doms = data.get("ad_destination_domains") or {}
+    total = sum(doms.values())
+    if not total:
+        return []
+    return [d for d, c in doms.items() if c >= min_count and c / total >= min_share]
 
 
 def _campaign_age_days(start_date):
@@ -1252,17 +1264,48 @@ def score_conversion_tracking(data):
                     else:
                         _evidence = (" Each campaign records only one of these actions, which supports the "
                                      "separate-storefronts read - most likely fine as set up.")
-                issues.append(
-                    f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
-                    "but their monthly volumes move independently, so they appear to track different parts of "
-                    "the business (for example two websites or product lines) rather than double-counting the "
-                    f"same orders.{_evidence} Two quick confirmations settle it: visit the destination sites "
-                    "behind each conversion action (separate storefronts is usually obvious within a minute), "
-                    "and check inside the account that each order can only ever fire one of these tags - if "
-                    "both can fire on the same checkout, sales and revenue are overstated and CPAs "
-                    "understated. If they are genuinely separate, keep both but label them clearly so "
-                    "reporting can split performance by site."
-                )
+                # If the ad destination URLs show two materially-advertised domains, the
+                # separate-storefronts read is CONFIRMED from evidence - state it plainly and name
+                # the sites instead of asking the client to "visit the destination sites" (Dan,
+                # 15 Jun 2026: SAIC's Dynabrade Tools -> dynashop.co.uk, abrasives -> saic-uk.co.uk).
+                _storefronts = _material_domains(data)
+                if len(_storefronts) >= 2:
+                    _dnames = " and ".join(_storefronts[:2])
+                    # The only thing still open is double-firing: does ONE campaign record both tags?
+                    _df_note = ""
+                    if _camp_split:
+                        _both2 = [(camp, acts) for camp, acts in _camp_split.items()
+                                  if sum(1 for n in _names if (acts.get(n) or 0) > 0) >= 2]
+                        if _both2:
+                            _bc, _ba = max(_both2, key=lambda x: sum(x[1].get(n, 0) for n in _names))
+                            _cts = " and ".join(f"{int(round(_ba.get(n, 0)))}x '{n}'"
+                                                for n in _names if (_ba.get(n) or 0) > 0)
+                            _df_note = (f" One thing to confirm: the '{_bc}' campaign has recorded both tags "
+                                        f"({_cts}), so check a single order there cannot fire both - if it can, "
+                                        "that campaign's sales and revenue are overstated.")
+                        else:
+                            _df_note = (" Each campaign records only one of the two tags, which is exactly what "
+                                        "a clean two-site setup looks like.")
+                    issues.append(
+                        f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
+                        "and their monthly volumes move independently. The ad destination URLs confirm why: this "
+                        f"account advertises two separate storefronts, {_dnames}, so the two tags track two "
+                        f"different sites rather than double-counting the same orders.{_df_note} Keep both tags, "
+                        "but label them clearly so reporting and bidding can split performance by site instead of "
+                        "blending the two."
+                    )
+                else:
+                    issues.append(
+                        f"{len(_names)} primary '{_pretty}' actions ({_named}) both feed the Conversions column, "
+                        "but their monthly volumes move independently, so they appear to track different parts of "
+                        "the business (for example two websites or product lines) rather than double-counting the "
+                        f"same orders.{_evidence} Two quick confirmations settle it: visit the destination sites "
+                        "behind each conversion action (separate storefronts is usually obvious within a minute), "
+                        "and check inside the account that each order can only ever fire one of these tags - if "
+                        "both can fire on the same checkout, sales and revenue are overstated and CPAs "
+                        "understated. If they are genuinely separate, keep both but label them clearly so "
+                        "reporting can split performance by site."
+                    )
                 if rag == "green":
                     rag = "amber"
         # True call/contact actions only - GET_DIRECTIONS is deliberately excluded: a directions
