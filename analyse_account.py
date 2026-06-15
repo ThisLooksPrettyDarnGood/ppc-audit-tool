@@ -3282,8 +3282,16 @@ def score_efficiency(data):
     # anywhere (catalogue sitting idle - out-of-stock exclusions are fine), and products
     # with real 12-month revenue that now get NO impressions ('gone dark' - proven
     # sellers quietly switched off). Gastronomica head-to-head, 11 June 2026.
+    # Only meaningful when the account actually runs a product-feed channel (Shopping or
+    # PMax). A Search-only account can still have a Merchant Center catalogue linked, which
+    # reads as "0 of N products eligible" - but those products are not "benched" from a
+    # Shopping strategy that exists, the account simply does not do Shopping. Claiming they
+    # were dropped and saying "reintroduce the proven sellers" would be confidently wrong
+    # (SAIC live, 15 Jun 2026: 2,448-product catalogue, 0 eligible, but Search-only).
     _pc = data.get("product_coverage") or {}
-    if account_type in ("ecommerce", "mixed") and (_pc.get("total") or 0) >= 20:
+    _feed_channel = any(t in ("SHOPPING", "PERFORMANCE_MAX")
+                        for t in (data.get("campaign_types_active") or []))
+    if account_type in ("ecommerce", "mixed") and _feed_channel and (_pc.get("total") or 0) >= 20:
         _instock = max((_pc["total"] - (_pc.get("out_of_stock") or 0)), 1)
         _benched = _pc.get("not_eligible_in_stock") or 0
         _dark_txt = ""
@@ -3617,8 +3625,13 @@ def score_efficiency(data):
         # rows - the "perfect table" Dan asked to see on the slide (13 Jun 2026).
         # Only build the table when the leak is material (it shares the dedicated table
         # slide, which is trimmed when empty) and we have the spend split.
+        # Only build the geo super-slide table when the leak actually warrants headlining -
+        # i.e. the big-or-unmeasured path that also carries severity 76. On the measured-SMALL
+        # path (e.g. SAIC: £61 / 5%) the finding is an Observation, so the table must not seize
+        # the marquee slide with a "leaking 5% of spend" headline (the £68/5% lesson, 15 Jun 2026).
         _gt_total = _geo.get("total_spend") or 0
-        if _gt_total and (_geo.get("out_of_area_spend") or 0) >= max(50.0, 0.05 * _gt_total):
+        if (_gt_total and (_geo.get("out_of_area_spend") or 0) >= max(50.0, 0.05 * _gt_total)
+                and (_leak_big or not _measured)):
             _gt_in = _geo.get("in_area_spend") or 0
             _gt_ooa = _geo.get("out_of_area_spend") or 0
             _gt_for = _geo.get("foreign_country_spend") or 0
