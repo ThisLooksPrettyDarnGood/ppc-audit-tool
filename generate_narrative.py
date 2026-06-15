@@ -546,6 +546,7 @@ Rules:
 - NO INTERNAL REPETITION: never reuse the same specific figure or example in both a bullet and the COMMERCIAL_IMPACT - if a number appears in a bullet, the impact paragraph states the consequence without restating the figure. Across the deck each statistic should land once, hard, in the place it belongs.
 - FACTUAL ACCURACY: never say GA4 imports "block" or "prevent" Enhanced Conversions (GA4 has its own ECs  -  say "worth confirming Enhanced Conversions is active"); never state a hard "30-50 conversions" minimum for smart bidding.
 - TERMINOLOGY: when referring to importing real lead outcomes (booked jobs / sales) back into Google Ads, name it "offline conversion import (OCI)" - not vague wording like "sales outcomes are not imported".
+- ACCURACY: never attach one campaign's historical figure (e.g. a past ROAS like "9:1") to the whole product catalogue or "all products" - if one past campaign returned well, say a past campaign did, not that every product did.
 - VOCABULARY follows the business: on an ecommerce account say "shoppers", "orders" and "demand" - never "leads" or "lead demand"; on a lead-gen account say "leads" and "enquiries", not "orders".
 - SCORE_SUMMARY: 2 - 3 short sentences shown next to the overall score dial - the "verdict in a breath". It must be HIGHER-LEVEL and more relational than the bullets: do NOT just repeat them or the COMMERCIAL_IMPACT. Acknowledge any genuine strength in one clause, name the single biggest reason the account scores where it does, and close by NAMING the one or two most important fixes in plain words (e.g. "starting with consolidating conversion tracking and tightening location targeting") - the client should finish the sentence knowing exactly where the gains will come from, not just that "fixes are clear". {_rag_tone} Do NOT mention e-commerce, and do not list specific numbers - keep it plain and human. Separate the verdict (the genuine strength and the single biggest reason for the score) from the closing fixes with the token ||PARA|| on its own, so the slide can show two short, easy-to-read paragraphs.
 - Use British English spelling.{escalation_note}
@@ -623,6 +624,7 @@ Rules:
 - IMPORTANT: do NOT just restate the issue slides word-for-word. REMIX them into fresh, forward-looking value statements  -  the same substance framed as the upside/prize, so the closing slide doesn't feel repetitive after the audit.
 - Be punchy and specific  -  these are punchy value statements, not generic descriptions. Under 18 words each.
 - TERMINOLOGY: if referencing importing real lead outcomes back into Google Ads, call it "offline conversion import (OCI)", not "sales outcomes".
+- ACCURACY: never attach one campaign's historical figure (e.g. a past ROAS like "9:1") to the whole product catalogue or "all products". If a single past campaign returned well, say a past campaign did - do not imply every product achieved it.
 - GROUP each opportunity under a THEME so the slide reads in clear buckets. Start every line with ONE theme word from this set, then " - ", then the value statement: Tracking, Structure, Targeting, Bidding, Strategy. (Tracking = conversion setup/OCI; Structure = campaign/keyword build; Targeting = location/audience/search terms; Bidding = bid strategy/CPC; Strategy = budget/scaling/competitor decisions.) Order lines so the same theme sits together. E.g. "Tracking - Make the 20 real form fills primary so bidding optimises for enquiries."
 - Use British English spelling.
 
@@ -798,6 +800,11 @@ _LINT_SUBS = [
      "Judge ROAS against your margins to gauge true profitability."),
     # Missing-verb slip GPT sometimes makes: "the trend unreliable" -> needs a verb (Dan, 15 Jun).
     (re.compile(r"\bthe trend unreliable\b", re.I), "the trend will be unreliable"),
+    # House vocabulary for the ongoing management work: "data-backed optimisation", not
+    # "steering" (Dan, 15 Jun 2026). Targeted so it never touches the legitimate BIDDING usage
+    # ("steer bidding", "target-ROAS bidding is steering spend").
+    (re.compile(r"\bactive steering\b", re.I), "active data-backed optimisation"),
+    (re.compile(r"\bnobody steering\b", re.I), "nobody making data-backed optimisations"),
 ]
 _LINT_SUBS_ECOM = [
     (re.compile(r"lead demand", re.I), "shopper demand"),            # ecommerce vocabulary
