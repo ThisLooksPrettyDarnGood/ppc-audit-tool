@@ -3353,17 +3353,31 @@ def score_efficiency(data):
             _pc2 = data.get("product_coverage") or {}
             _feed_txt = (f" The Merchant Center feed is live with {_pc2['total']:,} products."
                          if (_pc2.get("total") or 0) >= 1 else "")
-            # Name the best historical EARNER (by recorded value) as proof the channel worked.
-            _earner = next((h for h in sorted((data.get("shopping_history_alltime") or []),
-                                              key=lambda h: (h.get("conversion_value") or 0), reverse=True)
-                            if (h.get("conversion_value") or 0) >= 1 and (h.get("spend") or 0) >= 100), None)
+            # Name the historical EARNERS as proof the channel worked: the biggest by recorded
+            # value, plus a second, stronger-RETURNING campaign if there is one (the channel can
+            # pay well, not just at scale - argues for a SELECTIVE revival). All figures come
+            # from the account's own conversion tracking, which we have flagged as possibly
+            # inaccurate, so they are caveated as indicative, not exact (Dan, 15 Jun 2026).
+            _hist = [h for h in (data.get("shopping_history_alltime") or [])
+                     if (h.get("conversion_value") or 0) >= 1 and (h.get("spend") or 0) >= 100]
             _proof = ""
-            if _earner:
+            if _hist:
+                _earner = sorted(_hist, key=lambda h: h["conversion_value"], reverse=True)[0]
                 _ev_s, _ev_v = _earner["spend"], _earner["conversion_value"]
                 _roas_bit = f" (roughly {_ev_v / _ev_s:.0f}:1 by revenue)" if _ev_s else ""
                 _proof = (f" The history shows the channel produced real sales: its biggest, "
                           f"'{_earner['name']}', recorded about £{_ev_v:,.0f} of value on £{_ev_s:,.0f} "
-                          f"of spend over its life{_roas_bit} before it was paused.")
+                          f"of spend over its life{_roas_bit}.")
+                # Second example: best revenue-to-spend ratio among the OTHER campaigns, if strong.
+                _others = sorted((h for h in _hist if h is not _earner and h["spend"]),
+                                 key=lambda h: h["conversion_value"] / h["spend"], reverse=True)
+                if _others and (_others[0]["conversion_value"] / _others[0]["spend"]) >= 3:
+                    _b = _others[0]
+                    _proof += (f" Another, '{_b['name']}', returned more strongly still: about "
+                               f"£{_b['conversion_value']:,.0f} of value on £{_b['spend']:,.0f} of spend "
+                               f"(roughly {_b['conversion_value'] / _b['spend']:.0f}:1).")
+                _proof += (" These figures come from the account's own conversion tracking, which may "
+                           "not have been fully accurate, so treat them as indicative rather than exact.")
             issues.append(
                 f"This is an online store, but its Shopping and Performance Max campaigns are all "
                 f"switched off and the account runs on Search alone.{_feed_txt}{_proof} For an "
