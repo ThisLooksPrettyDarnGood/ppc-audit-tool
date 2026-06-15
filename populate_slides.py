@@ -8,6 +8,7 @@ template with the generated audit content.
 import io
 import os
 import json
+from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -349,7 +350,10 @@ def main():
     slides_service = build("slides", "v1", credentials=creds)
     drive_service  = build("drive",  "v3", credentials=creds)
 
-    deck_title = f"PPC Audit  -  {client_name}"
+    # Naming convention (Dan, 14 Jun 2026): "PPC Team" static, then the client name, the
+    # month and the year of generation - e.g. "PPC Team  -  The Beatles Story - June - 2026".
+    _now = datetime.now()
+    deck_title = f"PPC Team  -  {client_name} - {_now:%B} - {_now.year}"
     print(f"Creating copy of template: '{deck_title}'...")
     copied = drive_service.files().copy(
         fileId=TEMPLATE_PRESENTATION_ID,
