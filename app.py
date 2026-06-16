@@ -271,6 +271,13 @@ if submitted:
         _log_sheet_id = st.secrets.get("AUDIT_LOG_SHEET_ID", "") or os.environ.get("AUDIT_LOG_SHEET_ID", "")
         if _log_sheet_id:
             os.environ["AUDIT_LOG_SHEET_ID"] = _log_sheet_id
+        # Feedback Form / responses Sheet  -  feedback_config.json is gitignored so the
+        # cloud app reads these from secrets instead (the email Yes/No links need them).
+        for _fb_key in ("FEEDBACK_FORM_URL", "FEEDBACK_ENTRY_HELPFUL", "FEEDBACK_ENTRY_CLIENT",
+                        "FEEDBACK_ENTRY_AUDITOR", "FEEDBACK_RESPONSES_SHEET_ID", "FEEDBACK_RESPONSES_TAB"):
+            _fb_val = st.secrets.get(_fb_key, "") or os.environ.get(_fb_key, "")
+            if _fb_val:
+                os.environ[_fb_key] = _fb_val
 
         # ── Step 1: fetch Google Ads data ─────────────────────────────────
         update("Fetching Google Ads data…", 15)

@@ -12,6 +12,9 @@ client_secret.json
 # ─── Generated / runtime output ───────────────────────────────────
 narrative_output.json
 
+# ─── Internal resource IDs (feedback Form / responses Sheet) ──────
+feedback_config.json
+
 # ─── Python ───────────────────────────────────────────────────────
 __pycache__/
 *.pyc
