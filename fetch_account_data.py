@@ -1583,6 +1583,101 @@ def get_performance_summary(client, cid):
     }
 
 
+_BRAND_GENERIC = {
+    "tools", "tool", "products", "product", "range", "accessories", "accessory", "spares",
+    "spare", "parts", "consumables", "consumable", "abrasive", "abrasives", "sanding", "belts",
+    "belt", "discs", "disc", "rolls", "roll", "strips", "strip", "polishing", "vacuum", "vacuums",
+    "machinery", "automotive", "industrial", "pneumatic", "general", "purpose", "popular",
+    "clearance", "stock", "sale", "autumn", "floor", "glossary", "knowledge", "base", "guides",
+    "manuals", "manual", "terms", "uncategorised", "type", "shape", "size", "other", "page",
+    "feed", "category", "categories", "shop", "home", "supreme", "supremes", "spirit", "spirits",
+    "silver", "compounds", "compound", "hivac", "brands", "brand", "manufacturer", "manufacturers",
+    "pads", "pad", "kits", "kit", "sets", "set", "gear", "equipment", "supplies", "store", "online",
+}
+
+
+def discover_site_brands(domains, max_domains=2, timeout=10):
+    """
+    Best-effort: read a storefront's brand/manufacturer list so the analyser can tell a
+    resold brand name (e.g. 'dynabrade', 'sait') from genuine new demand in the search-query
+    review (the SAIC lesson: 5 of 8 'converting terms' were actually brand/supplier names).
+
+    Deliberately HIGH-PRECISION - only two safe signals, never a blanket category scrape
+    (treating every product category as a brand would suppress real demand on other accounts):
+      (A) an explicit brand/manufacturer taxonomy (a '/brands' or 'products-by-manufacturer'
+          listing, or a brand sitemap), and
+      (B) the house brand, taken ONLY where a word in the page <title> ALSO appears as a
+          repeated product category (catches 'dynabrade' but rejects generic 'sanding').
+    Generic industrial/ecommerce words are filtered out. Never raises - returns [] on any
+    problem so a slow or blocking site can never hold up the audit.
+    """
+    import re
+    from collections import Counter
+    try:
+        import requests
+    except Exception:
+        return []
+
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-GB,en;q=0.9",
+    }
+
+    def _get(url):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            return r.text if r.status_code == 200 else ""
+        except Exception:
+            return ""
+
+    def _toks(s):
+        return [t for t in re.split(r"[^a-z0-9]+", str(s).lower())
+                if len(t) > 3 and t not in _BRAND_GENERIC and not t.isdigit()]
+
+    tokens = set()
+    for domain in list(domains or [])[:max_domains]:
+        try:
+            host = re.sub(r"^https?://", "", str(domain)).strip("/").split("/")[0]
+            base = f"https://{host}"
+            # (A) explicit brand / manufacturer taxonomy
+            brand_slugs = set()
+            index = _get(base + "/sitemap_index.xml")
+            for sm in re.findall(r"https?://[^<\s]+\.xml", index):
+                if re.search(r"(brand|manufact|make)", sm, re.I):
+                    for u in re.findall(r"https?://[^<\s]+", _get(sm)):
+                        m = re.search(r"/([a-z0-9][a-z0-9-]+)/?$", u, re.I)
+                        if m:
+                            brand_slugs.add(m.group(1))
+            for path in ("/product-category/products-by-manufacturer/", "/brands/", "/brand/",
+                         "/product-brand/", "/manufacturer/", "/shop-by-brand/"):
+                html = _get(base + path)
+                found = re.findall(
+                    r"/(?:products-by-manufacturer|brand|product-brand|manufacturer)/([a-z0-9][a-z0-9-]+)/",
+                    html, re.I)
+                if found:
+                    brand_slugs.update(found)
+                    break  # found the brand listing; no need to try the other URL patterns
+            for slug in brand_slugs:
+                slug = re.sub(r"-(products?|tools?|range|abrasives?)$", "", slug)
+                tokens.update(_toks(slug.replace("-", " ")))
+            # (B) house brand: a <title> word that is ALSO a repeated product category
+            home = _get(base + "/")
+            mt = re.search(r"<title>([^<]*)</title>", home, re.I)
+            title_toks = set(_toks(mt.group(1))) if mt else set()
+            cat_counts = Counter()
+            for cs in re.findall(r"/product-category/([a-z0-9-]+)/",
+                                 _get(base + "/product_cat-sitemap.xml"), re.I):
+                cat_counts.update(set(_toks(cs.replace("-", " "))))
+            for t in title_toks:
+                if cat_counts.get(t, 0) >= 2:
+                    tokens.add(t)
+        except Exception:
+            continue
+    return sorted(tokens)
+
+
 def fetch_account_data(client_cid: str) -> dict:
     print(f"\n🔐 Authenticating...")
     creds = get_credentials()
@@ -1900,6 +1995,19 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (ad destination domains query failed: {e})")
         ad_destination_domains = None
 
+    print("  → Site brand/manufacturer list (for brand vs new-demand in the SQR)...")
+    site_brands = []
+    try:
+        if ad_destination_domains:
+            site_brands = discover_site_brands(ad_destination_domains)
+            if site_brands:
+                print(f"    {len(site_brands)} brand token(s): {', '.join(site_brands[:8])}")
+            else:
+                print("    (no explicit brand list found - SQR falls back to the brand caveat)")
+    except Exception as e:
+        print(f"    (site brand discovery skipped: {e})")
+        site_brands = []
+
     print("  → 30-day account summary...")
     account_summary = get_account_summary(client, cid)
 
@@ -1947,6 +2055,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "paused_campaign_history": paused_campaign_history,
         "shopping_history_alltime": shopping_history_alltime,
         "ad_destination_domains": ad_destination_domains,
+        "site_brands": site_brands,
         "negative_keyword_count": neg_kw_total,
         "negative_keywords": negative_keywords,
         "auto_apply_recommendations": auto_apply_enabled,

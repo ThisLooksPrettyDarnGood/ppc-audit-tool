@@ -1430,17 +1430,17 @@ def score_conversion_tracking(data):
             if rag == "green":
                 rag = "amber"
 
-        # GA4 import detection  -  no native tag snippet = likely imported from GA4
-        web_categories = {
-            "PURCHASE", "SUBMIT_LEAD_FORM", "LEAD", "CONTACT",
-            "BOOK_APPOINTMENT", "REQUEST_QUOTE", "SIGNUP",
-            "PHONE_CALL_LEAD", "IMPORTED_LEAD", "DEFAULT", "OTHER"
-        }
+        # GA4 import detection  -  read it straight off the conversion action TYPE,
+        # which states it outright (GOOGLE_ANALYTICS_4_*). The old proxy ("no website
+        # tag snippet = imported from GA4") was confidently wrong: native call
+        # conversions (AD_CALL) and legacy Universal Analytics goals legitimately
+        # carry no website snippet but are NOT GA4 imports (the SAIC lesson - it
+        # mislabelled UA transactions and a Calls-from-Ads action as GA4). Only flag
+        # a primary action whose type is genuinely a GA4 import.
         ga4_imported = [
             ca.get("name", "Unknown") for ca in active_actions
             if ca.get("include_in_conversions")
-            and not ca.get("has_tag_snippet", True)   # default True = don't flag if data missing
-            and ca.get("category", "") in web_categories
+            and str(ca.get("type", "")).startswith("GOOGLE_ANALYTICS_4")
         ]
         if ga4_imported:
             issues.append(
@@ -2211,6 +2211,31 @@ def score_targeting_keywords(data):
         brand_tokens = [w.lower() for w in str(data.get("account_name", "")).split()
                         if len(w) > 3 and w.lower() not in _generic]
 
+    # The account's OWN advertised domains are, by definition, its brands. Add their name
+    # tokens so a second storefront is recognised as brand too, not just the brand in the
+    # account name (the SAIC lesson: the account name 'Mark - Dynashop' only yielded
+    # 'dynashop', so 'saic' brand terms from the saic-uk.co.uk storefront slipped through).
+    brand_tokens = list(brand_tokens or [])
+    try:
+        import re as _re_dom
+        _generic_dom = {"www", "co", "uk", "com", "net", "org", "shop", "store", "online", "ltd"}
+        for _dom in (data.get("ad_destination_domains") or {}):
+            for _tok in _re_dom.split(r"[.\-]", str(_dom).lower()):
+                if len(_tok) > 3 and _tok not in _generic_dom and _tok not in brand_tokens:
+                    brand_tokens.append(_tok)
+    except Exception:
+        pass
+
+    # Brands the storefront actually sells, discovered from its own brand/manufacturer pages
+    # at fetch time (data["site_brands"]). This is what lets the SQR tell a resold brand name
+    # (e.g. 'dynabrade', 'sait') from genuine new demand, instead of leaning on the caveat alone
+    # (Mark's SAIC note: 5 of 8 'converting terms' were brand/supplier names). Empty/absent on
+    # older saved fetches, so behaviour is unchanged there.
+    for _sb in (data.get("site_brands") or []):
+        _sb = str(_sb).lower().strip()
+        if len(_sb) > 3 and _sb not in brand_tokens:
+            brand_tokens.append(_sb)
+
     def _is_brand(term):
         t = str(term).lower()
         return any(tok in t for tok in brand_tokens)
@@ -2454,6 +2479,15 @@ def score_targeting_keywords(data):
         # a false positive over 90 days. Only 3+ conversions earns the confident framing.
         _proven = [t for t in _sorted_conv if (t.get("conversions", 0) or 0) >= 3]
         _early = [t for t in _sorted_conv if (t.get("conversions", 0) or 0) < 3]
+        # Mark's SAIC note (16 Jun 2026): converting terms can include the client's own brand,
+        # or a manufacturer/supplier they resell, already converting inside a NON-brand campaign
+        # (e.g. 'dynabrade ...' for a Dynabrade reseller). The API cannot reliably tell a resold
+        # brand name from genuine new demand, so we caveat rather than overclaim a "new demand"
+        # win - those belong in brand/non-brand separation, not blanket keyword adds.
+        _brand_caveat = (" Before adding any of these, check each one: some may be your own brand, or "
+                         "a manufacturer or supplier you resell, already converting inside a non-brand "
+                         "campaign. Those are better handled by a dedicated brand campaign (with the brand "
+                         "name excluded as a negative elsewhere) than counted as new non-brand demand.")
         if _proven:
             eg_text = " For example " + ", ".join(_ck_eg(t) for t in _proven[:3]) + "."
             _early_note = (f" A further {len(_early)} term(s) converted only once or twice - "
@@ -2469,7 +2503,7 @@ def score_targeting_keywords(data):
                     f"last 90 days but are NOT added as active keywords.{eg_text} With purchase tracking "
                     "disconnected these counts show interest, not sales - but the terms are still "
                     "keyword candidates: adding the closest fits gives control over bids, ad copy and "
-                    f"landing pages, and they can be judged properly once real orders are tracked.{_early_note}"
+                    f"landing pages, and they can be judged properly once real orders are tracked.{_early_note}{_brand_caveat}"
                 )
             else:
                 sqr_issues.append(
@@ -2478,7 +2512,7 @@ def score_targeting_keywords(data):
                     "loosely (or not at all) rather than controlled directly. Promote these into dedicated keywords "
                     "where search volume supports it - very low-volume terms (under roughly 10 searches a month) "
                     "cannot be added and are better captured by a closely related theme - to gain control over bids, "
-                    f"ad copy and landing pages.{_early_note}{_quality_caveat}"
+                    f"ad copy and landing pages.{_early_note}{_quality_caveat}{_brand_caveat}"
                 )
         else:
             eg_text = " For example " + ", ".join(_ck_eg(t) for t in _sorted_conv[:3]) + "."
@@ -2488,7 +2522,7 @@ def score_targeting_keywords(data):
                 f"signals rather than statistical proof.{eg_text} The pattern matters more than any single "
                 "term: the search query report is producing keyword candidates and nobody is harvesting them. "
                 "Add the closest fits as keywords to test against more data, and make mining the report part "
-                f"of the monthly routine.{_quality_caveat}"
+                f"of the monthly routine.{_quality_caveat}{_brand_caveat}"
             )
         if rag == "green":
             rag = "amber"
@@ -2961,12 +2995,17 @@ def score_bidding_strategy(data):
                 and _ca_mc.get(n, {}).get("status") == "ENABLED"
                 for n, v in _vals_mc.items())
             if _zero_val_mc:
+                # Lead with the RISK, not the destination (Mark's SAIC note): on a manual
+                # account the words 'target ROAS' jar unless it's clear WHY it isn't the move
+                # yet. Switching to value bidding while the purchase tag records £0 orders would
+                # let it optimise from bad data and scale the wrong sales.
                 _ecom_note = (
-                    " For an ecommerce account the destination is VALUE-based bidding (target ROAS)"
-                    f"{_tgt_txt} - but the revenue signal must be trustworthy first. Fix the £0-value "
-                    "purchase tag, let a clean period record, then trial target ROAS through a campaign "
-                    "experiment (a controlled A/B test) rather than a hard switch, so the move is judged "
-                    "on real data."
+                    " The eventual destination is VALUE-based bidding (target ROAS)"
+                    f"{_tgt_txt}, but the revenue signal must be trustworthy first: move to it while the "
+                    "purchase tag records £0 orders and bidding would optimise from bad data and scale the "
+                    "wrong sales. Fix the £0-value purchase tag, let a clean period record, then trial target "
+                    "ROAS through a campaign experiment (a controlled A/B test) rather than a hard switch, so "
+                    "the move is judged on real data."
                 )
             else:
                 _ecom_note = (
