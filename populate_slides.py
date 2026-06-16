@@ -20,6 +20,12 @@ from fetch_logo import fetch_logo_bytes
 
 TEMPLATE_PRESENTATION_ID = "14fI3Vh_W06-ZoBo1UfTf64aOxoZD1Mp_TcqtT_JAJFE"
 
+# Shared Drive folder every finished audit lands in, so the admin team (Lee) can
+# see decks without them sitting in one person's personal My Drive (Dan, 16 Jun
+# 2026). The Google account the tool signs in as MUST have edit access to this
+# folder, or the copy below fails. Set to "" to fall back to My Drive root.
+OUTPUT_FOLDER_ID = "1ydZ139eIIkwwSM4ekyWs6_e579CEzSYf"
+
 CREDENTIALS_FILE = os.path.expanduser("~/Desktop/ppc-audit-tool/credentials.json")
 TOKEN_FILE        = os.path.expanduser("~/Desktop/ppc-audit-tool/token.json")
 NARRATIVE_FILE    = os.path.expanduser("~/Desktop/ppc-audit-tool/narrative_output.json")
@@ -355,10 +361,29 @@ def main():
     _now = datetime.now()
     deck_title = f"PPC Team  -  {client_name} - {_now:%B} - {_now.year}"
     print(f"Creating copy of template: '{deck_title}'...")
-    copied = drive_service.files().copy(
-        fileId=TEMPLATE_PRESENTATION_ID,
-        body={"name": deck_title},
-    ).execute()
+    copy_body = {"name": deck_title}
+    if OUTPUT_FOLDER_ID:
+        copy_body["parents"] = [OUTPUT_FOLDER_ID]
+    try:
+        copied = drive_service.files().copy(
+            fileId=TEMPLATE_PRESENTATION_ID,
+            body=copy_body,
+            supportsAllDrives=True,
+        ).execute()
+    except Exception as e:
+        # If the sign-in account can't write to the shared folder, don't leave Lee
+        # without a deck - fall back to My Drive root (the old behaviour) and shout
+        # about it so the access can be fixed.
+        if OUTPUT_FOLDER_ID:
+            print(f"  ⚠️  Could not create deck in shared folder ({e}). "
+                  f"Falling back to My Drive root - check this account has edit "
+                  f"access to folder {OUTPUT_FOLDER_ID}.")
+            copied = drive_service.files().copy(
+                fileId=TEMPLATE_PRESENTATION_ID,
+                body={"name": deck_title},
+            ).execute()
+        else:
+            raise
     new_id = copied["id"]
     print(f"New deck created (ID: {new_id})")
 
