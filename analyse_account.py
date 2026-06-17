@@ -3118,25 +3118,34 @@ def score_bidding_strategy(data):
         efficient_paused.sort(key=lambda p: (p.get("real_cpa") or p.get("cpa") or 1e9))
         descs = []
         # Vocabulary follows the business: an ecommerce account's conversions are orders,
-        # not leads/enquiries (Gastronomica review, 11 June 2026).
+        # not leads/enquiries (Gastronomica review, 11 June 2026). Name the unit plainly,
+        # drop the vague "genuine"/"real" label from client copy, and state the day each
+        # campaign was switched off (Dan, 17 Jun 2026, Hampton).
         _is_ecom_pw = detect_account_type(data) == "ecommerce"
-        _u1 = "order" if _is_ecom_pw else "genuine lead"
-        _up = "orders" if _is_ecom_pw else "real enquiries"
+        _up = "orders" if _is_ecom_pw else "enquiries"
+        from datetime import datetime as _dt_pw
         for p in efficient_paused[:3]:
             rc, g, gp = p.get("real_cpa"), p.get("genuine_conv"), p.get("genuine_pct")
+            _off = ""
+            if p.get("last_active"):
+                try:
+                    _dd = _dt_pw.strptime(p["last_active"], "%Y-%m-%d")
+                    _off = f", switched off {_dd.day} {_dd.strftime('%B')}"
+                except Exception:
+                    _off = ""
             if rc and g:
-                d = f"the '{p['name']}' campaign (£{rc:.0f} per {_u1} from {int(round(g))} {_up}"
+                d = f"the '{p['name']}' campaign ({int(round(g))} {_up} at £{rc:.0f} each{_off}"
                 if gp is not None and gp < 70:
-                    d += (f"; note only {gp:.0f}% of its tracked conversions were genuine, so its "
+                    d += (f"; only {gp:.0f}% of its tracked conversions were genuine, so its "
                           f"headline CPA of £{p.get('cpa', 0):.0f} flatters it")
                 d += ")"
             else:
-                d = f"the '{p['name']}' campaign (historic CPA £{p.get('cpa', 0):,.0f}, {int(round(p.get('conversions', 0)))} conv)"
+                d = f"the '{p['name']}' campaign (historic CPA £{p.get('cpa', 0):,.0f}, {int(round(p.get('conversions', 0)))} conv{_off})"
             descs.append(d)
         names = ", ".join(descs)
 
         _have_quality = [p for p in efficient_paused[:3] if p.get("genuine_pct") is not None]
-        _genuine_what = ("purchases" if _is_ecom_pw else "genuine leads (form fills, calls and contacts)")
+        _genuine_what = ("purchases" if _is_ecom_pw else "form fills, calls and contacts")
         if _have_quality and all((p.get("genuine_pct") or 0) >= 70 for p in _have_quality):
             verify = (f" We checked the conversion quality: these were {_genuine_what}, "
                       "not page views or engagement actions - so this is real efficient activity "
@@ -3144,7 +3153,7 @@ def score_bidding_strategy(data):
         else:
             verify = (" Worth confirming the conversion quality before reactivating - some of the apparent "
                       "efficiency leans on low-value actions (page views, engagement) rather than "
-                      + ("real orders." if _is_ecom_pw else "genuine enquiries."))
+                      + ("actual orders." if _is_ecom_pw else "actual enquiries."))
 
         # If the conversion setup shows possible double-counting, those "cheap" historic CPAs
         # may be ~half the true cost - caveat it rather than presenting them at face value.
@@ -3155,13 +3164,21 @@ def score_bidding_strategy(data):
                               if ca.get("category") in {"PHONE_CALL_LEAD", "CONTACT", "GET_DIRECTIONS", "CALL"})
         from collections import Counter as _C
         _dupcat = any(n >= 2 for n in _C(ca.get("category") for ca in _primary).values())
-        if _dupcat or _call_cluster_n >= 2:
+        # Volume-concentration guard (Dan, 17 Jun 2026, Hampton): multiple primary call/contact
+        # actions only actually DOUBLE-count when their recorded volumes overlap. When one action
+        # carries the vast majority of conversions, the others are negligible and cannot be
+        # inflating the count - so do NOT hedge the historic CPAs (Hampton: 98% from one action).
+        # Only suppress when we can PROVE concentration from data; absent it, hedge (cautious).
+        _act_totals = sorted((sum(m.values()) for m in (data.get("conversion_volume_by_month") or {}).values()
+                              if m), reverse=True)
+        _concentrated = bool(_act_totals) and sum(_act_totals) > 0 and _act_totals[0] / sum(_act_totals) >= 0.75
+        if (_dupcat or _call_cluster_n >= 2) and not _concentrated:
             _dup_caveat = (" Important: the conversion setup shows possible double-counting, so these historic "
                            "CPAs may be roughly half the true cost - verify against the back-end enquiry count "
                            "before trusting them.")
         issues.append(
             f"{len(efficient_paused)} paused campaign(s) historically delivered "
-            f"{'orders' if _is_ecom_pw else 'genuine leads'} below the "
+            f"{'orders' if _is_ecom_pw else 'enquiries'} below the "
             f"account's current £{cpa:.0f} CPA: {names}.{verify}{_dup_caveat} Worth reviewing whether "
             f"{'product profitability' if _is_ecom_pw else 'lead quality'}, not cost, drove the pause "
             "before deciding on reactivation."

@@ -1031,6 +1031,7 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
             campaign.id,
             campaign.name,
             campaign.advertising_channel_type,
+            segments.date,
             metrics.cost_micros,
             metrics.conversions
         FROM campaign
@@ -1039,7 +1040,9 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
     """
     rows = run_query(client, cid, gaql)
 
-    # Rows are segmented by date  -  aggregate per campaign id.
+    # Rows are segmented by date  -  aggregate per campaign id, and capture the LAST day each
+    # campaign actually spent (its pause point), so the deck can say "switched off on 13 May"
+    # and the analysis can anchor to real activity rather than dark days (Dan, 17 Jun 2026).
     agg = {}
     for row in rows:
         c = row.campaign
@@ -1049,9 +1052,14 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
             agg[key] = {"id": key, "name": c.name,
                         "type": c.advertising_channel_type.name,
                         "spend": 0.0, "conversions": 0.0,
-                        "genuine_conv": 0.0, "lowval_conv": 0.0}
+                        "genuine_conv": 0.0, "lowval_conv": 0.0,
+                        "last_active": None}
         agg[key]["spend"] += m.cost_micros / 1_000_000
         agg[key]["conversions"] += m.conversions
+        if m.cost_micros > 0:
+            d = row.segments.date
+            if agg[key]["last_active"] is None or d > agg[key]["last_active"]:
+                agg[key]["last_active"] = d
 
     # Second query: PRIMARY conversions (metrics.conversions  -  what drives the headline
     # CPA) split by category, so we can tell whether a tempting CPA is built on genuine
@@ -1452,12 +1460,44 @@ def get_account_summary(client, cid):
 
 
 def get_performance_summary(client, cid):
-    """Fetch account-level metrics for last 30 days and last 12 months, including SIS."""
+    """Fetch account-level metrics for last 30 days and last 12 months, including SIS.
+
+    Pause-aware (Dan, 17 Jun 2026): if the account has had no spend in the last 7 days it is
+    treated as PAUSED, and the "recent 30 days" window is anchored to the LAST ACTIVE DAY rather
+    than today - otherwise a switched-off account reads as "performance collapsed" when the real
+    story is that it is simply off. The 12-month window stays today-anchored for context. The
+    returned dict carries is_paused / last_active / days_dark so the narrative can caveat plainly.
+    """
     from datetime import datetime, timedelta
     today = datetime.today()
-    date_30d_start  = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     date_12m_start  = (today - timedelta(days=365)).strftime("%Y-%m-%d")
     date_today      = today.strftime("%Y-%m-%d")
+
+    # Account last-active day = most recent date with any spend across non-removed campaigns.
+    is_paused, days_dark, last_active = False, 0, None
+    try:
+        _daily = run_query(client, cid, f"""
+            SELECT segments.date, metrics.cost_micros FROM campaign
+            WHERE campaign.status != 'REMOVED'
+              AND segments.date BETWEEN '{date_12m_start}' AND '{date_today}'
+        """)
+        _spend_dates = [r.segments.date for r in _daily if r.metrics.cost_micros > 0]
+        if _spend_dates:
+            last_active = max(_spend_dates)
+            _la = datetime.strptime(last_active, "%Y-%m-%d")
+            days_dark = (today.date() - _la.date()).days
+            is_paused = days_dark >= 7          # no spend in the last 7 days -> treat as paused
+    except Exception as e:
+        print(f"  ⚠ Pause-detection query failed (non-fatal): {e}")
+
+    if is_paused and last_active:
+        # Anchor the recent window to the last active day, not today.
+        window_end     = last_active
+        date_30d_start = (_la - timedelta(days=30)).strftime("%Y-%m-%d")
+    else:
+        window_end     = date_today
+        date_30d_start = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    date_today = window_end          # everything below uses the (possibly anchored) window end
 
     def _totals(rows):
         t = {"spend": 0, "clicks": 0, "conversions": 0, "impressions": 0,
@@ -1578,6 +1618,12 @@ def get_performance_summary(client, cid):
         "revenue_12m": f"£{int(round(t12['value'])):,}" if t12["value"] else "N/A",
         "roas_30d":    f"{t30['roas']:.1f}x" if t30["roas"] else "N/A",
         "roas_12m":    f"{t12['roas']:.1f}x" if t12["roas"] else "N/A",
+        # Pause state (Dan, 17 Jun 2026): drives the "ads paused since X" caveat and the
+        # last-active-anchored window. is_paused = no spend in the last 7 days.
+        "is_paused":   is_paused,
+        "last_active": last_active,            # 'YYYY-MM-DD' of the last day with spend, or None
+        "days_dark":   days_dark,
+        "window_end":  window_end,             # the (possibly anchored) end of the recent window
         # Raw numbers for GPT commentary
         "_raw": {"t30": t30, "t12": t12},
     }

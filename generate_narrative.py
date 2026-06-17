@@ -811,6 +811,14 @@ _LINT_SUBS = [
     (re.compile(r"\bnobody steering\b", re.I), "nobody making data-backed optimisations"),
     (re.compile(r"\bsteering (?:the )?budget\b", re.I), "optimising the budget"),  # verb-gerund + object
     (re.compile(r"\bbudget steering\b", re.I), "budget optimisation"),             # noun phrase
+    # No invented uplift percentages (Dan, 17 Jun 2026, Hampton). GPT kept writing "image
+    # extensions lift CTR by 10-20%" - Google publishes no such figure, so it is false
+    # precision. Keep asset/format benefits QUALITATIVE: strip the unsourced % quantifier
+    # off any CTR/click-through/CVR uplift claim, leaving the (true) qualitative benefit.
+    (re.compile(r"\b(lift|lifts|lifting|boost|boosts|boosting|raise|raises|raising|improve|improves|improving|increase|increases|increasing)\s+(CTR|click-?through(?:\s+rate)?|clicks|conversion rate|CVR)\s+by\s+\d+(?:\s*[-–]\s*\d+)?\s*%",
+     re.I), r"\1 \2"),                                          # "lifts CTR by 10-20%" -> "lifts CTR"
+    (re.compile(r"\b\d+(?:\s*[-–]\s*\d+)?\s*%\s+(CTR|click-?through(?:\s+rate)?|CVR|conversion rate)\s+(gain|gains|uplift|uplifts|increase|increases|improvement|improvements|boost|boosts)\b",
+     re.I), r"\1 \2"),                                          # "10-20% CTR gains" -> "CTR gains"
 ]
 _LINT_SUBS_ECOM = [
     (re.compile(r"lead demand", re.I), "shopper demand"),            # ecommerce vocabulary
@@ -820,6 +828,9 @@ _LINT_WARN = [
     (re.compile(r"\b\d{2,}(?:-\d{2,})?\+? conversions(?:/| per )month\b", re.I),
      "hard conversion-volume minimum stated"),
     (re.compile(r"£\d+\.\d{2}\b"), "pence shown in a £ figure (house style: whole pounds)"),
+    # Catch any uplift % near CTR/CVR the subs above did not rephrase (novel wording).
+    (re.compile(r"\b(lift|boost|raise|improv|increas|uplift|gain)\w*\b[^.]{0,40}?\b(CTR|click-?through|CVR|conversion rate)\b[^.]{0,20}?\d+\s*%", re.I),
+     "unsourced uplift % near CTR/CVR - keep asset benefits qualitative (Dan, 17 Jun)"),
 ]
 
 
@@ -996,7 +1007,25 @@ Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m
     # would be confidently wrong. Only allow the "100% minus SIS" framing when Search is live.
     def _sis_blank(v):
         return v in (None, "", "N/A", "n/a", "0%", "--")
-    _search_live = not _sis_blank(perf.get("sis_30d"))
+    # Never frame SIS as eligible searches "currently missed" when the account is paused - even
+    # if the (last-active-anchored) window caught a few days of Search activity (Dan, 17 Jun 2026).
+    _search_live = (not perf.get("is_paused")) and not _sis_blank(perf.get("sis_30d"))
+
+    # Pause caveat (Dan, 17 Jun 2026): if the account is paused, the recent figures are the LAST
+    # ACTIVE window, not "today's performance" - lead with that so it never reads as a collapse.
+    _pause_instr = ""
+    if perf.get("is_paused") and perf.get("last_active"):
+        from datetime import datetime as _dt
+        try:
+            _d = _dt.strptime(perf["last_active"], "%Y-%m-%d")
+            _la_h = f"{_d.day} {_d.strftime('%B %Y')}"
+        except Exception:
+            _la_h = perf["last_active"]
+        _pause_instr = (f"\nCRITICAL CONTEXT - the account is PAUSED: it last spent on {_la_h} and has had no "
+                        f"live activity since. OPEN by stating plainly that ads have been paused since {_la_h}, "
+                        f"and that the recent figures are the last active window, NOT current performance. Do NOT "
+                        f"call this a 'collapse' or 'decline' - it is switched off. Frame the recent-vs-12-month "
+                        f"numbers as how it ran when last active.")
 
     client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
 
@@ -1004,7 +1033,7 @@ Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m
 You are writing 2 - 3 sentences for a Google Ads audit slide called "Performance Summary".
 The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
-Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{_ecom_instr}{conversion_caveat}
+Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{_pause_instr}{_ecom_instr}{conversion_caveat}
 If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
 {('When you note Search impression share (SIS) is low, QUANTIFY what that means: state the approximate share of eligible searches being missed (roughly 100% minus the SIS%, e.g. SIS of 40% means about 60% of eligible searches are being missed) - do not leave "low" vague.' if _search_live else 'IMPORTANT - Search is NOT currently serving (30-day Search impression share is not available, which means the Search campaigns are paused or stopped). Do NOT state any percentage of eligible searches "currently being missed", and do NOT present the 12-month SIS as a live problem. If you mention the 12-month SIS at all, make explicit it is a historical figure from when Search last ran. Lead the story with the collapse in spend and conversions instead.')}
 {("End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened." if not _is_ecom else "")}
