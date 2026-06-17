@@ -359,7 +359,36 @@ def main():
     # Naming convention (Dan, 14 Jun 2026): "PPC Team" static, then the client name, the
     # month and the year of generation - e.g. "PPC Team  -  The Beatles Story - June - 2026".
     _now = datetime.now()
-    deck_title = f"PPC Team  -  {client_name} - {_now:%B} - {_now.year}"
+    _base = f"PPC Team  -  {client_name} - {_now:%B} - {_now.year}"
+
+    # Version prefix (Dan, 17 Jun 2026): re-renders of the same client/month otherwise all land
+    # in the folder with an IDENTICAL name, so Lee can't tell which deck is newest. Look at the
+    # decks already there for this client+month, take the highest version present and bump it:
+    # first render = no prefix, then "V2 - ", "V3 - "... Robust to Dan deleting stale ones
+    # (it reads the max version that survives, not just a count).
+    import re as _re
+    def _next_version():
+        try:
+            safe = client_name.replace("'", "\\'")
+            q = (f"name contains '{safe}' and name contains '{_now:%B}' "
+                 f"and mimeType = 'application/vnd.google-apps.presentation' "
+                 f"and trashed = false")
+            if OUTPUT_FOLDER_ID:
+                q += f" and '{OUTPUT_FOLDER_ID}' in parents"
+            res = drive_service.files().list(
+                q=q, fields="files(name)", supportsAllDrives=True,
+                includeItemsFromAllDrives=True, pageSize=100).execute()
+            highest = 0
+            for f in res.get("files", []):
+                m = _re.match(r"\s*V(\d+)\s*-\s*", f.get("name", ""))
+                v = int(m.group(1)) if m else 1   # un-prefixed deck counts as V1
+                highest = max(highest, v)
+            return highest + 1
+        except Exception as e:
+            print(f"  (version check skipped: {e})")
+            return 1
+    _ver = _next_version()
+    deck_title = _base if _ver == 1 else f"V{_ver} - {_base}"
     print(f"Creating copy of template: '{deck_title}'...")
     copy_body = {"name": deck_title}
     if OUTPUT_FOLDER_ID:

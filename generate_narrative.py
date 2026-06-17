@@ -991,6 +991,13 @@ Last 30 days:  Spend {perf.get('spend_30d','?')} | Clicks {perf.get('clicks_30d'
 Last 12 months: Spend {perf.get('spend_12m','?')} | Clicks {perf.get('clicks_12m','?')} | Conversions {perf.get('convs_12m','?')} | CPA {perf.get('cpa_12m','?')} | SIS {perf.get('sis_12m','?')}{_rev_line12}{_share_line(t12)}{_aov_line}
 """.strip()
 
+    # SIS guard: a 30-day SIS of N/A (or 0) means Search is not currently serving (usually
+    # paused). Framing the historical 12-month SIS as eligible searches "currently missed"
+    # would be confidently wrong. Only allow the "100% minus SIS" framing when Search is live.
+    def _sis_blank(v):
+        return v in (None, "", "N/A", "n/a", "0%", "--")
+    _search_live = not _sis_blank(perf.get("sis_30d"))
+
     client_context = f"\nClient context (from questionnaire):\n{raw_questionnaire[:500]}" if raw_questionnaire.strip() else ""
 
     prompt = f"""
@@ -999,7 +1006,7 @@ The slide shows last 30 days vs last 12 months metrics side by side.
 Write a plain-English interpretation: is performance trending up, down, or mixed? What does it mean for the business?
 Be specific  -  reference the actual numbers. Flag anything that looks concerning (rising CPA, falling conversions, low SIS).{_ecom_instr}{conversion_caveat}
 If absolute-top or top-of-page impression share is provided and has fallen versus 12 months, note that the account may be losing visibility on its best, most relevant searches even while cheaper, lower-intent traffic grows.
-When you note Search impression share (SIS) is low, QUANTIFY what that means: state the approximate share of eligible searches being missed (roughly 100% minus the SIS%, e.g. SIS of 40% means about 60% of eligible searches are being missed) - do not leave "low" vague.
+{('When you note Search impression share (SIS) is low, QUANTIFY what that means: state the approximate share of eligible searches being missed (roughly 100% minus the SIS%, e.g. SIS of 40% means about 60% of eligible searches are being missed) - do not leave "low" vague.' if _search_live else 'IMPORTANT - Search is NOT currently serving (30-day Search impression share is not available, which means the Search campaigns are paused or stopped). Do NOT state any percentage of eligible searches "currently being missed", and do NOT present the 12-month SIS as a live problem. If you mention the 12-month SIS at all, make explicit it is a historical figure from when Search last ran. Lead the story with the collapse in spend and conversions instead.')}
 {("End with one short caveat that, because offline conversion import (OCI) is not set up, these figures only show conversion VOLUME and cost - they cannot show whether lead QUALITY has improved or worsened." if not _is_ecom else "")}
 Use British English. Be direct, not alarmist. You may write up to 4 sentences if needed to include the closing caveat.
 HARD LIMIT: 90 words total. This sits in a small slide text box - every sentence must earn its place.
