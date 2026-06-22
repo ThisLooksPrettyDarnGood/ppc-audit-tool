@@ -1110,6 +1110,70 @@ def get_rsa_ad_strength(client, cid):
     }
 
 
+def get_ad_copy_quality(client, cid):
+    """Responsive Search Ad COPY quality: casing consistency and use of the character limits.
+
+    Rory's Hampton review (22 Jun 2026) flagged ad copy that mixed capitalisation styles and did
+    not use the available character space. Ad Strength (get_rsa_ad_strength) does not capture
+    either, so we read the actual headline/description text. Window-INDEPENDENT and not gated on
+    ENABLED, so it works on a paused account. We return aggregate stats only (no copy stored).
+
+    Headline limit is 30 chars, description 90. Returns:
+        {"rsa_count", "headline_count", "desc_count",
+         "mean_headline_len", "mean_desc_len",
+         "lower_initial", "upper_initial", "all_caps",   # headline casing mix
+         "casing_inconsistent": bool}
+    """
+    gaql = """
+        SELECT ad_group_ad.ad.responsive_search_ad.headlines,
+               ad_group_ad.ad.responsive_search_ad.descriptions
+        FROM ad_group_ad
+        WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+          AND ad_group_ad.status != 'REMOVED'
+          AND campaign.status != 'REMOVED'
+    """
+    heads, descs = [], []
+    rsa_count = 0
+    for row in run_query(client, cid, gaql):
+        rsa_count += 1
+        rsa = row.ad_group_ad.ad.responsive_search_ad
+        heads += [a.text for a in rsa.headlines if a.text]
+        descs += [a.text for a in rsa.descriptions if a.text]
+
+    def _first_alpha(s):
+        for ch in s:
+            if ch.isalpha():
+                return ch
+        return ""
+
+    lower_initial = upper_initial = all_caps = 0
+    for h in heads:
+        fa = _first_alpha(h)
+        if not fa:
+            continue
+        letters = [c for c in h if c.isalpha()]
+        if len(letters) >= 3 and h.upper() == h:
+            all_caps += 1
+        elif fa.islower():
+            lower_initial += 1
+        else:
+            upper_initial += 1
+
+    out = {
+        "rsa_count": rsa_count,
+        "headline_count": len(heads),
+        "desc_count": len(descs),
+        "mean_headline_len": round(sum(len(h) for h in heads) / len(heads), 1) if heads else 0,
+        "mean_desc_len": round(sum(len(d) for d in descs) / len(descs), 1) if descs else 0,
+        "lower_initial": lower_initial,
+        "upper_initial": upper_initial,
+        "all_caps": all_caps,
+        # A genuine mix of lowercase-start AND capital-start headlines = inconsistent casing.
+        "casing_inconsistent": lower_initial >= 3 and (upper_initial + all_caps) >= 3,
+    }
+    return out
+
+
 def get_paused_campaign_history(client, cid, lookback_days=365):
     """
     Paused campaigns and how they performed over a longer window (default 12 months),
@@ -2112,6 +2176,13 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    (RSA ad strength query failed: {e})")
         rsa_ad_strength = None
 
+    print("  → Ad copy quality...")
+    try:
+        ad_copy_quality = get_ad_copy_quality(client, cid)
+    except Exception as e:
+        print(f"    (ad copy quality query failed: {e})")
+        ad_copy_quality = None
+
     print("  → Paused campaign history (12 months)...")
     try:
         paused_campaign_history = get_paused_campaign_history(client, cid)
@@ -2198,6 +2269,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "brand_leakage": brand_leakage,
         "account_name": account_name,
         "rsa_ad_strength": rsa_ad_strength,
+        "ad_copy_quality": ad_copy_quality,
         "paused_campaign_history": paused_campaign_history,
         "shopping_history_alltime": shopping_history_alltime,
         "ad_destination_domains": ad_destination_domains,

@@ -370,7 +370,8 @@ _ISSUE_SIGNATURES = [
     ("reach only a small slice of the demand that is already out there", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank (SIS/TAM framing)
     ("ads cannot serve",                           92, "red",       "Ads & Assets"),       # broken pages on a large share = not fit to run
     ("disapproved and silently not serving",       78, "amber_red", "Ads & Assets"),       # disapproved ads - dark ad groups
-    ("Health personalised-advertising policy",     48, "amber",     "Ads & Assets"),       # PMax sensitive-category limit
+    ("Health personalised-advertising policy",     60, "amber",     "Ads & Assets"),       # PMax sensitive-category limit - a main slide (Rory headlined it)
+    ("Ad copy needs tidying up",                   50, "amber",     "Ads & Assets"),       # casing + character-limit use -> Observations
     ("approved but LIMITED by policy",             38, "amber",     "Ads & Assets"),       # policy-limited -> Observations
     ("No changes have been made to the account",   67, "amber",     "Account Structure"),  # unmanaged account (neglect)
     ("ran between midnight and 6am",               55, "amber",     "Budget & Coverage"),  # overnight waste (lead gen)
@@ -3366,12 +3367,20 @@ def score_bidding_strategy(data):
             _dup_caveat = (" Important: the conversion setup shows possible double-counting, so these historic "
                            "CPAs may be roughly half the true cost - verify against the back-end enquiry count "
                            "before trusting them.")
+        # Reactivation stance follows how much we trust the data (Rory's Hampton review, 22 Jun
+        # 2026: don't just switch them back on - rebuild and verify). When the historic numbers
+        # rest on an unverifiable offline upload, lead with rebuild-and-verify, not reactivation.
+        if _offline_dom:
+            _tail = (f" Rather than simply switching these back on, rebuild with reliable conversion "
+                     f"tracking first and check the historic {'sales' if _is_ecom_pw else 'lead'} "
+                     "quality against the client's own records - the old figures are not proof on their own.")
+        else:
+            _tail = (f" Worth reviewing whether {'product profitability' if _is_ecom_pw else 'lead quality'}, "
+                     "not cost, drove the pause before deciding on reactivation.")
         issues.append(
             f"{len(efficient_paused)} paused campaign(s) historically delivered "
             f"{'orders' if _is_ecom_pw else 'enquiries'} below the "
-            f"account's current £{cpa:.0f} CPA: {names}.{verify}{_dup_caveat} Worth reviewing whether "
-            f"{'product profitability' if _is_ecom_pw else 'lead quality'}, not cost, drove the pause "
-            "before deciding on reactivation."
+            f"account's current £{cpa:.0f} CPA: {names}.{verify}{_dup_caveat}{_tail}"
         )
         if rag == "green":
             rag = "amber"
@@ -3547,6 +3556,41 @@ def score_efficiency(data):
         )
         if rag == "green":
             rag = "amber"
+
+    # ── Ad copy quality (Rory's Hampton review, 22 Jun 2026): inconsistent capitalisation and not
+    # using the available character space. Ad Strength does not capture either, so we read the copy.
+    # Trigger on the objective signal (a genuine mix of lower- and capital-start headlines) so it
+    # does not fire on every account with slightly short descriptions, then add the character-use
+    # detail. Sits at observation level - a polish item, like Rory's "Other Issues".
+    _adc = data.get("ad_copy_quality") or {}
+    if _adc:
+        _hc = _adc.get("headline_count", 0)
+        _low = _adc.get("lower_initial", 0)
+        _mh, _md = _adc.get("mean_headline_len", 0), _adc.get("mean_desc_len", 0)
+        # Casing: only call it "inconsistent" when a meaningful share of headlines start lower case
+        # (a couple of stylistic ones isn't a fault). Character use: headlines/descriptions sitting
+        # well under their 30/90 limits is the clear, objective "not using the space" signal.
+        _casing_bad = _low >= 5 and _hc and (_low / _hc) >= 0.03
+        _hl_under = bool(_mh and _mh < 20)
+        _dl_under = bool(_md and _md < 60)
+        _adc_bits = []
+        if _casing_bad:
+            _adc_bits.append("the headlines mix capitalisation styles (some Title Case, some all lower "
+                             "case), which reads inconsistently")
+        elif _low >= 3:
+            _adc_bits.append("a few headlines drop into lower case while the rest are Title Case")
+        if _hl_under:
+            _adc_bits.append(f"headlines average only {_mh:.0f} of the 30 characters available")
+        if _dl_under:
+            _adc_bits.append(f"descriptions average just {_md:.0f} of the 90 characters available")
+        if _adc_bits and (_casing_bad or _hl_under or _dl_under):
+            issues.append(
+                "Ad copy needs tidying up: " + "; ".join(_adc_bits) + ". Fuller, consistent copy reads "
+                "more professionally and takes up more space on the results page. Standardise the "
+                "capitalisation and expand the headlines and descriptions to use the limits properly."
+            )
+            if rag == "green":
+                rag = "amber"
 
     # ── Overnight waste (lead gen): spend running midnight-6am with zero conversions
     # and no schedule trimming it. Ecommerce converts around the clock, so this check
