@@ -368,6 +368,7 @@ _ISSUE_SIGNATURES = [
     ("lost impressions to budget",                 66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("reach only a small slice of the demand that is already out there", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank (SIS/TAM framing)
     ("disapproved and silently not serving",       78, "amber_red", "Ads & Assets"),       # disapproved ads - dark ad groups
+    ("Health personalised-advertising policy",     48, "amber",     "Ads & Assets"),       # PMax sensitive-category limit
     ("approved but LIMITED by policy",             38, "amber",     "Ads & Assets"),       # policy-limited -> Observations
     ("No changes have been made to the account",   67, "amber",     "Account Structure"),  # unmanaged account (neglect)
     ("ran between midnight and 6am",               55, "amber",     "Budget & Coverage"),  # overnight waste (lead gen)
@@ -2737,17 +2738,32 @@ def score_targeting_keywords(data):
         if rag == "green":
             rag = "amber"
 
-    # PMax audience signals check
-    if has_pmax:
-        pmax_enabled = [
-            c for c in campaigns
-            if c.get("type") == "PERFORMANCE_MAX" and c.get("status") == "ENABLED"
-        ]
-        if pmax_enabled and len(audience_signals) == 0:
+    # PMax audience signals check.
+    # NOTE (Rory's Hampton review, 22 Jun 2026): this block had two bugs. (1) `audience_signals`
+    # is the WRAPPER dict {audience_signals: [...], has_pmax, ...}, not the list - so len() was
+    # always ~4 and "no signals" never fired. (2) it gated on an ENABLED PMax campaign, so a
+    # paused PMax (a setup-quality question that still matters in an audit) was skipped. And it
+    # only caught ZERO signals, missing the common real case: an asset group with dozens of empty
+    # signal slots and only one populated audience (Hampton: 1 real of 40). Read the list, count
+    # POPULATED signals, and flag when they are sparse - paused or live. (3) `has_pmax` here comes
+    # from campaign_types_active, which only lists ACTIVE types, so a paused PMax was invisible -
+    # gate instead on the asset group the audience-signals query actually found.
+    _aud_wrap = data.get("audience_signals") or {}
+    if isinstance(_aud_wrap, dict) and _aud_wrap.get("pmax_asset_groups"):
+        _sig_list = _aud_wrap.get("audience_signals", [])
+        _populated = [a for a in _sig_list if (a or {}).get("audience")]
+        if len(_populated) <= 1:
+            if len(_populated) == 0:
+                _sig_txt = ("Performance Max is running without any audience signals. ")
+            else:
+                _sig_txt = ("Performance Max has only one audience signal populated across its asset "
+                            "group(s). ")
             issues.append(
-                "Performance Max campaign is running without audience signals. "
-                "Audience signals help Google identify your ideal customer profile  -  "
-                "without them PMax targets very broadly and learning is slower."
+                _sig_txt +
+                "Audience signals tell Google who your ideal customer looks like  -  thin or missing "
+                "signals leave PMax to target very broadly and learn slowly. Add relevant signals "
+                "(your customer-match lists, high-intent search themes and converting audiences) to "
+                "steer it towards the right people faster."
             )
             if rag == "green":
                 rag = "amber"
@@ -3144,9 +3160,41 @@ def score_bidding_strategy(data):
             descs.append(d)
         names = ", ".join(descs)
 
+        # Offline-import reliability guard (Rory's Hampton review, 22 Jun 2026): the genuine-vs-
+        # page-view quality check passes any LEAD-category action, so it rated Hampton 100% genuine
+        # - but 98% of those historic enquiries came through an OFFLINE-IMPORT action ('Phone Call
+        # Or Web Form', type UPLOAD_CLICKS) that is only as reliable as the client's manual upload
+        # process and had stopped feeding months earlier. That makes the headline CPAs unverifiable
+        # from the account, so we must HEDGE rather than call it "real efficient activity switched
+        # off". Detect when the dominant historic conversion action is an offline import.
+        _OCI_TYPES = {"UPLOAD_CLICKS", "UPLOAD_CALLS"}
+        _type_by_name = {ca.get("name"): ca.get("type")
+                         for ca in (data.get("conversion_actions") or [])}
+        _by_action = {n: (v or {}).get("conversions_12m", 0) or 0
+                      for n, v in (data.get("conversion_value_by_action") or {}).items()}
+        _tot_action = sum(_by_action.values())
+        _offline_dom = None
+        if _tot_action > 0:
+            _top_name = max(_by_action, key=_by_action.get)
+            if (_type_by_name.get(_top_name) in _OCI_TYPES
+                    and _by_action[_top_name] / _tot_action >= 0.6):
+                _offline_dom = _top_name
         _have_quality = [p for p in efficient_paused[:3] if p.get("genuine_pct") is not None]
         _genuine_what = ("purchases" if _is_ecom_pw else "form fills, calls and contacts")
-        if _have_quality and all((p.get("genuine_pct") or 0) >= 70 for p in _have_quality):
+        if _offline_dom:
+            _silent = ""
+            _months = sorted((data.get("conversion_volume_by_month") or {}).get(_offline_dom, {}).keys())
+            if _months:
+                try:
+                    _lm = _dt_pw.strptime(_months[-1], "%Y-%m")
+                    _silent = f", and it last recorded anything in {_lm.strftime('%B %Y')}"
+                except Exception:
+                    _silent = ""
+            verify = (f" Read these CPAs with caution: most of these historic {_up} were counted through "
+                      f"an offline import ('{_offline_dom}'){_silent} - a manual upload that is only as "
+                      "reliable as the process behind it and cannot be confirmed from the account itself. "
+                      "Check the figures against the client's own sales records before treating them as proven.")
+        elif _have_quality and all((p.get("genuine_pct") or 0) >= 70 for p in _have_quality):
             verify = (f" We checked the conversion quality: these were {_genuine_what}, "
                       "not page views or engagement actions - so this is real efficient activity "
                       "that was switched off, not vanity metrics.")
@@ -3293,23 +3341,59 @@ def score_efficiency(data):
     # ── Disapproved / policy-limited ads: a disapproved ad silently stops serving,
     # and its ad group can sit dark for months. The first thing every expert checks.
     _pol = data.get("ad_policy_status") or {}
+    # Friendly names for the raw policy_topic_entries Google returns (Rory's Hampton review,
+    # 22 Jun 2026: name the REASON, especially broken landing pages, not just "disapproved").
+    _TOPIC_LABEL = {
+        "DESTINATION_NOT_WORKING": "broken landing pages (the page returns an error such as a 404)",
+        "DESTINATION_MISMATCH": "a mismatch between the displayed and actual landing page",
+        "DESTINATION_NOT_CRAWLABLE": "landing pages Google cannot crawl",
+        "RESTRICTED_DRUG_TERMS": "restricted drug or medical terms",
+        "NON_FAMILY_SAFE": "adult or non-family-safe content",
+        "HEALTHCARE_AND_MEDICINES": "healthcare and medicines rules",
+    }
+    def _topic_label(t):
+        return _TOPIC_LABEL.get(t, t.replace("_", " ").lower())
     if _pol.get("disapproved"):
         _bad = _pol["disapproved"]
         _camps = sorted({e["campaign"] for e in _bad})
+        _dtopics = _pol.get("disapproved_topics") or {}
+        _reason = ""
+        if _dtopics:
+            _top = sorted(_dtopics.items(), key=lambda kv: -kv[1])[0]
+            _reason = (f" Most are disapproved for {_topic_label(_top[0])}"
+                       + (" - the ads point at pages that no longer load"
+                          if _top[0] == "DESTINATION_NOT_WORKING" else "") + ".")
         issues.append(
-            f"{len(_bad)} enabled ad(s) are disapproved and silently not serving, in: "
-            f"{', '.join(_camps[:3])}{'...' if len(_camps) > 3 else ''}. A disapproved ad shows "
-            "no error anywhere a client normally looks - the ad group just goes dark. Review the "
-            "policy reason in Ads > Status and fix or replace the ads."
+            f"{len(_bad)} ad(s) are disapproved and silently not serving, in: "
+            f"{', '.join(_camps[:3])}{'...' if len(_camps) > 3 else ''}.{_reason} A disapproved ad shows "
+            "no error anywhere a client normally looks - the ad group just goes dark. Fix the underlying "
+            "issue (for broken pages, restore the URL or add a redirect) and the ads will need re-reviewing "
+            "before they can serve again."
         )
         if rag != "red":
             rag = "amber_red"
     elif _pol.get("limited"):
         issues.append(
-            f"{len(_pol['limited'])} enabled ad(s) are approved but LIMITED by policy, which "
+            f"{len(_pol['limited'])} ad(s) are approved but LIMITED by policy, which "
             "restricts where or how often they can show. Worth reviewing the policy detail - "
             "small wording changes often lift the restriction."
         )
+
+    # Performance Max sensitive-category limit (asset-level only - never on ad_group_ad, so the
+    # ad-policy query above would miss it). HEALTH_IN_PERSONALIZED_ADS = the "Health in personalised
+    # advertising" restriction Rory flagged: a health service cannot use audience personalisation,
+    # so PMax loses Display/Video targeting reach. A category rule, not a fault - frame it that way.
+    _atopics = _pol.get("asset_topics") or {}
+    if "HEALTH_IN_PERSONALIZED_ADS" in _atopics:
+        issues.append(
+            "Performance Max is limited by Google's Health personalised-advertising policy: because "
+            "this is a sensitive (health) category, Google restricts how the Display and Video ads can "
+            "use audience personalisation, so PMax reaches fewer of the right people. It is a category "
+            "rule rather than a fault, but it is a real reason PMax delivers less here - a Search-led "
+            "structure would give you more direct control over who sees the ads."
+        )
+        if rag == "green":
+            rag = "amber"
 
     # ── Overnight waste (lead gen): spend running midnight-6am with zero conversions
     # and no schedule trimming it. Ecommerce converts around the clock, so this check
@@ -3941,14 +4025,23 @@ def score_efficiency(data):
         # for an online-checkout/ticketing business, where most buyers never call - so we
         # never headline a missing CALL extension on an ecommerce account (Dan, 13 Jun 2026:
         # it is 50/50 and depends what the client wants). Hedge it there instead.
-        missing_universal = [labels[t] for t in ("AD_IMAGE", "SITELINK", "CALLOUT", "STRUCTURED_SNIPPET")
+        # Image extensions are the weakest item here and were over-claimed on Hampton (Rory's
+        # review, 22 Jun 2026): the deck headlined "missing image extensions" while the account
+        # was already running image assets inside its PMax asset group - our ad_assets query only
+        # sees Search-ad extensions, not PMax images. When PMax asset groups exist the account
+        # clearly HAS images, so don't list image extensions as a missing high-value type.
+        _has_pmax_images = bool((data.get("audience_signals") or {}).get("pmax_asset_groups"))
+        _img_types = () if _has_pmax_images else ("AD_IMAGE",)
+        missing_universal = [labels[t] for t in (_img_types + ("SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"))
                              if t not in present]
         call_missing = "CALL" not in present
         _call_is_core = call_missing and _acct_type in ("lead_gen", "mixed", "unknown")
         missing_core = ([labels["CALL"]] if _call_is_core else []) + missing_universal
         if missing_core:
-            _booster = ("Call and image extensions in particular" if _call_is_core
-                        else "Image and sitelink extensions in particular")
+            # Name only types that are ACTUALLY missing (don't say "image extensions in
+            # particular" once images are covered by PMax) and keep the benefit qualitative -
+            # no invented uplift % (Dan, 17 Jun; Rory's review, 22 Jun 2026).
+            _booster = "Call extensions in particular" if _call_is_core else f"{missing_core[0].capitalize()} in particular"
             _ecom_call_note = ""
             if _acct_type == "ecommerce" and call_missing:
                 _ecom_call_note = (" Call extensions are absent too, but for an online-booking business "
@@ -3957,7 +4050,7 @@ def score_efficiency(data):
             issues.append(
                 f"Your ads are missing high-value extension types: {', '.join(missing_core)}. Extensions "
                 "make ads bigger and more clickable and feed Ad Rank - all at no extra cost per click. "
-                f"{_booster} tend to lift click-through rate by 10-20%. Add the missing types across your "
+                f"{_booster} can improve click-through. Add the missing types across your "
                 f"campaigns.{_ecom_call_note}"
             )
             if rag == "green":
@@ -3984,6 +4077,12 @@ def build_strengths(data):
     acknowledging strengths before the critique - it's honest and builds trust on the call.
     Returns a short list of plain-English strengths."""
     s = []
+    # A switched-off account has no PRESENT-TENSE strengths we can stand behind: its ads are
+    # not serving, so we cannot verify extension coverage is live/approved, and "tracking is
+    # working" is hollow when nothing is spending (Rory's Hampton review, 22 Jun 2026 - the
+    # deck opened "solid foundations, tracking live, coverage strong" on a fully paused account
+    # whose only live signal was call tracking). Withhold the live-state strengths when paused.
+    _paused = bool((data.get("performance_summary") or {}).get("is_paused"))
     neg = data.get("negative_keyword_count")
     if isinstance(neg, int) and neg >= 100:
         s.append(f"a well-maintained negative keyword list ({neg:,} negatives)")
@@ -3994,7 +4093,7 @@ def build_strengths(data):
     if nets and not any(c.get("search_partners") or c.get("display") for c in nets):
         s.append("Search Partners and the Display Network correctly switched off on Search")
     assets = data.get("ad_assets")
-    if assets and {"SITELINK", "CALLOUT", "CALL"}.issubset(set(assets.keys())):
+    if assets and not _paused and {"SITELINK", "CALLOUT", "CALL"}.issubset(set(assets.keys())):
         s.append("strong ad-extension coverage (sitelinks, callouts, call and more)")
     summary = data.get("account_summary_30d", {})
     # Only call tracking a strength when something business-meaningful is recording
@@ -4010,7 +4109,7 @@ def build_strengths(data):
     _sales_vol = sum(_vol30(ca) for ca in _cas if ca.get("category") == "PURCHASE")
     _enq_vol = sum(_vol30(ca) for ca in _cas if ca.get("category") in _BIZ_LEAD_CATS)
     _install_vol = sum(_vol30(ca) for ca in _cas if ca.get("category") == "DOWNLOAD")
-    if (summary.get("conversions", 0) or 0) > 0:
+    if (summary.get("conversions", 0) or 0) > 0 and not _paused:
         if _sales_vol > 0:
             s.append("conversion tracking live and recording sales")
         elif _enq_vol > 0:

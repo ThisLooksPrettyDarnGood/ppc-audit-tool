@@ -402,26 +402,72 @@ def get_campaigns(client, cid):
 
 def get_ad_policy_status(client, cid):
     """
-    Policy status of every ENABLED ad in ENABLED campaigns/ad groups. A disapproved ad
-    silently stops serving - every expert checklist starts here and we never did.
-    Returns {"total": n, "disapproved": [...], "limited": [...]} with campaign names.
+    Policy status of ads AND Performance Max assets. A disapproved ad silently stops serving.
+
+    Two upgrades after Rory's Hampton review (22 Jun 2026), where the old query reported "all
+    clear" on an account with 15 disapproved ads:
+      1. Do NOT filter to ENABLED-only. A disapproval persists while a campaign is paused and is
+         exactly what an audit must catch - the old enabled-campaign filter went blind the moment
+         an account was switched off. Skip only REMOVED rows.
+      2. Read policy_topic_entries (the REASON), not just approval_status. This is how we learn an
+         ad is disapproved for a broken landing page (DESTINATION_NOT_WORKING = HTTP 404/403/500),
+         restricted drug terms, etc. - no separate crawler needed; Google's AdsBot already checked.
+    Also queries asset_group_asset so we catch PMax-only policy such as HEALTH_IN_PERSONALIZED_ADS
+    (the "Health in personalised advertising" limit), which never appears on ad_group_ad.
+
+    Returns {"total", "disapproved":[{campaign,ad_group,topics}], "limited":[...],
+             "disapproved_topics":{topic:count}, "asset_limited", "asset_disapproved",
+             "asset_topics":{topic:count}}.
     """
+    out = {"total": 0, "disapproved": [], "limited": [], "disapproved_topics": {},
+           "asset_limited": 0, "asset_disapproved": 0, "asset_topics": {}}
+
+    def _topics(summary):
+        return [e.topic for e in summary.policy_topic_entries]
+
+    def _bump(d, keys):
+        for k in keys:
+            d[k] = d.get(k, 0) + 1
+
     gaql = """
-        SELECT ad_group_ad.policy_summary.approval_status, campaign.name, ad_group.name
+        SELECT ad_group_ad.policy_summary.approval_status,
+               ad_group_ad.policy_summary.policy_topic_entries,
+               campaign.name, ad_group.name
         FROM ad_group_ad
-        WHERE ad_group_ad.status = 'ENABLED' AND campaign.status = 'ENABLED'
-          AND ad_group.status = 'ENABLED'
+        WHERE campaign.status != 'REMOVED' AND ad_group.status != 'REMOVED'
+          AND ad_group_ad.status != 'REMOVED'
     """
-    rows = run_query(client, cid, gaql)
-    out = {"total": 0, "disapproved": [], "limited": []}
-    for row in rows:
+    for row in run_query(client, cid, gaql):
         status = row.ad_group_ad.policy_summary.approval_status.name
         out["total"] += 1
-        entry = {"campaign": row.campaign.name, "ad_group": row.ad_group.name}
+        topics = _topics(row.ad_group_ad.policy_summary)
+        entry = {"campaign": row.campaign.name, "ad_group": row.ad_group.name, "topics": topics}
         if status == "DISAPPROVED":
             out["disapproved"].append(entry)
+            _bump(out["disapproved_topics"], topics)
         elif status in ("APPROVED_LIMITED", "AREA_OF_INTEREST_ONLY"):
             out["limited"].append(entry)
+
+    # PMax / asset-level policy (separate resource; degrade gracefully if unavailable).
+    try:
+        agql = """
+            SELECT asset_group_asset.policy_summary.approval_status,
+                   asset_group_asset.policy_summary.policy_topic_entries
+            FROM asset_group_asset
+            WHERE campaign.status != 'REMOVED'
+        """
+        for row in run_query(client, cid, agql):
+            status = row.asset_group_asset.policy_summary.approval_status.name
+            topics = _topics(row.asset_group_asset.policy_summary)
+            if status == "DISAPPROVED":
+                out["asset_disapproved"] += 1
+                _bump(out["asset_topics"], topics)
+            elif status in ("APPROVED_LIMITED", "AREA_OF_INTEREST_ONLY"):
+                out["asset_limited"] += 1
+                _bump(out["asset_topics"], topics)
+    except Exception as e:
+        print(f"  skip asset_group_asset policy: {e}")
+
     return out
 
 
