@@ -335,6 +335,7 @@ _ISSUE_SIGNATURES = [
     ("appear to track different parts of the business", 58, "amber", "Conversion Tracking"),  # parallel streams UNCONFIRMED (could be migration tag) - verify; CONFIRMED two-site is suppressed as structure
     ("paid some very expensive single clicks",     50, "amber",     "Bidding Strategy"),  # CPC spike = exposure/risk, not measured waste -> below substantive findings (Dan, 13 Jun)
     # Bidding  -  Maximise Clicks branches (specific first; severity follows the money)
+    ("ran on Maximise Clicks, which chases",       62, "amber",     "Bidding Strategy"),  # paused acct: structural, not live spend
     ("Maximise Clicks with no maximum CPC limit set", 82, "amber",  "Bidding Strategy"),  # material spend, uncapped = real leak
     ("uses Maximise Clicks (optimising for traffic",  60, "amber",  "Bidding Strategy"),  # material spend, capped, wrong strategy
     ("uses Maximise Clicks but is a small",           33, "amber",  "Bidding Strategy"),  # tiny/starved -> Additional Observations
@@ -367,6 +368,7 @@ _ISSUE_SIGNATURES = [
     ("opted into",                                 62, "amber",     "Budget & Coverage"),  # Search Partners / Display
     ("lost impressions to budget",                 66, "amber",     "Budget & Coverage"),  # IS lost to budget
     ("reach only a small slice of the demand that is already out there", 58, "amber", "Ad Rank & Quality"),  # IS lost to rank (SIS/TAM framing)
+    ("ads cannot serve",                           92, "red",       "Ads & Assets"),       # broken pages on a large share = not fit to run
     ("disapproved and silently not serving",       78, "amber_red", "Ads & Assets"),       # disapproved ads - dark ad groups
     ("Health personalised-advertising policy",     48, "amber",     "Ads & Assets"),       # PMax sensitive-category limit
     ("approved but LIMITED by policy",             38, "amber",     "Ads & Assets"),       # policy-limited -> Observations
@@ -394,6 +396,7 @@ _ISSUE_SIGNATURES = [
     ("responsive search ads are rated",            54, "amber",     "Targeting & Keywords"),  # RSA ad strength
     ("of keyword clicks come from Broad Match",    58, "amber",     "Targeting & Keywords"),
     ("of keyword spend is on Broad Match",         57, "amber",     "Targeting & Keywords"),
+    ("keyword(s) are broad match",                 60, "amber",     "Targeting & Keywords"),  # count-based (pause-proof)
     ("negative keywords applied across",           50, "amber",     "Targeting & Keywords"),
     ("Exact Match only",                           45, "amber",     "Targeting & Keywords"),
     ("come from Exact Match",                      44, "amber",     "Targeting & Keywords"),  # majority-exact volume restriction
@@ -404,6 +407,7 @@ _ISSUE_SIGNATURES = [
     ("No purchases are reaching Google Ads",       88, "red",       "Conversion Tracking"),  # ecom purchase tag silent all year; page views steer bidding (Beatles Story)
     ("offline conversion imports (OCI)",           70, "amber",     "Conversion Tracking"),  # the elephant (lead gen) - paramount
     ("Revenue feedback loop",                      64, "amber",     "Conversion Tracking"),  # the ecommerce OCI equivalent
+    ("only conversion tracking actually recording", 72, "amber",     "Conversion Tracking"),  # only calls fire; web/appt dark (Rory #1). Amber, not amber_red: leads the tracking story without over-escalating a live account on a 30-day zero.
     ("appear set up but have recorded nothing",    58, "amber",     "Conversion Tracking"),  # dead genuine action (broken tag)
     ("Enhanced conversions for leads is not enabled", 50, "amber",  "Conversion Tracking"),  # EC-for-leads off (API-visible half)
     ("no lead-type conversion action",              63, "amber",    "Conversion Tracking"),  # claims lead gen, lead side invisible
@@ -440,6 +444,10 @@ _FILLER_MARKERS = (
 _ISSUE_THEMES = {
     "of keyword clicks come from Broad Match": "broad_match",
     "of keyword spend is on Broad Match":      "broad_match",
+    "keyword(s) are broad match":              "broad_match",
+    # Tracking depth ("only calls work") and a specific dead action are one tracking story.
+    "only conversion tracking actually recording": "tracking_depth",
+    "appear set up but have recorded nothing":     "tracking_depth",
     # Low negatives is flagged by both the tracking and targeting checks  -  one slide.
     "negative keyword(s) found across":        "negatives",
     "negative keywords applied across":        "negatives",
@@ -1112,6 +1120,34 @@ def score_conversion_tracking(data):
 
         # Count only PRIMARY actions (the ones bidding actually optimises towards).
         primary_actions = [ca for ca in active_actions if _is_primary(ca)]
+
+        # ── Tracking depth: is anything other than CALLS actually working? (Rory's Hampton
+        # review, 22 Jun 2026 - his #1 finding.) On many small lead-gen accounts the only
+        # conversion that genuinely fires is "Calls from ads"; the web-form / appointment actions
+        # are either set to secondary (so bidding ignores them) or have stopped recording. That
+        # leaves Google learning from phone calls alone - and calls are the easiest conversion to
+        # trigger without a real enquiry - so the data steering the account is narrow AND soft.
+        _CALL_CATS = {"PHONE_CALL_LEAD", "CALL"}
+        _WEB_LEAD_CATS = {"CONTACT", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT", "REQUEST_QUOTE", "SIGNUP", "LEAD"}
+        _live_counting = [ca for ca in primary_actions if _is_counting(ca)]
+        _web_lead_actions = [ca for ca in active_actions
+                             if ca.get("category") in _WEB_LEAD_CATS
+                             and ca.get("type") in ("WEBPAGE", "UPLOAD_CLICKS")]
+        _web_lead_dark = [ca for ca in _web_lead_actions
+                          if not _is_primary(ca) or not _is_counting(ca)]
+        if (detect_account_type(data) in ("lead_gen", "mixed", "unknown")
+                and _live_counting and _web_lead_dark
+                and all(ca.get("category") in _CALL_CATS for ca in _live_counting)):
+            issues.append(
+                "The only conversion tracking actually recording right now is calls from ads. The "
+                "web-form and appointment actions are either set to secondary (so Google ignores them "
+                "when it bids) or have stopped recording, so the account is steered by phone calls alone "
+                "- and call conversions are the easiest to trigger without a genuine enquiry. Rebuilding "
+                "tracking - a reliable web-form and appointment conversion as the primary goals, plus "
+                "Enhanced Conversions - is the foundation the rest of the account depends on."
+            )
+            if rag == "green":
+                rag = "amber"
 
         # ── Ecommerce account whose PURCHASE tracking is silent (owns the headline) ──
         # Purchase actions exist but recorded nothing across 12 months while other
@@ -2118,6 +2154,26 @@ def score_targeting_keywords(data):
 
     broad_pct = 0.0  # share of keyword CLICKS on broad match (set below if data present)
 
+    # Match type by keyword COUNT - window-independent, so it still works when the account is
+    # paused and the click breakdown is empty (Rory's Hampton review, 22 Jun 2026: a switched-off
+    # account was still 100% broad match). Only fires when we have no click data to judge from, so
+    # a live account uses the click-based check below; both share the "broad_match" theme anyway.
+    _kmc = data.get("keyword_match_counts") or {}
+    _kw_total = _kmc.get("total", 0)
+    if total_kw_clicks == 0 and _kw_total >= 5:
+        _broad_n = _kmc.get("BROAD", 0)
+        if _broad_n / _kw_total >= 0.7:
+            _exact_n, _phrase_n = _kmc.get("EXACT", 0), _kmc.get("PHRASE", 0)
+            issues.append(
+                f"{_broad_n} of your {_kw_total} keyword(s) are broad match ({_broad_n / _kw_total:.0%}), "
+                f"with only {_phrase_n} phrase and {_exact_n} exact. Broad match casts the widest net and, "
+                "without Smart Bidding and strong negatives to steer it, spends on loosely-related searches. "
+                "Lead with exact and phrase match for the core services, and only widen with broad match once "
+                "conversion tracking is trustworthy enough to guide it."
+            )
+            if rag == "green":
+                rag = "amber"
+
     if has_search and total_kw_clicks == 0:
         issues.append(
             "No keyword click data found despite Search campaigns being active. "
@@ -2255,6 +2311,23 @@ def score_targeting_keywords(data):
     # Drop the client's own brand terms from the converting list (not new demand).
     if brand_tokens:
         converting_not_added = [t for t in converting_not_added if not _is_brand(t.get("term", ""))]
+
+    # Suppress the "promote these converting terms" advice when the bulk of historic conversions
+    # came through an OFFLINE upload (Rory's Hampton review, 22 Jun 2026: he would NOT recommend
+    # adding these - the term "conversions" were manually-uploaded and unverifiable, so they are
+    # not proof a term is a winner). Deliberately narrow to the offline-dominant case: calls being
+    # the main conversion is normal for lead gen and must NOT gut this finding. Empties the finding
+    # AND the table (both derive from converting_not_added below).
+    _cas_ct = data.get("conversion_actions") or []
+    _byact_ct = {n: (v or {}).get("conversions_12m", 0) or 0
+                 for n, v in (data.get("conversion_value_by_action") or {}).items()}
+    _typ_ct = {c.get("name"): c.get("type") for c in _cas_ct}
+    _tot_ct = sum(_byact_ct.values())
+    _offline_dom_ct = bool(_tot_ct and _typ_ct.get(max(_byact_ct, key=_byact_ct.get)) in
+                           ("UPLOAD_CLICKS", "UPLOAD_CALLS")
+                           and _byact_ct[max(_byact_ct, key=_byact_ct.get)] / _tot_ct >= 0.6)
+    if _offline_dom_ct:
+        converting_not_added = []
     # ── Fading winners: terms that CONVERTED over 90 days but have gone quiet in the
     # last 30 (spend, no leads). This isn't a contradiction - it's the cross-window
     # pattern a good auditor hunts for (a page rename, a bid drop, a competitor moving in).
@@ -2881,9 +2954,14 @@ def score_bidding_strategy(data):
     # genuine money leak that leads the deck; a brand-new campaign is fine for now. We branch
     # on age, spend, and the CPC ceiling vs the account's typical CPC so severity follows the
     # money (the per-case detail strings map to different severities in _ISSUE_SIGNATURES).
+    # Include PAUSED Search campaigns when the whole account is switched off (Rory's Hampton
+    # review, 22 Jun 2026): the bidding strategy is a structural setup question that still matters
+    # in an audit, and gating on ENABLED-only made it invisible the moment an account was paused.
+    _paused_acct = bool((data.get("performance_summary") or {}).get("is_paused"))
     max_clicks_campaigns = [
         c for c in campaigns
-        if c.get("status") == "ENABLED"
+        if (c.get("status") == "ENABLED"
+            or (_paused_acct and c.get("status") == "PAUSED" and c.get("type") == "SEARCH"))
         and c.get("bid_strategy", "").upper() in ("MAXIMIZE_CLICKS", "TARGET_SPEND")
     ]
     true_manual = [n for n, s in manual_campaigns if s not in ("MAXIMIZE_CLICKS", "TARGET_SPEND")]
@@ -2895,7 +2973,27 @@ def score_bidding_strategy(data):
         account_spend = total_cost or sum((c.get("spend_30d") or 0) for c in campaigns)
         costly_terms = data.get("max_clicks_costly_terms", {}) or {}
 
+        # Paused account: judge the SETUP as ONE finding (not the zero live spend, and not a
+        # repetitive slide per campaign). Maximise Clicks on a lead-gen Search campaign buys
+        # traffic, not enquiries - worse with broad match (Rory's Hampton review, 22 Jun 2026).
+        _paused_mc = [c for c in max_clicks_campaigns
+                      if _paused_acct and (c.get("spend_30d") or 0) == 0]
+        if _paused_mc:
+            _names = ", ".join(f"'{c.get('name', 'Unknown')}'" for c in _paused_mc[:3])
+            _bm = data.get("keyword_match_counts") or {}
+            _broadish = _bm.get("total", 0) and _bm.get("BROAD", 0) / _bm["total"] >= 0.7
+            issues.append(
+                f"Your Search campaign(s) - {_names} - ran on Maximise Clicks, which chases the most "
+                "clicks it can get rather than the most enquiries. "
+                + ("With the keywords almost entirely on broad match, that pairing spends widely on "
+                   "loosely-related searches. " if _broadish else "")
+                + "For a lead-generation account the right setting is Maximise Conversions - but only "
+                "once conversion tracking is trustworthy, so fix the tracking first, then switch the bidding."
+            )
+
         for c in max_clicks_campaigns:
+            if c in _paused_mc:
+                continue
             name = c.get("name", "Unknown")
             spend = c.get("spend_30d") or 0
             conv = c.get("conversions_30d") or 0
@@ -3357,20 +3455,31 @@ def score_efficiency(data):
         _bad = _pol["disapproved"]
         _camps = sorted({e["campaign"] for e in _bad})
         _dtopics = _pol.get("disapproved_topics") or {}
+        _total_ads = _pol.get("total") or len(_bad)
+        _share = (len(_bad) / _total_ads) if _total_ads else 0.0
         _reason = ""
+        _dn = _dtopics.get("DESTINATION_NOT_WORKING", 0)
         if _dtopics:
             _top = sorted(_dtopics.items(), key=lambda kv: -kv[1])[0]
             _reason = (f" Most are disapproved for {_topic_label(_top[0])}"
                        + (" - the ads point at pages that no longer load"
                           if _top[0] == "DESTINATION_NOT_WORKING" else "") + ".")
+        # Fitness, not exposure: when broken landing pages dominate AND they take out a large
+        # share of the account's ads, the account effectively CANNOT serve - that is RED, not a
+        # tidy-up (Rory's Hampton review, 22 Jun 2026: he scored it red; we said amber). The
+        # proportion gate keeps a live account with a few stray 404s at amber_red, not red.
+        _severe = (_dn >= max(1, 0.5 * len(_bad))) and _share >= 0.4
+        _lead = "Most of the account's ads cannot serve: " if _severe else ""
         issues.append(
-            f"{len(_bad)} ad(s) are disapproved and silently not serving, in: "
+            f"{_lead}{len(_bad)} of {_total_ads} ad(s) are disapproved and silently not serving, in: "
             f"{', '.join(_camps[:3])}{'...' if len(_camps) > 3 else ''}.{_reason} A disapproved ad shows "
             "no error anywhere a client normally looks - the ad group just goes dark. Fix the underlying "
             "issue (for broken pages, restore the URL or add a redirect) and the ads will need re-reviewing "
             "before they can serve again."
         )
-        if rag != "red":
+        if _severe:
+            rag = "red"
+        elif rag != "red":
             rag = "amber_red"
     elif _pol.get("limited"):
         issues.append(

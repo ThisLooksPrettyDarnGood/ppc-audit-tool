@@ -471,6 +471,30 @@ def get_ad_policy_status(client, cid):
     return out
 
 
+def get_keyword_match_counts(client, cid):
+    """Count of keywords by match type across the whole account (not REMOVED).
+
+    Window-INDEPENDENT (it counts the keyword inventory, not clicks), so it still works on a
+    paused account where the click-based breakdown comes back empty (Rory's Hampton review,
+    22 Jun 2026: the account is switched off, but it is still ~100% broad match - which the
+    click breakdown could not show). Returns {"BROAD": n, "PHRASE": n, "EXACT": n, "total": n}.
+    """
+    out = {"BROAD": 0, "PHRASE": 0, "EXACT": 0, "total": 0}
+    gaql = """
+        SELECT ad_group_criterion.keyword.match_type
+        FROM ad_group_criterion
+        WHERE ad_group_criterion.type = 'KEYWORD'
+          AND ad_group_criterion.status != 'REMOVED'
+          AND campaign.status != 'REMOVED'
+    """
+    for row in run_query(client, cid, gaql):
+        mt = row.ad_group_criterion.keyword.match_type.name
+        if mt in out:
+            out[mt] += 1
+        out["total"] += 1
+    return out
+
+
 def get_change_activity(client, cid, days=28):
     """
     How many changes were made to the account recently (change_event caps at 30 days).
@@ -1870,13 +1894,16 @@ def fetch_account_data(client_cid: str) -> dict:
 
     print("  → Ad policy status / change activity / hourly / device splits...")
     ad_policy_status, change_activity, hourly_performance, device_performance = {}, {}, {}, {}
+    keyword_match_counts = {}
     for _name, _fn in (("ad_policy_status", get_ad_policy_status),
+                       ("keyword_match_counts", get_keyword_match_counts),
                        ("change_activity", get_change_activity),
                        ("hourly_performance", get_hourly_performance),
                        ("device_performance", get_device_performance)):
         try:
             _res = _fn(client, cid)
             if _name == "ad_policy_status":   ad_policy_status = _res
+            elif _name == "keyword_match_counts": keyword_match_counts = _res
             elif _name == "change_activity":  change_activity = _res
             elif _name == "hourly_performance": hourly_performance = _res
             else:                              device_performance = _res
@@ -2113,6 +2140,7 @@ def fetch_account_data(client_cid: str) -> dict:
         "account_summary_30d": account_summary,
         "campaigns": campaigns,
         "campaign_types_active": campaign_types,
+        "keyword_match_counts": keyword_match_counts,
         "max_clicks_costly_terms": max_clicks_costly_terms,
         "product_overlap": product_overlap,
         "ad_policy_status": ad_policy_status,
