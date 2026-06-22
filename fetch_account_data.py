@@ -540,9 +540,17 @@ def get_negative_keywords(client, cid):
     are already in negative_keyword_count. Caller wraps in try/except.
     Returns {"campaign": [{campaign, text, match_type}],
              "shared":   [{set, text, match_type}],
-             "shared_campaigns": {set_name: [campaign names]}}.
+             "shared_campaigns": {set_name: [campaign names]},
+             "ad_group_counts": {campaign_name: n},   # negatives set at AD-GROUP level
+             "shared_sizes": {set_name: member_count}} # authoritative size of each shared neg list
+
+    The per-campaign EFFECTIVE coverage = campaign-level + attached shared-list members +
+    ad-group-level. A campaign can have 2 of its own negatives yet inherit a big account list
+    (or vice versa), so all three levels must be summed before judging coverage (Dan, 22 Jun
+    2026): "one campaign might have two negatives, but the account has a whole bunch."
     """
-    out = {"campaign": [], "shared": [], "shared_campaigns": {}}
+    out = {"campaign": [], "shared": [], "shared_campaigns": {},
+           "ad_group_counts": {}, "shared_sizes": {}}
     for r in run_query(client, cid, """
         SELECT campaign.name, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
         FROM campaign_criterion
@@ -570,6 +578,24 @@ def get_negative_keywords(client, cid):
           AND campaign.status != 'REMOVED'
     """):
         out["shared_campaigns"].setdefault(r.shared_set.name, []).append(r.campaign.name)
+    # Authoritative size of each NEGATIVE_KEYWORDS shared set (member_count, not a capped
+    # text pull) so the engine can credit an inherited account list correctly.
+    for r in run_query(client, cid, """
+        SELECT shared_set.name, shared_set.member_count
+        FROM shared_set
+        WHERE shared_set.type = 'NEGATIVE_KEYWORDS' AND shared_set.status != 'REMOVED'
+    """):
+        out["shared_sizes"][r.shared_set.name] = r.shared_set.member_count
+    # Negatives set at AD-GROUP level, counted per campaign (the third coverage level).
+    for r in run_query(client, cid, """
+        SELECT campaign.name
+        FROM ad_group_criterion
+        WHERE ad_group_criterion.negative = TRUE
+          AND ad_group_criterion.type = 'KEYWORD'
+          AND ad_group_criterion.status != 'REMOVED'
+          AND campaign.status != 'REMOVED'
+    """):
+        out["ad_group_counts"][r.campaign.name] = out["ad_group_counts"].get(r.campaign.name, 0) + 1
     return out
 
 

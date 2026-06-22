@@ -398,6 +398,7 @@ _ISSUE_SIGNATURES = [
     ("of keyword spend is on Broad Match",         57, "amber",     "Targeting & Keywords"),
     ("keyword(s) are broad match",                 60, "amber",     "Targeting & Keywords"),  # count-based (pause-proof)
     ("negative keywords applied across",           50, "amber",     "Targeting & Keywords"),
+    ("have very few negative keywords once shared", 56, "amber",     "Targeting & Keywords"),  # per-campaign effective coverage
     ("Exact Match only",                           45, "amber",     "Targeting & Keywords"),
     ("come from Exact Match",                      44, "amber",     "Targeting & Keywords"),  # majority-exact volume restriction
     ("No Exact Match keyword clicks",              44, "amber",     "Targeting & Keywords"),
@@ -451,6 +452,7 @@ _ISSUE_THEMES = {
     # Low negatives is flagged by both the tracking and targeting checks  -  one slide.
     "negative keyword(s) found across":        "negatives",
     "negative keywords applied across":        "negatives",
+    "have very few negative keywords once shared": "negatives",
     # Per-campaign "spent with 0 conversions"  -  roll up to a single slide.
     "with 0 conversions recorded":             "zero_conv_campaign",
     # Zero-value purchase tag vs the generic revenue-feedback finding: same client story
@@ -2240,7 +2242,49 @@ def score_targeting_keywords(data):
         if rag == "green":
             rag = "amber"
 
-    # Escalation: heavy broad match AND weak negatives together is a RED combination  - 
+    # Per-campaign EFFECTIVE negative coverage (Dan, 22 Jun 2026). The flat account count hides
+    # the real picture: a campaign can have 2 of its own negatives yet inherit a big account list
+    # (fine), OR sit in an account with a healthy total while its own coverage is bare (not fine).
+    # Sum all three levels - campaign + inherited shared/account list + ad-group - before judging,
+    # so we never falsely say "no negatives" when a shared list is doing the work, nor miss a bare
+    # campaign hiding behind a big account total. Runs only when the fetch captured the ad-group
+    # level (newer field), so older saved fetches are unchanged and degrade gracefully.
+    _neg = data.get("negative_keywords") or {}
+    if isinstance(_neg, dict) and "ad_group_counts" in _neg:
+        from collections import Counter as _NegCounter
+        _camp_neg = _NegCounter(n.get("campaign") for n in _neg.get("campaign", []))
+        _shared_sizes = _neg.get("shared_sizes") or {}
+        _ag_counts = _neg.get("ad_group_counts") or {}
+        _shared_for_camp = {}
+        for _set_name, _camps in (_neg.get("shared_campaigns") or {}).items():
+            for _c in _camps:
+                _shared_for_camp[_c] = _shared_for_camp.get(_c, 0) + _shared_sizes.get(_set_name, 0)
+        _thin = []
+        for c in campaigns:
+            if c.get("type") not in ("SEARCH", "PERFORMANCE_MAX") or c.get("status") == "REMOVED":
+                continue
+            nm = c.get("name")
+            eff = _camp_neg.get(nm, 0) + _shared_for_camp.get(nm, 0) + _ag_counts.get(nm, 0)
+            if eff < 10:
+                _thin.append((nm, eff))
+        if _thin:
+            _thin.sort(key=lambda x: x[1])
+            _names = "; ".join(f"'{n}' ({e})" for n, e in _thin[:3])
+            _mts = {n.get("match_type") for n in _neg.get("campaign", []) if n.get("match_type")}
+            _xnote = (" The negatives that do exist are exact-match only, which blocks one exact phrasing "
+                      "at a time - phrase and broad negatives cut whole groups of irrelevant searches at "
+                      "once." if _mts == {"EXACT"} else "")
+            issues.append(
+                f"{len(_thin)} campaign(s) have very few negative keywords once shared and account-level "
+                f"lists are counted: {_names} - that is the effective total across campaign, account and "
+                f"ad-group levels.{_xnote} With broad and phrase match running, that leaves budget exposed "
+                "to irrelevant searches. Build a proper negative list per campaign and review the "
+                "search-term report monthly to keep cutting waste."
+            )
+            if rag == "green":
+                rag = "amber"
+
+    # Escalation: heavy broad match AND weak negatives together is a RED combination  -
     # the budget is wide open with little to filter waste (matches team judgement).
     if broad_pct > 0.8 and neg_kw_count is not None and neg_kw_count < 50:
         issues.append(
