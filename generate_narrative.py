@@ -834,7 +834,72 @@ _LINT_WARN = [
 ]
 
 
-def _lint_narrative(narr, account_type: str = ""):
+# ── Fact-fidelity guard (Dan, CEO call, 22 Jun 2026) ──────────────────────────
+# The engine's numbers are the only source of truth. GPT writes the prose, and the one
+# thing it must never do is state a £ figure or % the engine did not produce - that is the
+# "never confidently wrong" rule, and nothing checked it before. This guard builds the set
+# of numbers the deterministic engine actually generated, then flags any £/% in GPT's prose
+# that does not trace back to it (within a small rounding tolerance, plus monthly averages of
+# the annual figures, which GPT legitimately derives). Warn-only: we surface it loudly at
+# render time rather than silently "correcting" a number whose intent we can't be sure of.
+_POUND_RE = re.compile(r'£\s?(\d[\d,]*(?:\.\d+)?)')
+_PCT_RE = re.compile(r'(\d[\d,]*(?:\.\d+)?)\s?%')
+
+
+def _collect_facts(obj, pounds, pcts):
+    if isinstance(obj, str):
+        for m in _POUND_RE.findall(obj):
+            try: pounds.add(round(float(m.replace(",", ""))))
+            except ValueError: pass
+        for m in _PCT_RE.findall(obj):
+            try: pcts.add(round(float(m.replace(",", ""))))
+            except ValueError: pass
+    elif isinstance(obj, dict):
+        for v in obj.values(): _collect_facts(v, pounds, pcts)
+    elif isinstance(obj, list):
+        for v in obj: _collect_facts(v, pounds, pcts)
+
+
+def _lint_fact_fidelity(narr, findings):
+    """Return a list of (token, field, sentence) for £/% in GPT prose not traceable to the engine."""
+    src_p, src_pct = set(), set()
+    _collect_facts(findings, src_p, src_pct)                       # engine analysis output
+    _collect_facts(narr.get("performance_summary", {}), src_p, src_pct)  # deterministic perf block
+    for p in list(src_p):
+        src_p.add(round(p / 12))                                   # monthly average of an annual figure
+
+    def _ok_pound(v):
+        return any(abs(v - a) <= max(1, 0.02 * a) for a in src_p)  # 2% rounding tolerance for big numbers
+    def _ok_pct(v):
+        return any(abs(v - a) <= 1 for a in src_pct)
+
+    flags = []
+
+    def _scan(obj, field):
+        if isinstance(obj, str):
+            for m in _POUND_RE.findall(obj):
+                try: v = round(float(m.replace(",", "")))
+                except ValueError: continue
+                if not _ok_pound(v):
+                    flags.append((f"£{v}", field, obj.strip()))
+            for m in _PCT_RE.findall(obj):
+                try: v = round(float(m.replace(",", "")))
+                except ValueError: continue
+                if not _ok_pct(v):
+                    flags.append((f"{v}%", field, obj.strip()))
+        elif isinstance(obj, dict):
+            for v in obj.values(): _scan(v, field)
+        elif isinstance(obj, list):
+            for v in obj: _scan(v, field)
+
+    # Only the GPT-WRITTEN fields (the deterministic performance_summary block is the source, not suspect).
+    for field in ("issues", "executive_summary", "key_opportunities", "takeaways",
+                  "perf_commentary", "additional_observations", "objectives"):
+        _scan(narr.get(field), field)
+    return flags
+
+
+def _lint_narrative(narr, account_type: str = "", findings=None):
     """Apply the deterministic copy rules to every string in the narrative dict."""
     subs = list(_LINT_SUBS) + (list(_LINT_SUBS_ECOM) if account_type == "ecommerce" else [])
 
@@ -860,7 +925,20 @@ def _lint_narrative(narr, account_type: str = ""):
             return {k: _walk(v) for k, v in x.items()}
         return x
 
-    return _walk(narr)
+    cleaned = _walk(narr)
+
+    # Fact-fidelity check: flag any £/% in GPT prose the engine never produced.
+    if findings is not None:
+        facts = _lint_fact_fidelity(cleaned, findings)
+        if facts:
+            print(f"  🛑 fact-fidelity: {len(facts)} number(s) in the narration do NOT trace to the "
+                  "engine - REVIEW before sending:")
+            for tok, field, sentence in facts:
+                print(f"     • {tok} in {field}: \"{sentence[:90]}\"")
+        else:
+            print("  ✓ fact-fidelity: every £/% in the narration traces to the engine.")
+
+    return cleaned
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -1507,7 +1585,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "table":             _table,
         "geo_table":         (findings.get("efficiency") or {}).get("geo_table"),
         "website_url":       objectives.get("website_url", ""),
-    }, str(findings.get("account_type") or ""))
+    }, str(findings.get("account_type") or ""), findings=findings)
 
 
 # ── Quick test ────────────────────────────────────────────────────────────────
