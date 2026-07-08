@@ -72,7 +72,10 @@ def run_query(client, customer_id, gaql, _attempts=3):
     for attempt in range(1, _attempts + 1):
         rows = []
         try:
-            for row in service.search(request=request):
+            # timeout guards against a silently-dead gRPC socket hanging the pull
+            # forever (H1 brand pull sat 16h on one page request, 8 Jul 2026);
+            # DeadlineExceeded contains "deadline" so the transient-retry below catches it
+            for row in service.search(request=request, timeout=300):
                 rows.append(row)
             return rows
         except GoogleAdsException as ex:
