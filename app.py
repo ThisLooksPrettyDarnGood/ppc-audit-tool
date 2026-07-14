@@ -364,20 +364,65 @@ if submitted:
         except Exception as _le:
             st.warning(f"📋 Audit logging failed: {_le}")
 
-        # ── Email delivery (temporarily disabled) ─────────────────────────────
-        # The completion email is sent via the Gmail API (gmail.send), but the
-        # Slides refresh token is NOT authorised for Gmail, so refreshing it with
-        # gmail.send returns 'invalid_scope'. Until a Gmail-authorised refresh
-        # token is available, we skip email cleanly rather than crash the step.
-        # NOTE: send_email.send_audit_summary is intentionally left untouched.
+        # ── Email delivery (Gmail API: dedicated Gmail-only credentials) ──────
+        # Email uses its OWN refresh token, GOOGLE_REFRESH_TOKEN_GMAIL, authorised
+        # ONLY for gmail.send. It is never mixed with the Slides/Sheets token, and
+        # a failure here cannot affect the deck, the audit, or the log above.
         try:
-            st.caption(
-                "✉️ Notification email is currently disabled pending Gmail "
-                "authorisation. The audit and deck completed successfully, and "
-                "audit logging was attempted independently above."
-            )
-        except Exception:
-            pass
+            import send_email as _se
+            from google.oauth2.credentials import Credentials as _GCreds
+            from google.auth.transport.requests import Request as _GReq
+
+            # Optional secret: if absent, email is simply not configured yet — say
+            # so plainly and carry on (never crash the completed audit).
+            _gmail_token = (
+                st.secrets.get("GOOGLE_REFRESH_TOKEN_GMAIL", "")
+                or os.environ.get("GOOGLE_REFRESH_TOKEN_GMAIL", "")
+            ).strip()
+
+            if not _gmail_token:
+                st.info(
+                    "✉️ Notification email is not configured yet "
+                    "(GOOGLE_REFRESH_TOKEN_GMAIL is not set). The audit, deck and "
+                    "audit log are unaffected."
+                )
+            else:
+                # Full ranked findings (incl. those below the 6-slide cut) so the
+                # email carries every talking point for the call.
+                try:
+                    from analyse_account import select_top_issues as _sti
+                    _all_findings = _sti(findings, max_issues=50, apply_floor=False)
+                    _findings_lines = [
+                        f"[{i.get('category','')}] " + i.get("detail", "").split(". ")[0].strip()
+                        for i in _all_findings
+                    ]
+                except Exception:
+                    _findings_lines = []
+
+                # Gmail-only credentials: separate token, single minimal scope.
+                _gc = _GCreds(
+                    token=None,
+                    refresh_token=_gmail_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=get_secret("GOOGLE_CLIENT_ID"),
+                    client_secret=get_secret("GOOGLE_CLIENT_SECRET"),
+                    scopes=["https://www.googleapis.com/auth/gmail.send"],
+                )
+                _gc.refresh(_GReq())
+
+                _email_err = _se.send_audit_summary(
+                    _gc, client_name.strip(), client_cid.strip(),
+                    _duration, slides_url, _tokens,
+                    recipient=runner_email.strip(),
+                    findings_lines=_findings_lines,
+                )
+                # "sent ✓" only shows when the Gmail API send actually succeeded.
+                if _email_err:
+                    st.warning(f"✉️ Notification email failed: {_email_err}")
+                else:
+                    st.caption("✉️ Notification email sent ✓")
+        except Exception as _ee:
+            st.warning(f"✉️ Notification email failed: {_ee}")
 
         # ── Done ──────────────────────────────────────────────────────────
         progress_bar.progress(100)
