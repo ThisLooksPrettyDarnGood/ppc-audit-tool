@@ -63,6 +63,40 @@ _ACCESS_ERROR_MARKS = ("USER_PERMISSION_DENIED", "CUSTOMER_NOT_FOUND", "NOT_ADS_
                        "CUSTOMER_NOT_ENABLED")
 
 
+# ── Run evidence: what this audit could NOT see ───────────────────────────────
+# A failed optional query is survivable by design (the analyser degrades to cautious
+# wording), but until now the failure was printed to the console and read by nobody -
+# so a run could lose a third of its queries and the deck would never say so. Every
+# warning is still printed exactly as before; it is now ALSO collected and stamped
+# into the data dict as _warnings / _query_failures.
+_WARNINGS = []
+_QUERY_FAILURES = []
+
+
+def reset_collectors():
+    """Start every audit with a clean sheet. Called at the top of fetch_account_data() -
+    without it, a long-lived Streamlit process would carry one client's warnings into the
+    next client's audit."""
+    _WARNINGS.clear()
+    _QUERY_FAILURES.clear()
+
+
+def _warn(msg, fetch=None, error=None, query=None):
+    """Print a warning as before, and keep it as evidence for this run.
+
+    Pass `fetch` (the name of the thing being pulled) to also record a structured query
+    failure; `query` carries the GAQL when we have it.
+    """
+    print(msg)
+    _WARNINGS.append(msg.strip())
+    if fetch:
+        _QUERY_FAILURES.append({
+            "fetch": fetch,
+            "error": str(error) if error is not None else "",
+            "query": " ".join((query or "").split()) or None,
+        })
+
+
 def run_query(client, customer_id, gaql, _attempts=3):
     service = client.get_service("GoogleAdsService")
     request = client.get_type("SearchGoogleAdsRequest")
@@ -86,7 +120,8 @@ def run_query(client, customer_id, gaql, _attempts=3):
                     "No audit was produced - auditing without data would give false findings."
                 ) from ex
             # A malformed/unsupported query won't get better on retry - log and move on.
-            print(f"  [ERROR] Query failed for {customer_id}: {ex}")
+            _warn(f"  [ERROR] Query failed for {customer_id}: {ex}",
+                  fetch="run_query", error=ex, query=gaql)
             return rows
         except Exception as ex:
             # Google-side blips ('A transient internal error has occurred. Retry the
@@ -948,7 +983,8 @@ def get_location_targeting(client, cid):
             gid = l["geo_target"].split("/")[-1] if l.get("geo_target") else ""
             l["location_name"] = (_names.get(gid) or {}).get("name", "")
     except Exception as e:
-        print(f"    (location-name resolution failed: {e})")
+        _warn(f"    (location-name resolution failed: {e})",
+              fetch="location-name resolution", error=e)
     return locations
 
 
@@ -1249,7 +1285,8 @@ def get_paused_campaign_history(client, cid, lookback_days=365):
             elif cat in LOWVAL_CATS:
                 agg[key]["lowval_conv"] += conv
     except Exception as e:
-        print(f"    (paused conversion-quality query failed: {e})")
+        _warn(f"    (paused conversion-quality query failed: {e})",
+              fetch="paused conversion-quality", error=e)
 
     history = []
     for v in agg.values():
@@ -1651,7 +1688,8 @@ def get_performance_summary(client, cid):
             days_dark = (today.date() - _la.date()).days
             is_paused = days_dark >= 7          # no spend in the last 7 days -> treat as paused
     except Exception as e:
-        print(f"  ⚠ Pause-detection query failed (non-fatal): {e}")
+        _warn(f"  ⚠ Pause-detection query failed (non-fatal): {e}",
+              fetch="pause-detection", error=e)
 
     if is_paused and last_active:
         # Anchor the recent window to the last active day, not today.
@@ -1754,7 +1792,8 @@ def get_performance_summary(client, cid):
         _avg_share(t30, run_query(client, cid, gaql_sis_30d))
         _avg_share(t12, run_query(client, cid, gaql_sis_12m))
     except Exception as e:
-        print(f"  ⚠ Impression-share query failed (non-fatal): {e}")
+        _warn(f"  ⚠ Impression-share query failed (non-fatal): {e}",
+              fetch="impression-share", error=e)
 
     return {
         # 30 days  (money shown in whole pounds, no pence)
@@ -1888,6 +1927,7 @@ def discover_site_brands(domains, max_domains=2, timeout=10):
 
 
 def fetch_account_data(client_cid: str) -> dict:
+    reset_collectors()          # this audit's warnings only - never the last client's
     print(f"\n🔐 Authenticating...")
     creds = get_credentials()
     client = build_client(creds)
@@ -1909,7 +1949,7 @@ def fetch_account_data(client_cid: str) -> dict:
         _firing = [ca["name"] for ca in conversion_actions if ca.get("attributed_conversions_30d", 0) > 0]
         print(f"    {len(_firing)} action(s) with ad-attributed conversions")
     except Exception as e:
-        print(f"    (per-action volume query failed: {e})")
+        _warn(f"    (per-action volume query failed: {e})", fetch="per-action volume", error=e)
         # leave conversions_30d unset → analyser treats volume as unknown (cautious wording)
 
     print("  → Conversion tracking settings (Enhanced Conversions for leads)...")
@@ -1917,7 +1957,7 @@ def fetch_account_data(client_cid: str) -> dict:
     try:
         conversion_tracking_setting = get_conversion_tracking_setting(client, cid)
     except Exception as e:
-        print(f"    (tracking-setting query failed: {e})")
+        _warn(f"    (tracking-setting query failed: {e})", fetch="tracking-setting", error=e)
 
     print("  → Conversion volume by month (12m, tracking-change check)...")
     conversion_volume_by_month = {}
@@ -1925,7 +1965,7 @@ def fetch_account_data(client_cid: str) -> dict:
         conversion_volume_by_month = get_conversion_volume_by_month(client, cid)
         print(f"    {len(conversion_volume_by_month)} action(s) with monthly history")
     except Exception as e:
-        print(f"    (monthly volume query failed: {e})")
+        _warn(f"    (monthly volume query failed: {e})", fetch="monthly volume", error=e)
         # leave empty → analyser skips the tracking-change check (cautious default)
 
     print("  → Conversion value per action (12m, zero-value purchase check)...")
@@ -1933,7 +1973,7 @@ def fetch_account_data(client_cid: str) -> dict:
     try:
         conversion_value_by_action = get_conversion_value_by_action(client, cid)
     except Exception as e:
-        print(f"    (per-action value query failed: {e})")
+        _warn(f"    (per-action value query failed: {e})", fetch="per-action value", error=e)
         # leave empty → analyser skips the zero-value check (cautious default)
 
     print("  → Product coverage (Merchant Center estate vs advertised)...")
@@ -1944,14 +1984,16 @@ def fetch_account_data(client_cid: str) -> dict:
             print(f"    {product_coverage.get('eligible', 0)} of {product_coverage.get('total', 0)} "
                   f"products eligible; {product_coverage.get('dark_count', 0)} gone dark")
     except Exception as e:
-        print(f"    (product coverage query failed - fine for non-Shopping accounts: {e})")
+        _warn(f"    (product coverage query failed - fine for non-Shopping accounts: {e})",
+              fetch="product coverage", error=e)
 
     print("  → Conversion actions per campaign (12m, duplicate-tag evidence)...")
     campaign_conversion_split = {}
     try:
         campaign_conversion_split = get_campaign_conversion_split(client, cid)
     except Exception as e:
-        print(f"    (campaign conversion split query failed: {e})")
+        _warn(f"    (campaign conversion split query failed: {e})",
+              fetch="campaign conversion split", error=e)
         # leave empty → duplicate check keeps its unenriched wording
 
     print("  → Campaigns...")
@@ -1971,7 +2013,8 @@ def fetch_account_data(client_cid: str) -> dict:
         if _uncapped:
             max_clicks_costly_terms = get_max_clicks_costly_terms(client, cid, _uncapped)
     except Exception as e:
-        print(f"    (max-clicks costly-terms query failed: {e})")
+        _warn(f"    (max-clicks costly-terms query failed: {e})",
+              fetch="max-clicks costly-terms", error=e)
 
     # Product overlap (Shopping/PMax only) - products taking spend in 2+ campaigns
     print("  → Product overlap (Shopping/PMax)...")
@@ -1983,7 +2026,7 @@ def fetch_account_data(client_cid: str) -> dict:
             if product_overlap:
                 print(f"    {len(product_overlap)} product(s) spending in 2+ campaigns")
     except Exception as e:
-        print(f"    (product-overlap query failed: {e})")
+        _warn(f"    (product-overlap query failed: {e})", fetch="product-overlap", error=e)
 
     print("  → Ad policy status / change activity / hourly / device splits...")
     ad_policy_status, change_activity, hourly_performance, device_performance = {}, {}, {}, {}
@@ -2001,7 +2044,7 @@ def fetch_account_data(client_cid: str) -> dict:
             elif _name == "hourly_performance": hourly_performance = _res
             else:                              device_performance = _res
         except Exception as e:
-            print(f"    ({_name} query failed: {e})")
+            _warn(f"    ({_name} query failed: {e})", fetch=_name, error=e)
 
     print("  → Ad groups...")
     ad_groups = get_ad_groups(client, cid)
@@ -2036,7 +2079,7 @@ def fetch_account_data(client_cid: str) -> dict:
         for row in neg_response2:
             neg_kw_total += 1
     except Exception as e:
-        print(f"    (negative keyword query failed: {e})")
+        _warn(f"    (negative keyword query failed: {e})", fetch="negative keyword", error=e)
         neg_kw_total = None
 
     print("  → Negative keyword texts (conflict check)...")
@@ -2046,7 +2089,8 @@ def fetch_account_data(client_cid: str) -> dict:
         print(f"    {len(negative_keywords['campaign'])} campaign-level + "
               f"{len(negative_keywords['shared'])} shared-set negatives")
     except Exception as e:
-        print(f"    (negative keyword texts query failed: {e})")
+        _warn(f"    (negative keyword texts query failed: {e})",
+              fetch="negative keyword texts", error=e)
         # leave None → analyser skips the conflict check (cautious default)
 
     print("  → Auto-apply recommendations...")
@@ -2071,7 +2115,7 @@ def fetch_account_data(client_cid: str) -> dict:
         if auto_apply_types:
             print(f"    auto-apply types enabled: {auto_apply_types}")
     except Exception as e:
-        print(f"    (auto-apply query failed: {e})")
+        _warn(f"    (auto-apply query failed: {e})", fetch="auto-apply", error=e)
         auto_apply_enabled = None
         auto_apply_types = []
 
@@ -2082,13 +2126,15 @@ def fetch_account_data(client_cid: str) -> dict:
     try:
         priciest_clicks = get_priciest_clicks(client, cid)
     except Exception as e:
-        print(f"    (priciest-clicks query failed: {e})"); priciest_clicks = None
+        _warn(f"    (priciest-clicks query failed: {e})",
+              fetch="priciest-clicks", error=e); priciest_clicks = None
 
     print("  → Per-term conversion-action breakdown (90d)...")
     try:
         term_conversion_breakdown = get_term_conversion_breakdown(client, cid)
     except Exception as e:
-        print(f"    (term conv-breakdown query failed: {e})"); term_conversion_breakdown = {}
+        _warn(f"    (term conv-breakdown query failed: {e})",
+              fetch="term conv-breakdown", error=e); term_conversion_breakdown = {}
 
     print("  → Converting search terms not added as keywords (90d)...")
     try:
@@ -2096,7 +2142,8 @@ def fetch_account_data(client_cid: str) -> dict:
         if converting_unkeyworded_terms:
             print(f"    {len(converting_unkeyworded_terms)} converting term(s) not added as keywords")
     except Exception as e:
-        print(f"    (converting-unkeyworded query failed: {e})")
+        _warn(f"    (converting-unkeyworded query failed: {e})",
+              fetch="converting-unkeyworded", error=e)
         converting_unkeyworded_terms = None
 
     print("  → Location targeting...")
@@ -2109,7 +2156,7 @@ def fetch_account_data(client_cid: str) -> dict:
     try:
         customer_match = get_customer_match(client, cid)
     except Exception as e:
-        print(f"    (customer-match query failed: {e})")
+        _warn(f"    (customer-match query failed: {e})", fetch="customer-match", error=e)
         customer_match = None
 
     print("  → Quality scores...")
@@ -2119,13 +2166,15 @@ def fetch_account_data(client_cid: str) -> dict:
     try:
         impression_share_lost = get_impression_share_lost(client, cid)
     except Exception as e:
-        print(f"    (IS-lost query failed: {e})"); impression_share_lost = None
+        _warn(f"    (IS-lost query failed: {e})",
+              fetch="IS-lost", error=e); impression_share_lost = None
 
     print("  → Location targeting setting...")
     try:
         location_target_types = get_location_target_types(client, cid)
     except Exception as e:
-        print(f"    (location-type query failed: {e})"); location_target_types = None
+        _warn(f"    (location-type query failed: {e})",
+              fetch="location-type", error=e); location_target_types = None
 
     print("  → Geo user-location split (real out-of-area spend)...")
     try:
@@ -2135,25 +2184,28 @@ def fetch_account_data(client_cid: str) -> dict:
                   f"({geo_user_location['out_of_area_pct']:.0%}); "
                   f"cross-border £{geo_user_location['foreign_country_spend']:.0f}")
     except Exception as e:
-        print(f"    (geo user-location query failed: {e})"); geo_user_location = None
+        _warn(f"    (geo user-location query failed: {e})",
+              fetch="geo user-location", error=e); geo_user_location = None
 
     print("  → Ad assets / extensions...")
     try:
         ad_assets = get_ad_assets(client, cid)
     except Exception as e:
-        print(f"    (ad-assets query failed: {e})"); ad_assets = None
+        _warn(f"    (ad-assets query failed: {e})", fetch="ad-assets", error=e); ad_assets = None
 
     print("  → Search Partners / Display opt-in...")
     try:
         network_settings = get_search_network_settings(client, cid)
     except Exception as e:
-        print(f"    (network-settings query failed: {e})"); network_settings = None
+        _warn(f"    (network-settings query failed: {e})",
+              fetch="network-settings", error=e); network_settings = None
 
     print("  → Spend/conversions by network (Display & Search Partners)...")
     try:
         network_split = get_network_split(client, cid)
     except Exception as e:
-        print(f"    (network-split query failed: {e})"); network_split = None
+        _warn(f"    (network-split query failed: {e})",
+              fetch="network-split", error=e); network_split = None
 
     print("  → Account name (for brand detection)...")
     account_name = ""
@@ -2161,13 +2213,14 @@ def fetch_account_data(client_cid: str) -> dict:
         for r in run_query(client, cid, "SELECT customer.descriptive_name FROM customer"):
             account_name = r.customer.descriptive_name; break
     except Exception as e:
-        print(f"    (account-name query failed: {e})")
+        _warn(f"    (account-name query failed: {e})", fetch="account-name", error=e)
 
     print("  → Brand leakage into non-brand campaigns...")
     try:
         brand_leakage = get_brand_leakage(client, cid, account_name)
     except Exception as e:
-        print(f"    (brand-leakage query failed: {e})"); brand_leakage = None
+        _warn(f"    (brand-leakage query failed: {e})",
+              fetch="brand-leakage", error=e); brand_leakage = None
 
     print("  → RSA ad strength...")
     try:
@@ -2176,14 +2229,14 @@ def fetch_account_data(client_cid: str) -> dict:
             print(f"    {rsa_ad_strength['total_rsas']} RSAs; "
                   f"{rsa_ad_strength['low_strength_count']} Poor/Average")
     except Exception as e:
-        print(f"    (RSA ad strength query failed: {e})")
+        _warn(f"    (RSA ad strength query failed: {e})", fetch="RSA ad strength", error=e)
         rsa_ad_strength = None
 
     print("  → Ad copy quality...")
     try:
         ad_copy_quality = get_ad_copy_quality(client, cid)
     except Exception as e:
-        print(f"    (ad copy quality query failed: {e})")
+        _warn(f"    (ad copy quality query failed: {e})", fetch="ad copy quality", error=e)
         ad_copy_quality = None
 
     print("  → Paused campaign history (12 months)...")
@@ -2192,7 +2245,8 @@ def fetch_account_data(client_cid: str) -> dict:
         if paused_campaign_history:
             print(f"    {len(paused_campaign_history)} paused campaign(s) with history")
     except Exception as e:
-        print(f"    (paused campaign history query failed: {e})")
+        _warn(f"    (paused campaign history query failed: {e})",
+              fetch="paused campaign history", error=e)
         paused_campaign_history = None
 
     print("  → Shopping/PMax all-time history (why is it switched off?)...")
@@ -2201,7 +2255,8 @@ def fetch_account_data(client_cid: str) -> dict:
         if shopping_history_alltime:
             print(f"    {len(shopping_history_alltime)} Shopping/PMax campaign(s) in all-time history")
     except Exception as e:
-        print(f"    (Shopping/PMax all-time history query failed: {e})")
+        _warn(f"    (Shopping/PMax all-time history query failed: {e})",
+              fetch="Shopping/PMax all-time history", error=e)
         shopping_history_alltime = None
 
     print("  → Ad destination domains (single vs multi storefront)...")
@@ -2211,7 +2266,8 @@ def fetch_account_data(client_cid: str) -> dict:
             print(f"    {len(ad_destination_domains)} destination domain(s): "
                   f"{', '.join(list(ad_destination_domains)[:3])}")
     except Exception as e:
-        print(f"    (ad destination domains query failed: {e})")
+        _warn(f"    (ad destination domains query failed: {e})",
+              fetch="ad destination domains", error=e)
         ad_destination_domains = None
 
     print("  → Site brand/manufacturer list (for brand vs new-demand in the SQR)...")
@@ -2224,7 +2280,7 @@ def fetch_account_data(client_cid: str) -> dict:
             else:
                 print("    (no explicit brand list found - SQR falls back to the brand caveat)")
     except Exception as e:
-        print(f"    (site brand discovery skipped: {e})")
+        _warn(f"    (site brand discovery skipped: {e})", fetch="site brand discovery", error=e)
         site_brands = []
 
     print("  → 30-day account summary...")
@@ -2282,10 +2338,18 @@ def fetch_account_data(client_cid: str) -> dict:
         "auto_apply_recommendations": auto_apply_enabled,
         "auto_apply_types": auto_apply_types,
         "performance_summary": performance_summary,
+        # What this run could not see. Copies, so nothing written here can be changed by a
+        # later run's collectors. The analyser and the deck ignore them today; they exist so
+        # a finished audit can always say which queries came back empty, and why.
+        "_query_failures": list(_QUERY_FAILURES),
+        "_warnings": list(_WARNINGS),
     }
 
     print(f"\n✅ Data pull complete. {len(campaigns)} campaigns, {len(ad_groups)} ad groups, "
           f"{len(conversion_actions)} conversion actions found.")
+    if _QUERY_FAILURES:
+        print(f"  ⚠ {len(_QUERY_FAILURES)} query/queries failed this run: "
+              f"{', '.join(sorted({f['fetch'] for f in _QUERY_FAILURES}))}")
     return data
 
 

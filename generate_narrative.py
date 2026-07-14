@@ -900,8 +900,14 @@ def _lint_fact_fidelity(narr, findings):
 
 
 def _lint_narrative(narr, account_type: str = "", findings=None):
-    """Apply the deterministic copy rules to every string in the narrative dict."""
+    """Apply the deterministic copy rules to every string in the narrative dict.
+
+    Warnings are still printed, and are now also KEPT on the returned dict as
+    `_warnings` - a style-lint or fact-fidelity flag used to go to the console and
+    nowhere else, so nobody ever saw the ones that fired during a real audit.
+    """
     subs = list(_LINT_SUBS) + (list(_LINT_SUBS_ECOM) if account_type == "ecommerce" else [])
+    warnings = []
 
     def _fix(s):
         if not isinstance(s, str):
@@ -914,6 +920,8 @@ def _lint_narrative(narr, account_type: str = "", findings=None):
         for pat, why in _LINT_WARN:
             if pat.search(out):
                 print(f"  ⚠ style-lint warning: {why}: ...{pat.search(out).group(0)}...")
+                warnings.append({"type": "style_lint", "rule": why,
+                                 "match": pat.search(out).group(0)})
         return re.sub(r"  +", " ", out).strip()
 
     def _walk(x):
@@ -935,9 +943,14 @@ def _lint_narrative(narr, account_type: str = "", findings=None):
                   "engine - REVIEW before sending:")
             for tok, field, sentence in facts:
                 print(f"     • {tok} in {field}: \"{sentence[:90]}\"")
+                warnings.append({"type": "fact_fidelity", "token": tok, "field": field,
+                                 "sentence": sentence})
         else:
             print("  ✓ fact-fidelity: every £/% in the narration traces to the engine.")
 
+    # Attached AFTER the walk, so the warnings are the raw record and are never themselves
+    # rewritten by the copy rules.
+    cleaned["_warnings"] = warnings
     return cleaned
 
 
@@ -1560,7 +1573,7 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         findings.get("bidding_strategy", {}).get("rag", "amber"),
     ]
 
-    return _lint_narrative({
+    narrative = _lint_narrative({
         "client_name":       client_name,
         "account_cid":       findings.get("account_cid", ""),
         "overall_rag":       overall_rag,
@@ -1586,6 +1599,12 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
         "geo_table":         (findings.get("efficiency") or {}).get("geo_table"),
         "website_url":       objectives.get("website_url", ""),
     }, str(findings.get("account_type") or ""), findings=findings)
+
+    # Which findings the engine picked for the deck (severity, RAG, theme and all), kept
+    # outside the linted copy so the run can be replayed and reviewed. populate_slides
+    # reads named keys only, so this - like _tokens_used - never reaches a slide.
+    narrative["_selected_issues"] = selected
+    return narrative
 
 
 # ── Quick test ────────────────────────────────────────────────────────────────
