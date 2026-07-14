@@ -1,0 +1,2606 @@
+{
+ "account_name": "Example Fuel Co Ltd",
+ "client_cid": "1234567890",
+ "account_summary_30d": {
+  "spend": 0.0,
+  "clicks": 0,
+  "conversions": 0.0,
+  "impressions": 0,
+  "cpa": null,
+  "ctr_pct": null,
+  "avg_cpc": null
+ },
+ "performance_summary": {
+  "spend_30d": "£1,830",
+  "impr_30d": "17,745",
+  "clicks_30d": "2,336",
+  "convs_30d": "10,288",
+  "cvr_30d": "440.42%",
+  "cpa_30d": "£0",
+  "sis_30d": "15%",
+  "spend_12m": "£6,100",
+  "impr_12m": "90,297",
+  "clicks_12m": "5,970",
+  "convs_12m": "15,720",
+  "cvr_12m": "263.32%",
+  "cpa_12m": "£0",
+  "sis_12m": "15%",
+  "revenue_30d": "£9,924",
+  "revenue_12m": "£15,235",
+  "roas_30d": "5.4x",
+  "roas_12m": "2.5x",
+  "is_paused": true,
+  "last_active": "2026-03-04",
+  "days_dark": 132,
+  "window_end": "2026-03-04",
+  "_raw": {
+   "t30": {
+    "spend": 1829.55,
+    "clicks": 2336,
+    "conversions": 10288.21,
+    "impressions": 17745,
+    "value": 9924.16,
+    "sis_sum": 0.0,
+    "sis_count": 0,
+    "cpa": 0.18,
+    "cvr": 440.42,
+    "roas": 5.42,
+    "sis": 15.0,
+    "abs_top": 10.0,
+    "top": 11.4
+   },
+   "t12": {
+    "spend": 6100.13,
+    "clicks": 5970,
+    "conversions": 15720.09,
+    "impressions": 90297,
+    "value": 15234.89,
+    "sis_sum": 0.0,
+    "sis_count": 0,
+    "cpa": 0.39,
+    "cvr": 263.32,
+    "roas": 2.5,
+    "sis": 14.9,
+    "abs_top": 10.0,
+    "top": 11.2
+   }
+  },
+  "spend_30d_trend": "▲ 3.6x",
+  "impr_30d_trend": "▲ +136%",
+  "clicks_30d_trend": "▲ 4.7x",
+  "convs_30d_trend": "▲ 7.9x",
+  "cvr_30d_trend": "▲ +67%",
+  "cpa_30d_trend": "▼ -54%",
+  "sis_30d_trend": "▶ +1%",
+  "roas_30d_trend": "▲ +117%"
+ },
+ "campaigns": [
+  {
+   "id": "10000000001",
+   "name": "Search - Product A",
+   "status": "PAUSED",
+   "start_date": "2025-08-29",
+   "type": "SEARCH",
+   "bid_strategy": "MANUAL_CPC",
+   "daily_budget_gbp": 16.5,
+   "spend_30d": 0.0,
+   "clicks_30d": 0,
+   "conversions_30d": 0.0,
+   "impressions_30d": 0,
+   "avg_cpc_gbp": null,
+   "cpc_ceiling_gbp": null,
+   "target_cpa_gbp": null,
+   "target_roas": null,
+   "conv_value_30d": 0.0,
+   "shared_budget": false,
+   "budget_resource": "customers/1234567890/campaignBudgets/30000000001",
+   "portfolio_strategy": false
+  },
+  {
+   "id": "10000000002",
+   "name": "Search - Product B",
+   "status": "PAUSED",
+   "start_date": "2025-09-03",
+   "type": "SEARCH",
+   "bid_strategy": "MANUAL_CPC",
+   "daily_budget_gbp": 16.5,
+   "spend_30d": 0.0,
+   "clicks_30d": 0,
+   "conversions_30d": 0.0,
+   "impressions_30d": 0,
+   "avg_cpc_gbp": null,
+   "cpc_ceiling_gbp": null,
+   "target_cpa_gbp": null,
+   "target_roas": null,
+   "conv_value_30d": 0.0,
+   "shared_budget": false,
+   "budget_resource": "customers/1234567890/campaignBudgets/30000000002",
+   "portfolio_strategy": false
+  },
+  {
+   "id": "10000000003",
+   "name": "Search - Product C",
+   "status": "PAUSED",
+   "start_date": "2025-09-05",
+   "type": "SEARCH",
+   "bid_strategy": "MANUAL_CPC",
+   "daily_budget_gbp": 16.5,
+   "spend_30d": 0.0,
+   "clicks_30d": 0,
+   "conversions_30d": 0.0,
+   "impressions_30d": 0,
+   "avg_cpc_gbp": null,
+   "cpc_ceiling_gbp": null,
+   "target_cpa_gbp": null,
+   "target_roas": null,
+   "conv_value_30d": 0.0,
+   "shared_budget": false,
+   "budget_resource": "customers/1234567890/campaignBudgets/30000000003",
+   "portfolio_strategy": false
+  },
+  {
+   "id": "10000000004",
+   "name": "Search - Product D",
+   "status": "PAUSED",
+   "start_date": "2025-09-09",
+   "type": "SEARCH",
+   "bid_strategy": "MANUAL_CPC",
+   "daily_budget_gbp": 5.5,
+   "spend_30d": 0.0,
+   "clicks_30d": 0,
+   "conversions_30d": 0.0,
+   "impressions_30d": 0,
+   "avg_cpc_gbp": null,
+   "cpc_ceiling_gbp": null,
+   "target_cpa_gbp": null,
+   "target_roas": null,
+   "conv_value_30d": 0.0,
+   "shared_budget": false,
+   "budget_resource": "customers/1234567890/campaignBudgets/30000000004",
+   "portfolio_strategy": false
+  },
+  {
+   "id": "10000000005",
+   "name": "Search - Product E",
+   "status": "PAUSED",
+   "start_date": "2025-10-18",
+   "type": "SEARCH",
+   "bid_strategy": "MAXIMIZE_CONVERSIONS",
+   "daily_budget_gbp": 40.61,
+   "spend_30d": 0.0,
+   "clicks_30d": 0,
+   "conversions_30d": 0.0,
+   "impressions_30d": 0,
+   "avg_cpc_gbp": null,
+   "cpc_ceiling_gbp": null,
+   "target_cpa_gbp": null,
+   "target_roas": null,
+   "conv_value_30d": 0.0,
+   "shared_budget": false,
+   "budget_resource": "customers/1234567890/campaignBudgets/30000000005",
+   "portfolio_strategy": false
+  },
+  {
+   "id": "10000000006",
+   "name": "Smart - Local Calls",
+   "status": "PAUSED",
+   "start_date": "2026-01-28",
+   "type": "SMART",
+   "bid_strategy": "TARGET_SPEND",
+   "daily_budget_gbp": 13.8,
+   "spend_30d": 0.0,
+   "clicks_30d": 0,
+   "conversions_30d": 0.0,
+   "impressions_30d": 0,
+   "avg_cpc_gbp": null,
+   "cpc_ceiling_gbp": null,
+   "target_cpa_gbp": null,
+   "target_roas": null,
+   "conv_value_30d": 0.0,
+   "shared_budget": false,
+   "budget_resource": "customers/1234567890/campaignBudgets/30000000006",
+   "portfolio_strategy": true
+  }
+ ],
+ "campaign_types_active": [],
+ "ad_groups": [
+  {
+   "id": "20000000001",
+   "name": "Ad group 001 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000100",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000002",
+   "name": "Ad group 002 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000100",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000003",
+   "name": "Ad group 003 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000101",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000004",
+   "name": "Ad group 004 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000101",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000005",
+   "name": "Ad group 005 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000102",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000006",
+   "name": "Ad group 006 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000102",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000007",
+   "name": "Ad group 007 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000102",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000008",
+   "name": "Ad group 008 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000102",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000009",
+   "name": "Ad group 009 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000102",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000010",
+   "name": "Ad group 010 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000102",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000011",
+   "name": "Ad group 011 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000012",
+   "name": "Ad group 012",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000013",
+   "name": "Ad group 013 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000014",
+   "name": "Ad group 014 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000015",
+   "name": "Ad group 015 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000016",
+   "name": "Ad group 016 | Phrase",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000017",
+   "name": "Ad group 017 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000018",
+   "name": "Ad group 018 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000019",
+   "name": "Ad group 019 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000020",
+   "name": "Ad group 020 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000021",
+   "name": "Ad group 021 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000022",
+   "name": "Ad group 022 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000023",
+   "name": "Ad group 023 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000024",
+   "name": "Ad group 024 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000025",
+   "name": "Ad group 025 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000026",
+   "name": "Ad group 026 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000027",
+   "name": "Ad group 027 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000028",
+   "name": "Ad group 028 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000029",
+   "name": "Ad group 029 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000030",
+   "name": "Ad group 030 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000031",
+   "name": "Ad group 031 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000032",
+   "name": "Ad group 032 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000033",
+   "name": "Ad group 033 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000034",
+   "name": "Ad group 034 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000035",
+   "name": "Ad group 035 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000036",
+   "name": "Ad group 036 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000037",
+   "name": "Ad group 037 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000038",
+   "name": "Ad group 038 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000039",
+   "name": "Ad group 039 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000040",
+   "name": "Ad group 040 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000041",
+   "name": "Ad group 041 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000103",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000042",
+   "name": "Ad group 110 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000043",
+   "name": "Ad group 070 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000044",
+   "name": "Ad group 078 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000045",
+   "name": "Ad group 079 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000046",
+   "name": "Ad group 080 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000047",
+   "name": "Ad group 081 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000048",
+   "name": "Ad group 083 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000049",
+   "name": "Ad group 102 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000050",
+   "name": "Ad group 106 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000051",
+   "name": "Ad group 082 | Phrase",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000052",
+   "name": "Ad group 052",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000053",
+   "name": "Ad group 053 | Phrase",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000054",
+   "name": "Ad group 054 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000055",
+   "name": "Ad group 055 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000056",
+   "name": "Ad group 093 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000057",
+   "name": "Ad group 087 | Exact",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000104",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000058",
+   "name": "Ad group 058 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000105",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000059",
+   "name": "Ad group 059 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000105",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000060",
+   "name": "Ad group 110 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000061",
+   "name": "Ad group 070 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000062",
+   "name": "Ad group 078 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000063",
+   "name": "Ad group 079 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000064",
+   "name": "Ad group 080 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000065",
+   "name": "Ad group 081 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000066",
+   "name": "Ad group 083 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000067",
+   "name": "Ad group 102 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000068",
+   "name": "Ad group 106 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000106",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000069",
+   "name": "Ad group 110 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000070",
+   "name": "Ad group 070 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000071",
+   "name": "Ad group 078 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000072",
+   "name": "Ad group 079 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000073",
+   "name": "Ad group 080 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000074",
+   "name": "Ad group 081 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000075",
+   "name": "Ad group 083 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000076",
+   "name": "Ad group 102 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000077",
+   "name": "Ad group 106 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000107",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000078",
+   "name": "Ad group 078 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000108",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000079",
+   "name": "Ad group 079 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000108",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000080",
+   "name": "Ad group 080 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000108",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000081",
+   "name": "Ad group 081 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000108",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000082",
+   "name": "Ad group 082 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000108",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000083",
+   "name": "Ad group 083 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000109",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000084",
+   "name": "Ad group 102 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000109",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000085",
+   "name": "Ad group 106 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000109",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000086",
+   "name": "Ad group 086 | Phrase",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000109",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000087",
+   "name": "Ad group 087 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000109",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000088",
+   "name": "Ad group 088 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000110",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000089",
+   "name": "Ad group 089 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000110",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000090",
+   "name": "Ad group 090 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000110",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000091",
+   "name": "Ad group 091 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000110",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000092",
+   "name": "Ad group 092 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000093",
+   "name": "Ad group 093 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000094",
+   "name": "Ad group 094 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000095",
+   "name": "Ad group 095 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000096",
+   "name": "Ad group 096 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000097",
+   "name": "Ad group 097 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000098",
+   "name": "Ad group 098 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000099",
+   "name": "Ad group 099 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000100",
+   "name": "Ad group 100 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000101",
+   "name": "Ad group 101 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000102",
+   "name": "Ad group 102 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000103",
+   "name": "Ad group 103 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000104",
+   "name": "Ad group 104 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000105",
+   "name": "Ad group 105 | Broad",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000106",
+   "name": "Ad group 106 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000111",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000107",
+   "name": "Ad group 107",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000112",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000108",
+   "name": "Ad group 108 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000113",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000109",
+   "name": "Ad group 109 | Exact",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000113",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000110",
+   "name": "Ad group 110 | Phrase",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000114",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000111",
+   "name": "Ad group 119",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000001",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000112",
+   "name": "Ad group 112",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000002",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000113",
+   "name": "Ad group 113",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000002",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000114",
+   "name": "Ad group 114",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000002",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000115",
+   "name": "Ad group 115",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000003",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000116",
+   "name": "Ad group 116",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000003",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000117",
+   "name": "Ad group 117",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000003",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000118",
+   "name": "Ad group 118",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000003",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000119",
+   "name": "Ad group 119",
+   "status": "PAUSED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000004",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000120",
+   "name": "Ad group 120",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000121",
+   "name": "Ad group 121",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000122",
+   "name": "Ad group 122",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000123",
+   "name": "Ad group 123",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000124",
+   "name": "Ad group 124",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000125",
+   "name": "Ad group 125",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000126",
+   "name": "Ad group 126",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000005",
+   "spend_30d": 0.0
+  },
+  {
+   "id": "20000000127",
+   "name": "Ad group 127",
+   "status": "ENABLED",
+   "campaign_resource": "customers/1234567890/campaigns/10000000006",
+   "spend_30d": 0.0
+  }
+ ],
+ "conversion_actions": [
+  {
+   "name": "Submit lead form (thank-you)",
+   "status": "ENABLED",
+   "counting_type": "ONE_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "SIGNUP",
+   "type": "WEBPAGE_CODELESS",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Contact (thank-you)",
+   "status": "ENABLED",
+   "counting_type": "ONE_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "CONTACT",
+   "type": "WEBPAGE_CODELESS",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Page view (Thank-You)",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "CONTACT",
+   "type": "WEBPAGE_CODELESS",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Product C (web) purchase",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PURCHASE",
+   "type": "GOOGLE_ANALYTICS_4_PURCHASE",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) purchase",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PURCHASE",
+   "type": "GOOGLE_ANALYTICS_4_PURCHASE",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_01",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_02",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_03",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PURCHASE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_04",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "SUBMIT_LEAD_FORM",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_05",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_06",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_07",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_08",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PHONE_CALL_LEAD",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_09",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "SUBMIT_LEAD_FORM",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_10",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_11",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_12",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_13",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Landing page (web) purchase",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PURCHASE",
+   "type": "GOOGLE_ANALYTICS_4_PURCHASE",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) form_submit",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "SUBMIT_LEAD_FORM",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) Enquiry_A",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "ENGAGEMENT",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) page_view",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) user_engagement",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "ENGAGEMENT",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) form_start",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Lead form - Submit",
+   "status": "ENABLED",
+   "counting_type": "ONE_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "SUBMIT_LEAD_FORM",
+   "type": "LEAD_FORM_SUBMIT",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Page view (Page load example.com/for-home/thank-you))",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "PAGE_VIEW",
+   "type": "WEBPAGE_CODELESS",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Domestic Submit lead form (example.com/for-home/)",
+   "status": "ENABLED",
+   "counting_type": "ONE_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "SUBMIT_LEAD_FORM",
+   "type": "WEBPAGE_CODELESS",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) close_convert_lead",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) qualify_lead",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) Form_submit",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) Formsubmit_A",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "SUBMIT_LEAD_FORM",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Calls from ads (2)",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "PHONE_CALL_LEAD",
+   "type": "AD_CALL",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) event_14",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) first_visit",
+   "status": "HIDDEN",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Auto-created conversion action for converted leads",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "CONVERTED_LEAD",
+   "type": "UPLOAD_CLICKS",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Auto-created conversion action for qualified leads (1)",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "QUALIFIED_LEAD",
+   "type": "UPLOAD_CLICKS",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) Thank_You_A",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "REQUEST_QUOTE",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "GA4 (web) Phone_Call",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": false,
+   "category": "PHONE_CALL_LEAD",
+   "type": "GOOGLE_ANALYTICS_4_CUSTOM",
+   "has_tag_snippet": true,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Smart campaign map clicks to call",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "CONTACT",
+   "type": "SMART_CAMPAIGN_MAP_CLICKS_TO_CALL",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Local actions - Directions",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "GET_DIRECTIONS",
+   "type": "GOOGLE_HOSTED",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Smart campaign map directions",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "GET_DIRECTIONS",
+   "type": "SMART_CAMPAIGN_MAP_DIRECTIONS",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Clicks to call",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "CONTACT",
+   "type": "GOOGLE_HOSTED",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Calls from Smart Campaign Ads",
+   "status": "ENABLED",
+   "counting_type": "ONE_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "PHONE_CALL_LEAD",
+   "type": "SMART_CAMPAIGN_TRACKED_CALLS",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Auto-created conversion action for qualified leads",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "QUALIFIED_LEAD",
+   "type": "UPLOAD_CLICKS",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_SEARCH_ATTRIBUTION_DATA_DRIVEN",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Smart campaign ad clicks to call",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": true,
+   "primary_for_goal": true,
+   "category": "CONTACT",
+   "type": "SMART_CAMPAIGN_AD_CLICKS_TO_CALL",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Local actions - Website visits",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "PAGE_VIEW",
+   "type": "GOOGLE_HOSTED",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  },
+  {
+   "name": "Local actions - Other engagements",
+   "status": "ENABLED",
+   "counting_type": "MANY_PER_CLICK",
+   "include_in_conversions": false,
+   "primary_for_goal": true,
+   "category": "ENGAGEMENT",
+   "type": "GOOGLE_HOSTED",
+   "has_tag_snippet": false,
+   "attribution_model": "GOOGLE_ADS_LAST_CLICK",
+   "conversions_30d": 0,
+   "attributed_conversions_30d": 0
+  }
+ ],
+ "conversion_tracking_setting": {
+  "ec_for_leads": true,
+  "accepted_customer_data_terms": true
+ },
+ "conversion_value_by_action": {
+  "Business Enquiry": {
+   "conversions_12m": 6.0,
+   "value_12m": 0.0
+  },
+  "Business profile - Tracked call": {
+   "conversions_12m": 10.0,
+   "value_12m": 10.0
+  },
+  "Calls from Smart Campaign Ads": {
+   "conversions_12m": 71.0,
+   "value_12m": 0.0
+  },
+  "Calls from ads (2)": {
+   "conversions_12m": 57.0,
+   "value_12m": 57.0
+  },
+  "Clicks to call": {
+   "conversions_12m": 66.0,
+   "value_12m": 66.0
+  },
+  "Contact (thank-you)": {
+   "conversions_12m": 621.0,
+   "value_12m": 458.59
+  },
+  "Domestic Submit lead form (example.com/for-home/)": {
+   "conversions_12m": 496.0,
+   "value_12m": 496.0
+  },
+  "Home Enquiry": {
+   "conversions_12m": 17.0,
+   "value_12m": 0.0
+  },
+  "Local actions - Directions": {
+   "conversions_12m": 6.0,
+   "value_12m": 6.0
+  },
+  "GA4 (web) Enquiry_B": {
+   "conversions_12m": 6.0,
+   "value_12m": 6.0
+  },
+  "GA4 (web) Formsubmit_A": {
+   "conversions_12m": 448.0,
+   "value_12m": 329.93
+  },
+  "GA4 (web) Enquiry_A": {
+   "conversions_12m": 344.0,
+   "value_12m": 344.0
+  },
+  "GA4 (web) click": {
+   "conversions_12m": 1.0,
+   "value_12m": 1.0
+  },
+  "GA4 (web) form_start": {
+   "conversions_12m": 1470.0,
+   "value_12m": 1470.0
+  },
+  "GA4 (web) form_submit": {
+   "conversions_12m": 310.0,
+   "value_12m": 310.0
+  },
+  "GA4 (web) page_view": {
+   "conversions_12m": 6602.0,
+   "value_12m": 6602.0
+  },
+  "GA4 (web) user_engagement": {
+   "conversions_12m": 4768.09,
+   "value_12m": 4768.09
+  },
+  "Page view (Page load example.com/for-home/thank-you))": {
+   "conversions_12m": 421.0,
+   "value_12m": 310.29
+  }
+ },
+ "conversion_volume_by_month": {
+  "Business Enquiry": {
+   "2025-09": 4.0,
+   "2025-10": 1.0,
+   "2025-11": 1.0
+  },
+  "Contact (thank-you)": {
+   "2025-09": 1.0,
+   "2025-11": 1.0,
+   "2025-12": 10.563221,
+   "2026-01": 247.370112,
+   "2026-02": 299.066667,
+   "2026-03": 62.0
+  },
+  "Home Enquiry": {
+   "2025-09": 4.0,
+   "2025-12": 13.0
+  },
+  "GA4 (web) Enquiry_B": {
+   "2025-10": 2.0,
+   "2025-11": 4.0
+  },
+  "GA4 (web) Enquiry_A": {
+   "2025-11": 1.0,
+   "2025-12": 0.013278,
+   "2026-01": 35.424329,
+   "2026-02": 260.562393,
+   "2026-03": 47.0
+  },
+  "Calls from ads (2)": {
+   "2025-12": 1.0,
+   "2026-01": 11.000963,
+   "2026-02": 35.003144,
+   "2026-03": 9.995893
+  },
+  "Domestic Submit lead form (example.com/for-home/)": {
+   "2025-12": 21.0,
+   "2026-01": 186.333333,
+   "2026-02": 246.666667,
+   "2026-03": 42.0
+  },
+  "GA4 (web) click": {
+   "2025-12": 1.0
+  },
+  "GA4 (web) form_start": {
+   "2025-12": 44.0,
+   "2026-01": 776.999999,
+   "2026-02": 555.000001,
+   "2026-03": 94.0
+  },
+  "GA4 (web) form_submit": {
+   "2025-12": 16.0,
+   "2026-01": 294.0
+  },
+  "GA4 (web) page_view": {
+   "2025-12": 2.0,
+   "2026-01": 2048.23333,
+   "2026-02": 3578.850003,
+   "2026-03": 972.916667
+  },
+  "GA4 (web) user_engagement": {
+   "2025-12": 152.059751,
+   "2026-01": 1293.81744,
+   "2026-02": 2595.962973,
+   "2026-03": 726.25
+  },
+  "Clicks to call": {
+   "2026-01": 2.0,
+   "2026-02": 55.0,
+   "2026-03": 9.0
+  },
+  "GA4 (web) Formsubmit_A": {
+   "2026-01": 41.999999,
+   "2026-02": 348.000001,
+   "2026-03": 58.0
+  },
+  "Page view (Page load example.com/for-home/thank-you))": {
+   "2026-01": 52.333333,
+   "2026-02": 301.666667,
+   "2026-03": 67.0
+  },
+  "Business profile - Tracked call": {
+   "2026-02": 7.0,
+   "2026-03": 3.0
+  },
+  "Calls from Smart Campaign Ads": {
+   "2026-02": 54.001369,
+   "2026-03": 16.998631
+  },
+  "Local actions - Directions": {
+   "2026-02": 6.0
+  }
+ },
+ "campaign_conversion_split": {
+  "Search - Product A": {
+   "GA4 (web) Enquiry_B": 1.0
+  },
+  "Search - Product B": {
+   "Business Enquiry": 3.0,
+   "Home Enquiry": 2.0,
+   "GA4 (web) Enquiry_B": 3.0
+  },
+  "Search - Product C": {
+   "Business Enquiry": 3.0,
+   "Contact (thank-you)": 2.0,
+   "Home Enquiry": 2.0,
+   "GA4 (web) Enquiry_B": 2.0,
+   "GA4 (web) Enquiry_A": 1.0
+  },
+  "Search - Product E": {
+   "Calls from Smart Campaign Ads": 2.0,
+   "Calls from ads (2)": 48.0,
+   "Contact (thank-you)": 607.99,
+   "Domestic Submit lead form (example.com/for-home/)": 488.0,
+   "Home Enquiry": 13.0,
+   "GA4 (web) Formsubmit_A": 444.0,
+   "GA4 (web) Enquiry_A": 340.0,
+   "GA4 (web) click": 1.0,
+   "GA4 (web) form_start": 1466.0,
+   "GA4 (web) form_submit": 310.0,
+   "GA4 (web) page_view": 6436.68,
+   "GA4 (web) user_engagement": 4685.09,
+   "Page view (Page load example.com/for-home/thank-you))": 412.95
+  },
+  "Smart - Local Calls": {
+   "Business profile - Tracked call": 10.0,
+   "Calls from Smart Campaign Ads": 69.0,
+   "Calls from ads (2)": 9.0,
+   "Clicks to call": 66.0,
+   "Contact (thank-you)": 11.01,
+   "Domestic Submit lead form (example.com/for-home/)": 8.0,
+   "Local actions - Directions": 6.0,
+   "GA4 (web) Formsubmit_A": 4.0,
+   "GA4 (web) Enquiry_A": 3.0,
+   "GA4 (web) form_start": 4.0,
+   "GA4 (web) page_view": 165.32,
+   "GA4 (web) user_engagement": 83.0,
+   "Page view (Page load example.com/for-home/thank-you))": 8.05
+  }
+ },
+ "paused_campaign_history": [
+  {
+   "id": "10000000001",
+   "name": "Search - Product A",
+   "type": "SEARCH",
+   "spend": 851.72,
+   "conversions": 1.0,
+   "genuine_conv": 1.0,
+   "lowval_conv": 0.0,
+   "last_active": "2025-12-02",
+   "cpa": 851.72,
+   "genuine_pct": 100,
+   "real_cpa": 851.72
+  },
+  {
+   "id": "10000000002",
+   "name": "Search - Product B",
+   "type": "SEARCH",
+   "spend": 1054.2,
+   "conversions": 8.0,
+   "genuine_conv": 8.0,
+   "lowval_conv": 0.0,
+   "last_active": "2025-12-02",
+   "cpa": 131.78,
+   "genuine_pct": 100,
+   "real_cpa": 131.78
+  },
+  {
+   "id": "10000000003",
+   "name": "Search - Product C",
+   "type": "SEARCH",
+   "spend": 955.69,
+   "conversions": 10.0,
+   "genuine_conv": 9.0,
+   "lowval_conv": 1.0,
+   "last_active": "2025-12-02",
+   "cpa": 95.57,
+   "genuine_pct": 90,
+   "real_cpa": 106.19
+  },
+  {
+   "id": "10000000004",
+   "name": "Search - Product D",
+   "type": "SEARCH",
+   "spend": 104.93,
+   "conversions": 0.0,
+   "genuine_conv": 0.0,
+   "lowval_conv": 0.0,
+   "last_active": "2025-10-06",
+   "cpa": null,
+   "genuine_pct": null,
+   "real_cpa": null
+  },
+  {
+   "id": "10000000005",
+   "name": "Search - Product E",
+   "type": "SEARCH",
+   "spend": 2633.0,
+   "conversions": 15254.71,
+   "genuine_conv": 3379.99,
+   "lowval_conv": 11874.72,
+   "last_active": "2026-03-04",
+   "cpa": 0.17,
+   "genuine_pct": 22,
+   "real_cpa": 0.78
+  },
+  {
+   "id": "10000000006",
+   "name": "Smart - Local Calls",
+   "type": "SMART",
+   "spend": 500.6,
+   "conversions": 446.38,
+   "genuine_conv": 181.01,
+   "lowval_conv": 259.37,
+   "last_active": "2026-03-04",
+   "cpa": 1.12,
+   "genuine_pct": 41,
+   "real_cpa": 2.77
+  }
+ ],
+ "shopping_history_alltime": [
+  {
+   "id": "10000000115",
+   "name": "PMax - Product B (removed)",
+   "type": "PERFORMANCE_MAX",
+   "status": "REMOVED",
+   "spend": 5254.26,
+   "conversions": 358.0,
+   "conversion_value": 4.81
+  }
+ ],
+ "negative_keyword_count": 9455,
+ "negative_keywords": {
+  "campaign": [
+   {
+    "campaign": "Search - Product C",
+    "text": "neg_term_001",
+    "match_type": "BROAD"
+   },
+   {
+    "campaign": "Search - Product C",
+    "text": "neg_term_002",
+    "match_type": "BROAD"
+   },
+   {
+    "campaign": "Search - Product C",
+    "text": "neg_term_003",
+    "match_type": "BROAD"
+   },
+   {
+    "campaign": "Search - Product C",
+    "text": "neg_term_004",
+    "match_type": "BROAD"
+   },
+   {
+    "campaign": "Search - Product C",
+    "text": "neg_term_005",
+    "match_type": "BROAD"
+   },
+   {
+    "campaign": "Smart - Local Calls",
+    "text": "neg_term_006",
+    "match_type": "PHRASE"
+   },
+   {
+    "campaign": "Smart - Local Calls",
+    "text": "neg_term_007",
+    "match_type": "PHRASE"
+   },
+   {
+    "campaign": "Smart - Local Calls",
+    "text": "neg_term_008",
+    "match_type": "PHRASE"
+   },
+   {
+    "campaign": "Smart - Local Calls",
+    "text": "neg_term_009",
+    "match_type": "PHRASE"
+   },
+   {
+    "campaign": "Smart - Local Calls",
+    "text": "neg_term_010",
+    "match_type": "PHRASE"
+   }
+  ],
+  "shared": [
+   {
+    "set": "Shared set 1",
+    "text": "neg_term_011",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 1",
+    "text": "neg_term_012",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 1",
+    "text": "neg_term_013",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 2",
+    "text": "neg_term_014",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 2",
+    "text": "neg_term_015",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 2",
+    "text": "neg_term_016",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 3",
+    "text": "neg_term_017",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 3",
+    "text": "neg_term_018",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 3",
+    "text": "neg_term_019",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 4",
+    "text": "neg_term_020",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 4",
+    "text": "neg_term_009",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 4",
+    "text": "neg_term_001",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 5",
+    "text": "neg_term_021",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 5",
+    "text": "neg_term_022",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 5",
+    "text": "neg_term_023",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 6",
+    "text": "neg_term_021",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 6",
+    "text": "neg_term_022",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 6",
+    "text": "neg_term_023",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 7",
+    "text": "neg_term_024",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 7",
+    "text": "neg_term_025",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 7",
+    "text": "neg_term_026",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 8",
+    "text": "neg_term_027",
+    "match_type": "EXACT"
+   },
+   {
+    "set": "Shared set 8",
+    "text": "neg_term_028",
+    "match_type": "BROAD"
+   },
+   {
+    "set": "Shared set 8",
+    "text": "neg_term_029",
+    "match_type": "BROAD"
+   }
+  ],
+  "shared_campaigns": {
+   "Shared set 2": [
+    "Search - Product A",
+    "Search - Product B",
+    "Search - Product C",
+    "Search - Product D",
+    "Search - Product E"
+   ],
+   "Shared set 7": [
+    "Search - Product A",
+    "Search - Product B",
+    "Search - Product C",
+    "Search - Product D"
+   ],
+   "Shared set 8": [
+    "Search - Product E"
+   ]
+  },
+  "ad_group_counts": {
+   "Search - Product E": 3
+  },
+  "shared_sizes": {
+   "Shared set 1": 199,
+   "Shared set 2": 53,
+   "Shared set 3": 211,
+   "Shared set 4": 499,
+   "Shared set 5": 80,
+   "Shared set 6": 107,
+   "Shared set 7": 186,
+   "Shared set 8": 217
+  }
+ },
+ "ad_assets": {
+  "STRUCTURED_SNIPPET": 1,
+  "SITELINK": 15,
+  "CALLOUT": 3,
+  "CALL": 1
+ },
+ "audience_signals": {
+  "pmax_asset_groups": [],
+  "audience_signals": [],
+  "has_pmax": false,
+  "has_audience_signals": false
+ },
+ "rsa_ad_strength": {
+  "total_rsas": 126,
+  "by_strength": {
+   "GOOD": 44,
+   "AVERAGE": 13,
+   "EXCELLENT": 48,
+   "POOR": 21
+  },
+  "low_strength_count": 34,
+  "low_strength_spend": 0.0,
+  "low_strength_examples": [
+   {
+    "ad_group": "Ad group 005 | Phrase",
+    "strength": "Average",
+    "spend": 0.0
+   },
+   {
+    "ad_group": "Ad group 006 | Exact",
+    "strength": "Average",
+    "spend": 0.0
+   },
+   {
+    "ad_group": "Ad group 011 | Phrase",
+    "strength": "Average",
+    "spend": 0.0
+   },
+   {
+    "ad_group": "Ad group 012",
+    "strength": "Average",
+    "spend": 0.0
+   },
+   {
+    "ad_group": "Ad group 028 | Exact",
+    "strength": "Average",
+    "spend": 0.0
+   }
+  ]
+ },
+ "ad_copy_quality": {
+  "rsa_count": 16,
+  "headline_count": 240,
+  "desc_count": 64,
+  "mean_headline_len": 24.5,
+  "mean_desc_len": 80.4,
+  "lower_initial": 0,
+  "upper_initial": 240,
+  "all_caps": 0,
+  "casing_inconsistent": false
+ },
+ "ad_policy_status": {
+  "total": 17,
+  "disapproved": [],
+  "limited": [],
+  "disapproved_topics": {},
+  "asset_limited": 0,
+  "asset_disapproved": 0,
+  "asset_topics": {}
+ },
+ "keyword_match_counts": {
+  "BROAD": 155,
+  "PHRASE": 605,
+  "EXACT": 209,
+  "total": 969
+ },
+ "keyword_match_breakdown": {
+  "BROAD": {
+   "spend": 0.0,
+   "clicks": 0
+  },
+  "PHRASE": {
+   "spend": 0.0,
+   "clicks": 0
+  },
+  "EXACT": {
+   "spend": 0.0,
+   "clicks": 0
+  }
+ },
+ "location_targeting": [
+  {
+   "campaign_id": "10000000001",
+   "campaign_name": "Search - Product A",
+   "geo_target": "geoTargetConstants/900001",
+   "is_negative": false,
+   "location_name": "Region A"
+  },
+  {
+   "campaign_id": "10000000001",
+   "campaign_name": "Search - Product A",
+   "geo_target": "geoTargetConstants/900002",
+   "is_negative": true,
+   "location_name": "Excluded area 01"
+  },
+  {
+   "campaign_id": "10000000001",
+   "campaign_name": "Search - Product A",
+   "geo_target": "geoTargetConstants/900003",
+   "is_negative": true,
+   "location_name": "Excluded area 02"
+  },
+  {
+   "campaign_id": "10000000001",
+   "campaign_name": "Search - Product A",
+   "geo_target": "geoTargetConstants/900004",
+   "is_negative": true,
+   "location_name": "Excluded area 03"
+  },
+  {
+   "campaign_id": "10000000002",
+   "campaign_name": "Search - Product B",
+   "geo_target": "geoTargetConstants/900001",
+   "is_negative": false,
+   "location_name": "Region A"
+  },
+  {
+   "campaign_id": "10000000002",
+   "campaign_name": "Search - Product B",
+   "geo_target": "geoTargetConstants/900002",
+   "is_negative": true,
+   "location_name": "Excluded area 01"
+  },
+  {
+   "campaign_id": "10000000002",
+   "campaign_name": "Search - Product B",
+   "geo_target": "geoTargetConstants/900003",
+   "is_negative": true,
+   "location_name": "Excluded area 02"
+  },
+  {
+   "campaign_id": "10000000002",
+   "campaign_name": "Search - Product B",
+   "geo_target": "geoTargetConstants/900004",
+   "is_negative": true,
+   "location_name": "Excluded area 03"
+  },
+  {
+   "campaign_id": "10000000003",
+   "campaign_name": "Search - Product C",
+   "geo_target": "geoTargetConstants/900001",
+   "is_negative": false,
+   "location_name": "Region A"
+  },
+  {
+   "campaign_id": "10000000003",
+   "campaign_name": "Search - Product C",
+   "geo_target": "geoTargetConstants/900002",
+   "is_negative": true,
+   "location_name": "Excluded area 01"
+  },
+  {
+   "campaign_id": "10000000003",
+   "campaign_name": "Search - Product C",
+   "geo_target": "geoTargetConstants/900003",
+   "is_negative": true,
+   "location_name": "Excluded area 02"
+  },
+  {
+   "campaign_id": "10000000003",
+   "campaign_name": "Search - Product C",
+   "geo_target": "geoTargetConstants/900004",
+   "is_negative": true,
+   "location_name": "Excluded area 03"
+  },
+  {
+   "campaign_id": "10000000004",
+   "campaign_name": "Search - Product D",
+   "geo_target": "geoTargetConstants/900005",
+   "is_negative": false,
+   "location_name": "Region B"
+  },
+  {
+   "campaign_id": "10000000004",
+   "campaign_name": "Search - Product D",
+   "geo_target": "geoTargetConstants/900001",
+   "is_negative": false,
+   "location_name": "Region A"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900006",
+   "is_negative": true,
+   "location_name": "Excluded area 04"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900007",
+   "is_negative": true,
+   "location_name": "Excluded area 05"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900008",
+   "is_negative": true,
+   "location_name": "Excluded area 06"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900001",
+   "is_negative": false,
+   "location_name": "Region A"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900009",
+   "is_negative": true,
+   "location_name": "Excluded area 07"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900002",
+   "is_negative": true,
+   "location_name": "Excluded area 01"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000010",
+   "is_negative": true,
+   "location_name": "Excluded area 08"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900003",
+   "is_negative": true,
+   "location_name": "Excluded area 02"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000011",
+   "is_negative": true,
+   "location_name": "Excluded area 09"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000012",
+   "is_negative": true,
+   "location_name": "Excluded area 10"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000013",
+   "is_negative": true,
+   "location_name": "Excluded area 11"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000014",
+   "is_negative": true,
+   "location_name": "Excluded area 12"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000015",
+   "is_negative": true,
+   "location_name": "Excluded area 13"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000016",
+   "is_negative": true,
+   "location_name": "Excluded area 14"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000017",
+   "is_negative": true,
+   "location_name": "Excluded area 15"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/900004",
+   "is_negative": true,
+   "location_name": "Excluded area 03"
+  },
+  {
+   "campaign_id": "10000000005",
+   "campaign_name": "Search - Product E",
+   "geo_target": "geoTargetConstants/9000018",
+   "is_negative": true,
+   "location_name": "Excluded area 16"
+  }
+ ],
+ "client_keywords": [
+  "product term 1",
+  "product term 2",
+  "product term 3",
+  "product term 4",
+  "product term 5"
+ ],
+ "competitors": [
+  "competitor 1",
+  "competitor 2",
+  "competitor 3"
+ ],
+ "site_brands": [],
+ "customer_match": {
+  "total_lists": 14,
+  "customer_match_lists": 0,
+  "customer_match_names": []
+ },
+ "change_activity": {
+  "days": 28,
+  "changes": 0,
+  "last_change": null,
+  "last_target_change": null
+ },
+ "auto_apply_recommendations": false,
+ "auto_apply_types": [],
+ "claims_ecom": false,
+ "claims_lead_gen": true,
+ "international_audience": false,
+ "stated_roas_target": null,
+ "stated_margin_pct": null,
+ "stated_ltv_gbp": null,
+ "ltv_note": "",
+ "top_search_terms": [],
+ "converting_unkeyworded_terms": [],
+ "term_conversion_breakdown": {},
+ "quality_scores": [],
+ "impression_share_lost": [],
+ "priciest_clicks": [],
+ "max_clicks_costly_terms": {},
+ "brand_leakage": [],
+ "ad_destination_domains": {},
+ "device_performance": {},
+ "network_split": {},
+ "network_settings": [],
+ "location_target_types": [],
+ "product_coverage": {},
+ "product_overlap": [],
+ "hourly_performance": {},
+ "geo_user_location": null,
+ "_warnings": [],
+ "_query_failures": [],
+ "_fixture_note": {
+  "what": "Sanitised, synthetic-named copy of a real lead-gen prospect account (T3, Phase 1 audit-quality plan). Shape preserved, identity removed.",
+  "identity_removed": [
+   "client and business names",
+   "customer ID",
+   "campaign names",
+   "ad group names",
+   "conversion action names that carried the brand",
+   "URLs and domains",
+   "location names",
+   "negative keyword text",
+   "shared negative set names",
+   "client keywords and competitor names",
+   "all Google resource IDs"
+  ],
+  "sampled_not_full": "negative_keywords.campaign / .shared hold a representative sample (5 per campaign, 3 per set). negative_keyword_count (9455) and shared_sizes keep the REAL totals - they are what the count-based strength reads. Engine output is identical with the full 1,779 rows.",
+  "verified": "analyse_account + select_top_issues produce the same account type, the same overall RAG, the same severity ladder and the same strengths on this fixture as on the real account data it was built from."
+ }
+}
