@@ -57,11 +57,13 @@ def prepare_credentials():
             "token_uri":     "https://oauth2.googleapis.com/token",
             "client_id":     get_secret("GOOGLE_CLIENT_ID"),
             "client_secret": get_secret("GOOGLE_CLIENT_SECRET"),
+            # Only scopes the Slides refresh token is actually authorised for.
+            # gmail.send is deliberately NOT here: the token has no Gmail grant,
+            # and listing it would poison any refresh that reads these scopes.
             "scopes": [
                 "https://www.googleapis.com/auth/presentations",
                 "https://www.googleapis.com/auth/drive",
                 "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/gmail.send",
             ],
         }
         with open(token_path, "w") as f:
@@ -328,60 +330,54 @@ if submitted:
 
         slides_url = ps_module.main()
 
-        # ── Log + email the completed audit ──────────────────────────────
+        # ── Log the completed audit + notify ──────────────────────────────
+        # Logging and email are INDEPENDENT: they use separate credentials and
+        # separate try/except blocks, so one failing can never mask or block the
+        # other (and neither can undo the finished deck shown below).
+        _duration = _time.time() - _audit_start
+        _tokens   = narrative.get("_tokens_used", 0)
+
+        # ── Audit logging (Google Sheets: needs only the spreadsheets scope) ──
         try:
             import audit_log as _al
-            import send_email as _se
             from google.oauth2.credentials import Credentials as _Creds
             from google.auth.transport.requests import Request as _Req
 
-            _duration = _time.time() - _audit_start
-            _tokens   = narrative.get("_tokens_used", 0)
-
-            # Full ranked findings list (incl. those below the 6-slide cut) for the
-            # internal email, so the auditor can reference everything on the call.
-            try:
-                from analyse_account import select_top_issues as _sti
-                _all_findings = _sti(findings, max_issues=50, apply_floor=False)
-                _findings_lines = [
-                    f"[{i.get('category','')}] " + i.get("detail", "").split(". ")[0].strip()
-                    for i in _all_findings
-                ]
-            except Exception:
-                _findings_lines = []
-
-            # Build credentials directly from secrets  -  reliable on cloud
+            # Spreadsheets-scope credentials off the Slides token. This scope IS
+            # authorised on GOOGLE_REFRESH_TOKEN_SLIDES, so the refresh succeeds.
             _lc = _Creds(
                 token=None,
                 refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
                 token_uri="https://oauth2.googleapis.com/token",
                 client_id=get_secret("GOOGLE_CLIENT_ID"),
                 client_secret=get_secret("GOOGLE_CLIENT_SECRET"),
-                scopes=[
-                    "https://www.googleapis.com/auth/spreadsheets",
-                    "https://www.googleapis.com/auth/gmail.send",
-                ],
+                scopes=["https://www.googleapis.com/auth/spreadsheets"],
             )
             _lc.refresh(_Req())
 
             _log_err = _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
                                      _duration, slides_url, _tokens)
-            _email_err = _se.send_audit_summary(_lc, client_name.strip(), client_cid.strip(),
-                                                _duration, slides_url, _tokens,
-                                                recipient=runner_email.strip(),
-                                                findings_lines=_findings_lines)
-
-            # Surface results so we are never flying blind again
             if _log_err:
-                st.warning(f"📋 Audit log: {_log_err}")
+                st.warning(f"📋 Audit logging failed: {_log_err}")
             else:
                 st.caption("📋 Audit logged to Google Sheet ✓")
-            if _email_err:
-                st.warning(f"✉️ Email: {_email_err}")
-            else:
-                st.caption("✉️ Notification email sent ✓")
         except Exception as _le:
-            st.warning(f"⚠️ Log/email setup error (credentials): {_le}")
+            st.warning(f"📋 Audit logging failed: {_le}")
+
+        # ── Email delivery (temporarily disabled) ─────────────────────────────
+        # The completion email is sent via the Gmail API (gmail.send), but the
+        # Slides refresh token is NOT authorised for Gmail, so refreshing it with
+        # gmail.send returns 'invalid_scope'. Until a Gmail-authorised refresh
+        # token is available, we skip email cleanly rather than crash the step.
+        # NOTE: send_email.send_audit_summary is intentionally left untouched.
+        try:
+            st.caption(
+                "✉️ Notification email is currently disabled pending Gmail "
+                "authorisation. The audit and deck completed successfully, and "
+                "audit logging was attempted independently above."
+            )
+        except Exception:
+            pass
 
         # ── Done ──────────────────────────────────────────────────────────
         progress_bar.progress(100)
