@@ -26,6 +26,37 @@ def get_secret(key: str) -> str:
     raise KeyError(f"Missing secret / env var: {key}")
 
 
+# Keys in st.secrets that are configuration, not credentials. Everything NOT listed here
+# is treated as secret material and checked against the evidence bundle before it is
+# uploaded (audit_evidence.py). Erring towards "it's a secret" is the safe direction: the
+# cost of a false positive is one skipped evidence upload, and the cost of a false negative
+# is a key on Google Drive.
+_NON_SECRET_KEYS = {
+    "GOOGLE_CLIENT_ID",          # public by design, half of every OAuth flow
+    "AUDIT_LOG_SHEET_ID",
+    "DAILY_AUDIT_LIMIT",
+    "FEEDBACK_FORM_URL", "FEEDBACK_ENTRY_HELPFUL", "FEEDBACK_ENTRY_CLIENT",
+    "FEEDBACK_ENTRY_AUDITOR", "FEEDBACK_RESPONSES_SHEET_ID", "FEEDBACK_RESPONSES_TAB",
+}
+
+
+def _live_secret_values() -> list:
+    """Every secret value this run is actually holding, so the evidence bundle can be
+    PROVED free of them rather than assumed to be. On Streamlit Cloud these live in
+    st.secrets and never reach the environment, so os.environ alone would miss them."""
+    vals = []
+    try:
+        for key in st.secrets:
+            if key in _NON_SECRET_KEYS:
+                continue
+            val = st.secrets[key]
+            if isinstance(val, str) and len(val.strip()) >= 12:
+                vals.append(val.strip())
+    except Exception:
+        pass
+    return vals
+
+
 # ── Write credential files from secrets (Streamlit Cloud only) ───────────────
 def prepare_credentials():
     """
@@ -331,11 +362,59 @@ if submitted:
         slides_url = ps_module.main()
 
         # ── Log the completed audit + notify ──────────────────────────────
-        # Logging and email are INDEPENDENT: they use separate credentials and
+        # Evidence, logging and email are INDEPENDENT: they use separate credentials and
         # separate try/except blocks, so one failing can never mask or block the
         # other (and neither can undo the finished deck shown below).
         _duration = _time.time() - _audit_start
         _tokens   = narrative.get("_tokens_used", 0)
+
+        # ── Evidence bundle (Drive: PRIVATE folder, drive scope only) ─────────
+        # T2. The deck is already built by this point. Everything below writes the run
+        # down so it can be replayed later; none of it is allowed to touch the deck.
+        # A failure here costs us a fixture, not an audit.
+        _evidence_url = ""
+        try:
+            import audit_evidence as _ae
+            from generate_narrative import GPT_MODEL as _gpt_model
+            from google.oauth2.credentials import Credentials as _ECreds
+            from google.auth.transport.requests import Request as _EReq
+
+            # Same refresh token the deck already uses for Drive, narrowed to the drive
+            # scope. No new grant, no new token, no OAuth change.
+            _ec = _ECreds(
+                token=None,
+                refresh_token=get_secret("GOOGLE_REFRESH_TOKEN_SLIDES"),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=get_secret("GOOGLE_CLIENT_ID"),
+                client_secret=get_secret("GOOGLE_CLIENT_SECRET"),
+                scopes=["https://www.googleapis.com/auth/drive"],
+            )
+            _ec.refresh(_EReq())
+
+            _ev = _ae.save_audit_evidence(
+                _ec,
+                account_data=account_data,
+                findings=findings,
+                narrative=narrative,
+                client_name=client_name.strip(),
+                cid=client_cid.strip(),
+                deck_url=slides_url,
+                tokens_used=_tokens,
+                gpt_model=_gpt_model,
+                # The literal secret values this run is holding. The bundle is checked
+                # against them before upload, so "no secrets in the bundle" is proved
+                # rather than assumed.
+                extra_secret_values=_live_secret_values(),
+            )
+            _evidence_url = _ev.get("url", "")
+            if _ev.get("warning"):
+                st.warning(f"🗄️ {_ev['warning']}")
+            else:
+                st.caption("🗄️ Evidence bundle saved to Drive ✓")
+        except Exception as _eve:
+            st.warning(
+                f"🗄️ Evidence bundle not saved: {_eve}. The deck and the audit are unaffected."
+            )
 
         # ── Audit logging (Google Sheets: needs only the spreadsheets scope) ──
         try:
@@ -356,7 +435,8 @@ if submitted:
             _lc.refresh(_Req())
 
             _log_err = _al.log_audit(_lc, client_name.strip(), client_cid.strip(),
-                                     _duration, slides_url, _tokens)
+                                     _duration, slides_url, _tokens,
+                                     evidence_url=_evidence_url)
             if _log_err:
                 st.warning(f"📋 Audit logging failed: {_log_err}")
             else:

@@ -39,11 +39,16 @@ def _credibility_line(account_type: str) -> str:
 
 _total_tokens = 0  # module-level token counter, reset per generate_narrative() call
 
+# The narration model, named once. The evidence bundle (audit_evidence.py) records which
+# model wrote a deck, and a hardcoded copy of the name over there would drift the first time
+# we upgraded here.
+GPT_MODEL = "gpt-5.5"
+
 
 def _call_openai(client: OpenAI, system_prompt: str, user_prompt: str) -> str:
     global _total_tokens
     response = client.chat.completions.create(
-        model="gpt-5.5",
+        model=GPT_MODEL,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
@@ -1207,7 +1212,7 @@ def _sensecheck_terms(client: OpenAI, terms: list, business_context: str = "") -
     )
     try:
         global _total_tokens
-        r = client.responses.create(model="gpt-5.5", tools=[{"type": "web_search"}], input=prompt)
+        r = client.responses.create(model=GPT_MODEL, tools=[{"type": "web_search"}], input=prompt)
         try:
             _total_tokens += r.usage.total_tokens
         except Exception:

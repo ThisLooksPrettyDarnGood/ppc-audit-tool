@@ -4,6 +4,11 @@ audit_log.py
 Logs each completed audit to a Google Sheet and provides stats for the dashboard.
 
 Sheet columns: Timestamp | Client Name | CID | Duration (mins) | Slides URL | Tokens Used
+               | Evidence URL
+
+Evidence URL (T2, 14 Jul 2026) is the Drive link to that run's evidence bundle, so any deck
+in the log can be traced back to the data it was built from. It is the last column on
+purpose: older rows simply have an empty cell there, and nothing about them moves.
 """
 
 import os
@@ -46,7 +51,7 @@ def _sheet_id() -> str:
 
 
 HEADER_ROW = ["Timestamp", "Client Name", "CID", "Duration (mins)",
-              "Slides URL", "Tokens Used"]
+              "Slides URL", "Tokens Used", "Evidence URL"]
 
 
 def _get_sheets_service(creds):
@@ -78,12 +83,50 @@ def _ensure_tab(service, sheet_id: str):
     ).execute()
 
 
+def _ensure_header(service, sheet_id: str):
+    """
+    Widen the header row when a new column is added, WITHOUT touching a single data row.
+
+    The live sheet predates the Evidence URL column: its header has six cells. Appending a
+    seven-value row is safe on its own (older rows just have an empty G), but the header
+    would still say six, and a column of URLs with no name is how a log stops being read.
+
+    This rewrites row 1 and nothing else, and only when row 1 is recognisably OUR header and
+    is short. An unrecognised row 1 is left exactly as it is - if someone has put their own
+    data up there, that is theirs, and clobbering it to add a column heading would be a poor
+    trade.
+    """
+    res = service.spreadsheets().values().get(
+        spreadsheetId=sheet_id,
+        range=f"{SHEET_NAME}!1:1",
+    ).execute()
+    rows = res.get("values", [])
+    header = rows[0] if rows else []
+
+    if not header or header[0] != HEADER_ROW[0]:
+        return                                  # empty, or not our header → leave it alone
+    if len(header) >= len(HEADER_ROW):
+        return                                  # already wide enough
+
+    service.spreadsheets().values().update(
+        spreadsheetId=sheet_id,
+        range=f"{SHEET_NAME}!A1",
+        valueInputOption="RAW",
+        body={"values": [HEADER_ROW]},
+    ).execute()
+
+
 def log_audit(creds, client_name: str, cid: str, duration_secs: float,
-              slides_url: str = "", tokens_used: int = 0) -> str:
+              slides_url: str = "", tokens_used: int = 0,
+              evidence_url: str = "") -> str:
     """
     Append one row to the audit log sheet.
     Returns "" on success, or a human-readable error string on failure
     (so the caller can surface it instead of failing silently).
+
+    `evidence_url` defaults to "" so an audit whose evidence upload failed still logs a
+    complete row - the evidence cell is simply empty, and the deck is still traceable by
+    its Slides URL.
     """
     sheet_id = _sheet_id()
     if not sheet_id:
@@ -92,13 +135,20 @@ def log_audit(creds, client_name: str, cid: str, duration_secs: float,
     try:
         service = _get_sheets_service(creds)
         _ensure_tab(service, sheet_id)
+        # Cosmetic, and never worth losing a log row over: if widening the header fails,
+        # the append below still writes the audit exactly as it always has.
+        try:
+            _ensure_header(service, sheet_id)
+        except Exception as he:
+            print(f"  ⚠ Audit log header widen skipped: {he}")
+
         now = _uk_now().strftime("%Y-%m-%d %H:%M UK")
         duration_mins = round(duration_secs / 60, 1)
-        row = [[now, client_name, cid, duration_mins, slides_url, tokens_used]]
+        row = [[now, client_name, cid, duration_mins, slides_url, tokens_used, evidence_url]]
 
         service.spreadsheets().values().append(
             spreadsheetId=sheet_id,
-            range=f"{SHEET_NAME}!A:F",
+            range=f"{SHEET_NAME}!A:G",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": row},

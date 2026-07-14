@@ -12,6 +12,13 @@ client_secret.json
 # ─── Generated / runtime output ───────────────────────────────────
 narrative_output.json
 
+# ─── Audit evidence bundles (T2) — full client account data ───────
+# The tool streams these straight to a PRIVATE Drive folder and never writes one to disk.
+# These patterns are the backstop: a bundle dumped locally for debugging must never be
+# committable.
+*.json.gz
+evidence_*.json
+
 # ─── Internal resource IDs (feedback Form / responses Sheet) ──────
 feedback_config.json
 
