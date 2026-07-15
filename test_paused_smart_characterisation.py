@@ -23,8 +23,10 @@ What the engine currently does with it, and which ticket flips each one:
 
   1. Reads the empty 30-day window as broken tracking: severity 122, RED, and tells the
      client "Tags may be broken or firing incorrectly."                             (T5)
-  2. Ranks the low-value-primary root cause below the deck floor, while the branch that
-     admits we could not measure anything scores 82.                                (T4)
+  2. [T4 LANDED] The low-value-primary severity inversion is fixed. On THIS paused account
+     the honest classification is a confirmed-zero minor tidy-up (severity 35) - nothing
+     fired, so we do not claim inflation. The proven-firing 84 headline is exercised
+     against real firing evidence in test_low_value_primary.py.                     (T4)
   3. Headlines missing image extensions (severity 60) on an account whose ads have been
      switched off for four months.                                                  (T8a)
   4. Praises a 9,455-strong negative keyword list on row count alone.               (T8c)
@@ -33,12 +35,12 @@ What the engine currently does with it, and which ticket flips each one:
 
 What this account CANNOT show
 -----------------------------
-The severity-40 branch of the low-value-primary check (the one that fires when low-value
-actions are PROVEN to be recording ad-attributed conversions) cannot fire here: a paused
-account records nothing, so the check takes its 'latent' branch at 52 instead. The two are
-mutually exclusive, and we do not invent conversions to force the other branch. The 40 is
-pinned where it actually lives - at the classifier, against the wording the code emits -
-in `CharacterisationOfTheLowValueSeverityLadder` below.
+The PROVEN-firing branch of the low-value-primary check (the one that fires when low-value
+actions are recording ad-attributed conversions) cannot fire here: a paused account records
+nothing, so the check reads a CONFIRMED ZERO and classifies it as a severity-35 minor
+tidy-up. The two are mutually exclusive, and we do not invent conversions to force the
+headline. The corrected ladder is pinned at the classifier, against the wordings the code
+emits, in `CharacterisationOfTheLowValueSeverityLadder` below.
 
 Run:
     python3 test_paused_smart_characterisation.py
@@ -178,24 +180,26 @@ class CharacterisationOfWrongBehaviour(unittest.TestCase):
         self.assertNotIn("paused", headline.lower())
         self.assertNotIn("2026-03-04", headline)
 
-    # ── T4 ────────────────────────────────────────────────────────────────────
-    def test_WRONG_the_low_value_primary_root_cause_never_reaches_the_deck(self):
-        """The root cause a human auditor leads with is ranked below the deck floor.
+    # ── T4 (LANDED) ─────────────────────────────────────────────────────────
+    def test_T4_low_value_primary_on_a_paused_account_is_a_confirmed_zero_minor(self):
+        """T4 has landed. On THIS account the honest classification is a minor tidy-up.
 
-        On this account the check fires its 'latent' branch (severity 52) because the
-        30-day window is empty, so it lands under the floor of 55 and never reaches the
-        client. Missing image extensions (60) does. T4 (severity ladder) and T8a
-        (extensions gate) fix the two halves of this.
+        A paused account records nothing, so the low-value primaries are a CONFIRMED
+        ZERO (Classification 2): included in bidding, but they did not fire, so bidding
+        has not been learning from them. That is genuinely a severity-35 minor tidy-up
+        for Additional Observations - not a headline, because nothing was proven to fire.
+        We do NOT invent firing to force the 84 headline (that would be confidently
+        wrong on a switched-off account). The proven-firing 84 branch is exercised
+        against real firing evidence in test_low_value_primary.py instead.
         """
-        low_value = find_issue(self.ranked, "A low-value action is set as a primary conversion")
+        low_value = find_issue(self.ranked, "not been learning from it during the period reviewed")
         self.assertIsNotNone(low_value, "the low-value primary check should still fire")
-        self.assertEqual(low_value["severity"], 52.0)
+        self.assertEqual(low_value["severity"], 35.0)
+        self.assertEqual(low_value["rag"], "amber")
         self.assertLess(low_value["severity"], STRONG_FLOOR)
         self.assertNotIn(low_value["detail"], [i["detail"] for i in self.top])
-
-        extensions = find_issue(self.top, "missing high-value extension types")
-        self.assertIsNotNone(extensions, "extensions currently outrank the root cause")
-        self.assertGreater(extensions["severity"], low_value["severity"])
+        # It never claims bidding learned from these actions during the empty window.
+        self.assertNotIn("Bidding will be learning from the wrong actions", low_value["detail"])
 
     # ── T8a ───────────────────────────────────────────────────────────────────
     def test_WRONG_missing_image_extensions_score_60_and_reach_the_top_findings(self):
@@ -273,78 +277,72 @@ class CharacterisationOfWrongBehaviour(unittest.TestCase):
 
 
 class CharacterisationOfTheLowValueSeverityLadder(unittest.TestCase):
-    """⚠ The severity inversion, pinned at the classifier.
+    """The severity ladder, pinned at the classifier - CORRECTED by T4.
 
-    The low-value-primary check has four branches. The fixture fires branch C (latent),
-    because a paused account records nothing - so branches A and B cannot be exercised
-    from THIS account's data, and we do not invent data to force them. They are pinned
-    here against the exact wordings analyse_account.py emits.
+    Before T4 the low-value-primary check inverted its own severities: the branch that
+    PROVED the problem took the unsignatured 40 fallback, while the branch that admitted
+    it could not measure anything scored 82. Confidence beat measurement, backwards.
 
-    WRONG, and the reason T4 exists: the branch where we PROVED the problem scores 40,
-    and the branch where we admit we could not measure it scores 82. Confidence beats
-    measurement, which is backwards.
+    After T4 the ladder follows the evidence. Each state is pinned here against the exact
+    wording classify_low_value_primary_conversions emits, built from fictional actions so
+    all three states can be exercised (the fixture itself is a confirmed zero).
     """
 
-    # Verbatim from score_conversion_tracking, one per branch.
-    BRANCH_A_PROVEN = (
-        "Your PRIMARY conversions include low-value website activity that is being counted, "
-        "not real enquiries: 'a page-view action' (5) recorded about 5 ad-attributed "
-        "'conversions' in the last 30 days - page scrolls, clicks and page views, not "
-        "genuine leads. Google optimises towards this activity, inflating your reported "
-        "numbers. Move these to secondary and make the genuine enquiry (form submission) "
-        "the single primary conversion."
-    )
-    BRANCH_B_SITE_EVENTS = (
-        "Low-value website actions are set as PRIMARY conversions ('a page-view action') and "
-        "fire often as site events, but they are not currently attributed to your Google Ads "
-        "clicks, so they are not inflating your reported Conversions right now."
-    )
-    BRANCH_C_LATENT = (
-        "A low-value action is set as a primary conversion but is recording no conversions in "
-        "the last 30 days: a page-view action."
-    )
-    BRANCH_D_UNMEASURED = (
-        "Low-value conversion action set as a primary 'Conversions' goal: a page-view action. "
-        "It's worth confirming whether it is currently recording conversions."
-    )
+    # One fictional action per evidence state (shape matches fetch_account_data).
+    def _ca(self, **kw):
+        base = {"name": "Homepage view", "category": "PAGE_VIEW", "status": "ENABLED",
+                "primary_for_goal": True, "include_in_conversions": True}
+        base.update(kw)
+        return base
 
     def _severity(self, detail):
-        meta = A._classify_issue(detail, "Conversion Tracking", "red")
-        self.assertIsNotNone(meta, "the branch wording must classify, not be filtered")
+        meta = A._classify_issue(detail, "Conversion Tracking", "amber")
+        self.assertIsNotNone(meta, "the wording must classify, not be filtered")
         return meta["severity"]
 
-    def test_WRONG_measured_inflation_scores_less_than_unmeasured_volume(self):
-        proven = self._severity(self.BRANCH_A_PROVEN)
-        site_events = self._severity(self.BRANCH_B_SITE_EVENTS)
-        latent = self._severity(self.BRANCH_C_LATENT)
-        unmeasured = self._severity(self.BRANCH_D_UNMEASURED)
+    def test_T4_measurement_now_beats_confidence(self):
+        res_proven = A.classify_low_value_primary_conversions(
+            [self._ca(attributed_conversions_30d=6.0, conversions_30d=20.0)])
+        res_zero = A.classify_low_value_primary_conversions(
+            [self._ca(attributed_conversions_30d=0.0, conversions_30d=0.0)])
+        res_unconf = A.classify_low_value_primary_conversions([self._ca()])  # no volume keys
 
-        # Branches A and B match no signature at all, so they take the unsignatured
-        # fallback of 40 - below the deck floor.
-        self.assertEqual(proven, 40.0)
-        self.assertEqual(site_events, 40.0)
-        self.assertLess(proven, STRONG_FLOOR)
+        # PROVEN firing is the root cause - the highest rung, and a headline.
+        self.assertEqual(res_proven["proven"]["severity"], 84.0)
+        self.assertEqual(res_proven["proven"]["rag"], "amber_red")
+        self.assertEqual(self._severity(res_proven["proven"]["detail"]), 84.0)
 
-        self.assertEqual(latent, 52.0)
-        self.assertEqual(unmeasured, 82.0)
+        # CONFIRMED ZERO is a minor tidy-up.
+        self.assertEqual(res_zero["zero"]["severity"], 35.0)
+        self.assertEqual(self._severity(res_zero["zero"]["detail"]), 35.0)
 
-        # The inversion, in one line.
-        self.assertLess(proven, unmeasured)
+        # UNCONFIRMED carries no score at all - informational only.
+        self.assertIsNone(res_unconf["proven"])
+        self.assertIsNone(res_unconf["zero"])
+        self.assertEqual(len(res_unconf["informational"]), 1)
 
-    def test_WRONG_the_intended_signature_matches_no_wording_the_code_can_emit(self):
-        """The orphaned needle - the same bug family as the budget-capped IS needle."""
+        # Measurement beats confidence: proven > zero, and the unmeasured state scores nothing.
+        self.assertGreater(res_proven["proven"]["severity"], res_zero["zero"]["severity"])
+
+    def test_T4_the_orphaned_needle_is_gone_and_the_new_needles_are_matched(self):
+        """The orphaned 84/amber_red needle matched no emitted wording (the same bug family
+        as the budget-capped IS needle). T4 removes it and adds needles that DO match."""
         orphan = "PRIMARY conversions are dominated by low-value"
-        self.assertTrue(any(needle == orphan for needle, *_ in A._ISSUE_SIGNATURES),
-                        "the 84/amber_red signature is still in the table")
-        for branch in (self.BRANCH_A_PROVEN, self.BRANCH_B_SITE_EVENTS,
-                       self.BRANCH_C_LATENT, self.BRANCH_D_UNMEASURED):
-            self.assertNotIn(orphan, branch)
+        self.assertFalse(any(needle == orphan for needle, *_ in A._ISSUE_SIGNATURES),
+                         "the orphaned needle should have been removed")
 
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "analyse_account.py")) as fh:
             source = fh.read()
-        self.assertEqual(source.count(orphan), 1,
-                         "the needle appears only in the signature table - nothing emits it")
+        self.assertEqual(source.count(orphan), 0, "no trace of the orphaned needle remains")
+
+        # Every new needle matches a wording the classifier actually emits.
+        proven = A.classify_low_value_primary_conversions(
+            [self._ca(attributed_conversions_30d=6.0, conversions_30d=20.0)])["proven"]["detail"]
+        zero = A.classify_low_value_primary_conversions(
+            [self._ca(attributed_conversions_30d=0.0, conversions_30d=0.0)])["zero"]["detail"]
+        self.assertIn("learning from the wrong actions", proven)
+        self.assertIn("not been learning from it during the period reviewed", zero)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

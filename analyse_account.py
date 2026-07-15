@@ -326,9 +326,15 @@ _ISSUE_SIGNATURES = [
     ("spent with 0 conversions",                 116, "red",       "Bidding Strategy"),
     ("should be treated as urgent",              112, "red",       "Targeting & Keywords"),  # broad + weak negatives combo
     # On the cusp
-    ("primary conversion but is recording no conversions", 52, "amber", "Conversion Tracking"),  # latent: set but not firing
-    ("PRIMARY conversions are dominated by low-value", 84, "amber_red", "Conversion Tracking"),  # quantified inflation - root cause
-    ("Low-value conversion action",               82, "amber_red", "Conversion Tracking"),
+    # ── Low-value PRIMARY conversion classifier (ticket T4). These two needles match the
+    # EXACT wordings classify_low_value_primary_conversions() emits (specific, first-match
+    # wins). Severity follows MEASURED evidence: a PROVEN-firing low-value primary is the
+    # root cause a human auditor leads with (84, headline); a confirmed ZERO-volume one is a
+    # minor tidy-up (35). The old table inverted these - the branch that proved the problem
+    # took the unsignatured 40 fallback while the branch that admitted it could not measure
+    # anything scored 82 (the same orphaned-needle bug as the budget-capped IS finding).
+    ("learning from the wrong actions",           84, "amber_red", "Conversion Tracking"),  # Class 1: proven-firing low-value primary (affects the score)
+    ("not been learning from it during the period reviewed", 35, "amber", "Conversion Tracking"),  # Class 2: confirmed zero-volume low-value primary (Additional Observations)
     ("counting orders without passing their value", 75, "amber_red", "Conversion Tracking"), # £0-value purchase action - ROAS understated
     ("Possible conversion double-counting",        74, "amber_red", "Conversion Tracking"),  # data integrity - undermines all CPAs (volumes move TOGETHER)
     ("call or contact actions set as primary conversions", 45, "amber", "Conversion Tracking"),  # multiple call actions, volumes INDEPENDENT -> tidy-up, not confirmed double-count
@@ -460,6 +466,11 @@ _ISSUE_THEMES = {
     # ("order value isn't flowing back"), so show only the sharper, evidence-based one.
     "counting orders without passing their value": "revenue_value_feedback",
     "Revenue feedback loop":                   "revenue_value_feedback",
+    # NOTE (T4): the proven-firing (84 headline) and confirmed-zero (35 observation) low-value
+    # findings are DELIBERATELY NOT themed together. They describe DIFFERENT actions with
+    # different evidence (firing vs did-not-fire) and must both survive - a confirmed-zero
+    # tidy-up is never dropped just because a separate proven finding also fired. There is no
+    # duplicate scoring: the classifier's groups are disjoint, so each action scores once.
 }
 
 
@@ -1063,6 +1074,230 @@ def detect_tracking_change(monthly):
     return {"changed": True, "month": _label(change_month), "detail": "; ".join(parts)}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LOW-VALUE PRIMARY CONVERSION CLASSIFIER  (ticket T4)
+# A "low-value primary conversion" is a conversion action included in bidding as a
+# PRIMARY goal whose PURPOSE is a micro-action - a page view, an engagement event, a
+# scroll, an outbound click - rather than a genuine sale, enquiry or qualified lead.
+# It matters because bidding optimises towards the primary goals: if the account is
+# learning from page views, the reported numbers are inflated and the optimisation is
+# aimed at the wrong thing. This classifier grades each candidate by the strength of the
+# evidence and never judges "low value" from an action's free-text name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Google's own conversion_action.category values whose purpose is UNAMBIGUOUSLY a
+# micro-action - a step or a signal, never itself a sale, completed enquiry, qualified lead
+# or other genuine commercial outcome. This is CATEGORY evidence, not a match on the action
+# name, so an action is never called low-value merely because its name contains "click",
+# "form", "call", "view" or "engagement". Genuine-outcome categories (PURCHASE,
+# SUBMIT_LEAD_FORM, LEAD, QUALIFIED_LEAD, CONVERTED_LEAD, BOOK_APPOINTMENT, REQUEST_QUOTE,
+# SIGNUP, PHONE_CALL_LEAD, SUBSCRIBE_PAID, STORE_SALE, ...) are absent by design, so a genuine
+# outcome can never be a candidate. ADD_TO_CART (add to basket), BEGIN_CHECKOUT (checkout
+# START, not a completed order) and GET_DIRECTIONS (map / directions clicks) are funnel steps
+# and signals - clearly low-value when set as a PRIMARY goal, so they sit here too.
+#
+# DOWNLOAD is deliberately EXCLUDED: it is ambiguous, not clearly a micro-action. An app
+# install / "First open" carries the DOWNLOAD category and IS the genuine conversion on an
+# App campaign (nutrimode: 'com.nutrimode (Android) installs' fired 159 ad-attributed
+# conversions). Auto-flagging those as low-value and telling the advertiser to move them to
+# secondary "and keep the genuine enquiry (form submission)" would be confidently wrong.
+# DOWNLOAD is not an evidence-proven micro-action, so we never classify it.
+_LOW_VALUE_CATEGORIES = {"PAGE_VIEW", "ENGAGEMENT", "OUTBOUND_CLICK",
+                         "ADD_TO_CART", "BEGIN_CHECKOUT", "GET_DIRECTIONS"}
+_LOW_VALUE_PLAIN = {
+    "PAGE_VIEW": "a page-view action", "ENGAGEMENT": "an engagement action",
+    "OUTBOUND_CLICK": "an outbound-click action", "ADD_TO_CART": "an add-to-basket action",
+    "BEGIN_CHECKOUT": "a checkout-start action", "GET_DIRECTIONS": "a directions/map-click action",
+}
+_LOW_VALUE_WHY = {
+    "PAGE_VIEW": "page views", "ENGAGEMENT": "engagement events",
+    "OUTBOUND_CLICK": "outbound clicks", "ADD_TO_CART": "add-to-basket clicks",
+    "BEGIN_CHECKOUT": "checkout starts", "GET_DIRECTIONS": "map and directions clicks",
+}
+
+
+def _lv_enabled_state(ca):
+    """'yes' / 'no' / 'unknown' - can we confirm the action is enabled?
+    A missing or UNSPECIFIED status is 'unknown' - we never assume enabled."""
+    s = str(ca.get("status") or "").upper()
+    if s == "ENABLED":
+        return "yes"
+    if s in ("PAUSED", "REMOVED", "HIDDEN"):
+        return "no"
+    return "unknown"
+
+
+def _lv_primary_state(ca):
+    """'yes' / 'no' / 'unknown' - is the action primary / included in bidding?
+    Either the goal-based flag or include_in_conversions is enough for 'yes' (a
+    goal-based account can carry include_in_conversions False on a primary action).
+    Both signals missing = we cannot tell; both present and false = secondary/excluded."""
+    p, inc = ca.get("primary_for_goal"), ca.get("include_in_conversions")
+    if p or inc:
+        return "yes"
+    if p is None and inc is None:
+        return "unknown"
+    return "no"
+
+
+def _lv_volume_state(ca):
+    """'fired' / 'zero' / 'unknown' - ad-attributed conversions in the window.
+    AD-ATTRIBUTED conversions (metrics.conversions) are the ground truth for what bidding
+    actually learned from. None means the per-action volume query was unavailable, so the
+    volume is UNKNOWN - it is never silently read as zero (the 'missing != zero' rule)."""
+    v = ca.get("attributed_conversions_30d")
+    if v is None:
+        return "unknown"
+    return "fired" if v > 0 else "zero"
+
+
+def _lv_names(actions, limit=3):
+    """De-duplicated, readable action labels, capped, with an '...and N more' tail so the
+    action names are always preserved even when the group is large."""
+    seen, labels = set(), []
+    for ca in actions:
+        lbl = _clean_action_label(
+            ca.get("name"), _LOW_VALUE_PLAIN.get(str(ca.get("category") or "").upper(), "a low-value action"))
+        if lbl not in seen:
+            seen.add(lbl)
+            labels.append(lbl)
+    shown = ", ".join(f"'{l}'" for l in labels[:limit])
+    if len(labels) > limit:
+        shown += f", and {len(labels) - limit} more"
+    return shown
+
+
+def _lv_why_phrase(actions):
+    """Plain 'why it is low value' fragment from the distinct categories present,
+    e.g. 'page views and engagement events'."""
+    order = ["PAGE_VIEW", "ENGAGEMENT", "OUTBOUND_CLICK",
+             "ADD_TO_CART", "BEGIN_CHECKOUT", "GET_DIRECTIONS"]
+    present = [c for c in order
+               if any(str(ca.get("category") or "").upper() == c for ca in actions)]
+    whys = [_LOW_VALUE_WHY[c] for c in present] or ["page activity"]
+    if len(whys) == 1:
+        return whys[0]
+    return ", ".join(whys[:-1]) + " and " + whys[-1]
+
+
+def _lv_unconfirmed_reason(actions):
+    """Which piece of evidence is missing, drawn from the unconfirmed set, so the
+    client-facing note says exactly what to check."""
+    reasons = []
+    if any(_lv_enabled_state(ca) == "unknown" for ca in actions):
+        reasons.append("its enabled status could not be read")
+    if any(_lv_primary_state(ca) == "unknown" for ca in actions):
+        reasons.append("we could not tell whether it is included in bidding")
+    if any(_lv_volume_state(ca) == "unknown" for ca in actions):
+        reasons.append("the per-action conversion volume was not available for this audit")
+    if not reasons:
+        reasons.append("the available evidence was incomplete")
+    if len(reasons) == 1:
+        return reasons[0]
+    return ", ".join(reasons[:-1]) + " and " + reasons[-1]
+
+
+def classify_low_value_primary_conversions(conversion_actions):
+    """Evidence-based classifier for low-value PRIMARY conversions (ticket T4).
+
+    Candidates are actions whose CATEGORY is a micro-action (page view / engagement /
+    download / outbound click). A disabled action, or one that is secondary / excluded
+    from bidding, is dropped (never reported as a low-value PRIMARY issue). Each remaining
+    candidate is placed by the strength of the evidence, and the groups are disjoint so an
+    uncertain action can never raise the severity of a proven or zero-volume group:
+
+      proven  (Classification 1): enabled + primary + FIRED ad-attributed conversions
+              -> severity 84, amber_red, HEADLINE, affects the score. Bidding IS learning
+                 from the wrong actions and the reported numbers are inflated.
+      zero    (Classification 2): enabled + primary + confirmed ZERO ad-attributed
+              -> severity 35, amber, minor tidy-up (Additional Observations). Included in
+                 bidding, but it did not fire, so bidding has not learned from it.
+      informational (Classification 3): enabled / primary / volume cannot be established
+              -> a client-facing note, NO score impact. We say exactly what to check.
+
+    Returns {"proven": finding|None, "zero": finding|None, "informational": [note, ...]}
+    where each finding is {"detail", "severity", "rag", "headline", "actions"}.
+    """
+    proven, zero, unconfirmed = [], [], []
+    for ca in conversion_actions or []:
+        if str(ca.get("category") or "").upper() not in _LOW_VALUE_CATEGORIES:
+            continue   # purpose is not clearly a micro-action - not a candidate
+        enabled, primary = _lv_enabled_state(ca), _lv_primary_state(ca)
+        if enabled == "no" or primary == "no":
+            continue   # disabled, or secondary / excluded from bidding - not this finding
+        if enabled == "unknown" or primary == "unknown":
+            unconfirmed.append(ca)
+            continue
+        vol = _lv_volume_state(ca)
+        if vol == "fired":
+            proven.append(ca)
+        elif vol == "zero":
+            zero.append(ca)
+        else:
+            unconfirmed.append(ca)   # volume unavailable - cannot confirm firing
+
+    result = {"proven": None, "zero": None, "informational": []}
+
+    if proven:
+        _ranked = sorted(proven, key=lambda ca: ca.get("attributed_conversions_30d") or 0,
+                         reverse=True)
+        _egs = ", ".join(
+            f"'{_clean_action_label(ca.get('name'), _LOW_VALUE_PLAIN.get(str(ca.get('category') or '').upper(), 'a low-value action'))}'"
+            f" ({int(round(ca.get('attributed_conversions_30d') or 0))})"
+            for ca in _ranked[:3])
+        _total = int(round(sum(ca.get("attributed_conversions_30d") or 0 for ca in proven)))
+        detail = (
+            f"Your primary conversions include low-value website activity that Google Ads is "
+            f"optimising towards: {_egs} recorded about {_total} ad-attributed 'conversions' in "
+            f"the last 30 days. These are {_lv_why_phrase(proven)}, not genuine enquiries, yet "
+            f"they are set as primary goals included in bidding and they fired during the period "
+            f"reviewed. Bidding will be learning from the wrong actions. Your reported conversion "
+            f"numbers are inflated by activity that is not a real sale or enquiry. Move these "
+            f"actions to secondary and keep your genuine conversion (a completed sale or enquiry) "
+            f"as the single primary goal."
+        )
+        result["proven"] = {"detail": detail, "severity": 84.0, "rag": "amber_red",
+                            "headline": True, "actions": proven}
+
+    if zero:
+        _names = _lv_names(zero)
+        _fires_as_site_event = any((ca.get("conversions_30d") or 0) > 0 for ca in zero)
+        if _fires_as_site_event:
+            detail = (
+                f"A low-value website action is included in bidding as a primary conversion but "
+                f"is not attributed to your Google Ads clicks: {_names}. It fires as website "
+                f"activity, but none was attributed to your ads in the period reviewed, so "
+                f"bidding has not been learning from it during the period reviewed and your "
+                f"reported conversions are not inflated by it today. It is still worth moving it "
+                f"to secondary, or removing it, so it never can: a low-value action does not "
+                f"belong in the primary 'Conversions' column."
+            )
+        else:
+            detail = (
+                f"A low-value website action is included in bidding as a primary conversion but "
+                f"did not fire during the period reviewed: {_names}. It is currently a primary "
+                f"goal, but because it recorded no ad-attributed conversions in the period "
+                f"reviewed, bidding has not been learning from it during the period reviewed. It "
+                f"should be moved to secondary, or removed, so it never can: a low-value action "
+                f"does not belong in the primary 'Conversions' column. This is a conversion-setup "
+                f"tidy-up, not a sign anything is broken."
+            )
+        result["zero"] = {"detail": detail, "severity": 35.0, "rag": "amber",
+                          "headline": False, "actions": zero}
+
+    if unconfirmed:
+        note = (
+            f"We could not confirm whether {_lv_names(unconfirmed)} is currently active and "
+            f"influencing bidding, because {_lv_unconfirmed_reason(unconfirmed)}. Its goal "
+            f"settings, tag status and recent conversion activity should be checked before "
+            f"drawing a conclusion. We have drawn no conclusion and it has not counted for or "
+            f"against the account's rating."
+        )
+        result["informational"].append(note)
+
+    return result
+
+
 def score_conversion_tracking(data):
     issues = []
     rag = "green"
@@ -1070,6 +1305,10 @@ def score_conversion_tracking(data):
     # ad-attributed conversions, or real multi-counting) - drives the downstream "don't celebrate
     # the CPA" caveat. Stays False for latent setup risk where the reported numbers are genuine.
     conversions_inflated = False
+    # Client-facing notes that carry NO score impact (never raise the section RAG and never
+    # rank as an issue) - the deck surfaces them as informational observations. Used by the
+    # low-value-primary check (T4) when the evidence cannot support a conclusion.
+    informational_notes = []
     revenue_undertracked = []   # (name, orders) of purchase actions counting orders at £0 value
     # True when an ecommerce account's purchase actions recorded NOTHING all year while
     # low-value primaries hold all the volume - reported revenue/ROAS is then an artifact
@@ -1492,104 +1731,46 @@ def score_conversion_tracking(data):
             if rag == "green":
                 rag = "amber"
 
-        # Spammable/low-value categories set as primary optimisation goal
-        spammable_categories = {"PAGE_VIEW", "ENGAGEMENT", "DOWNLOAD", "OUTBOUND_CLICK"}
-        _lowval_plain = {"PAGE_VIEW": "a page-view action", "ENGAGEMENT": "an engagement action",
-                         "DOWNLOAD": "a download action", "OUTBOUND_CLICK": "an outbound-click action"}
-        primary_spammable = [ca for ca in active_actions
-                             if _is_primary(ca) and ca.get("category", "") in spammable_categories]
-        # When the purchase-silent check above fired, it already tells the page-view
-        # story - running this block too would put the same fact on two slides.
-        if primary_spammable and not _purchase_silent:
-            plain = ", ".join(_lowval_plain.get(ca.get("category", ""), "a low-value action")
-                              for ca in primary_spammable)
-            _vols_all = [ca.get("conversions_30d") for ca in primary_spammable]   # all_conversions
-            _recording_site = any((v is not None and v > 0) for v in _vols_all)
-            _all_known_zero = bool(_vols_all) and all((v is not None and v == 0) for v in _vols_all)
-            _attr_low = sum((_attr(ca) or 0) for ca in primary_spammable) if _has_attr else None
-
-            # The genuine lead action currently driving the reported conversions (if any) - used both
-            # to flag a true inversion and, in the softer case, to reassure that the headline number
-            # already reflects real enquiries.
-            _genuine_counting = [ca for ca in active_actions
-                                 if ca.get("category", "") in {"SUBMIT_LEAD_FORM", "LEAD", "REQUEST_QUOTE",
-                                                               "BOOK_APPOINTMENT"} and _is_counting(ca)]
-            _g = max(_genuine_counting,
-                     key=lambda ca: (_attr(ca) if _has_attr else ca.get("conversions_30d")) or 0) \
-                 if _genuine_counting else None
-            _gv = int(round(((_attr(_g) if _has_attr else _g.get("conversions_30d")) or 0))) if _g else 0
-            _g_label = _clean_action_label(_g.get("name")) if _g else ""
-
-            # ACTIVE inflation: low-value actions are actually recording AD-ATTRIBUTED conversions
-            # (or we have no attribution data and they're firing, so we can't rule it out).
-            _active = _recording_site and (not _has_attr or (_attr_low or 0) >= 1)
-            if _active:
-                _use_attr = _has_attr and (_attr_low or 0) >= 1
-                _named = sorted(
-                    [(_clean_action_label(ca.get("name"), _lowval_plain.get(ca.get("category"), "a low-value action")),
-                      (_attr(ca) if _use_attr else ca.get("conversions_30d")) or 0)
-                     for ca in primary_spammable
-                     if ((_attr(ca) if _use_attr else ca.get("conversions_30d")) or 0) > 0],
-                    key=lambda x: x[1], reverse=True)
-                _total_low = int(round(sum(v for _, v in _named)))
-                _egs = ", ".join(f"'{lbl}' ({int(round(v))})" for lbl, v in _named[:3])
-                _attr_word = "ad-attributed " if _use_attr else ""
-                # Inversion only when the genuine action is genuinely NOT primary (truly sidelined).
-                _inv = ""
-                if _g and not _is_primary(_g):
-                    _inv = (f" Worse, your genuine enquiry action ('{_g_label}', {_gv} in 30 days) is NOT set as a "
-                            "primary conversion - so the real lead is not even what bidding optimises towards.")
-                issues.append(
-                    f"Your PRIMARY conversions include low-value website activity that is being counted, not real "
-                    f"enquiries: {_egs} recorded about {_total_low} {_attr_word}'conversions' in the last 30 days - "
-                    f"page scrolls, clicks and page views, not genuine leads.{_inv} Google optimises towards this "
-                    "activity, inflating your reported numbers. Move these to secondary and make the genuine enquiry "
-                    "(form submission) the single primary conversion."
-                )
-                conversions_inflated = True
-                if rag != "red":
-                    rag = "amber_red"
-            elif _recording_site:
-                # Set as primary and firing as SITE events, but ~0 ad-attributed → NOT inflating the
-                # reported/optimised Conversions today (which reflect genuine enquiries). Real setup
-                # risk, but we must not claim the numbers are inflated when they are not.
-                _site_named = sorted(
-                    [(_clean_action_label(ca.get("name"), _lowval_plain.get(ca.get("category"), "a low-value action")),
-                      ca.get("conversions_30d") or 0) for ca in primary_spammable if (ca.get("conversions_30d") or 0) > 0],
-                    key=lambda x: x[1], reverse=True)
-                _egs = ", ".join(f"'{lbl}'" for lbl, _ in _site_named[:3])
-                _g_note = (f" Encouragingly, your reported conversions are currently driven by the genuine enquiry "
-                           f"action ('{_g_label}', {_gv} in 30 days), so the headline numbers are not inflated today."
-                           if _g else "")
-                issues.append(
-                    f"Low-value website actions are set as PRIMARY conversions ({_egs}) and fire often as site "
-                    "events, but they are not currently attributed to your Google Ads clicks, so they are not "
-                    f"inflating your reported Conversions right now.{_g_note} It is still a misconfiguration that "
-                    "points bidding at the wrong goals and would distort your numbers if that traffic grows: move "
-                    "these actions to secondary and keep the genuine form submission as the single primary conversion."
-                )
-                if rag == "green":
-                    rag = "amber"
-            elif _all_known_zero:
-                # Primary but recording nothing at all → a latent misconfiguration, not active harm.
-                issues.append(
-                    f"A low-value action is set as a primary conversion but is recording no conversions in the "
-                    f"last 30 days: {plain}. It isn't skewing bidding right now, but it should be removed or set "
-                    "to secondary so it never can - and a low-value action sitting in the primary 'Conversions' "
-                    "column is a sign the conversion setup needs a tidy-up."
-                )
-                if rag == "green":
-                    rag = "amber"
-            else:
-                # Volume unknown (per-action query unavailable) → stay cautious, don't over-claim.
-                issues.append(
-                    f"Low-value conversion action set as a primary 'Conversions' goal: {plain}. It's worth "
-                    "confirming whether it is currently recording conversions: if it is, Google optimises "
-                    "towards low-value website activity (a page view, not an enquiry) rather than genuine "
-                    "leads. Either way, a low-value action shouldn't sit in the primary 'Conversions' column."
-                )
-                if rag != "red":
-                    rag = "amber_red"
+        # ── Low-value PRIMARY conversions (ticket T4): evidence-based classification.
+        # The classifier grades each low-value-category primary by the strength of the
+        # evidence (see classify_low_value_primary_conversions). Neither the PROVEN nor the
+        # CONFIRMED-ZERO result is ever suppressed by the purchase-silent state - both rest on
+        # established evidence, and a silent purchase tag is a SEPARATE problem (they are two
+        # distinct client findings, and the deck keeps them on two slides). Only the genuinely
+        # UNCERTAIN (Classification 3) case may stand down under purchase-silent, where the
+        # missing purchase evidence can leave us unable to draw a useful client-facing
+        # conclusion. We do not weaken proven or confirmed evidence to keep the deck focused.
+        _lv = classify_low_value_primary_conversions(conversion_actions)
+        if _lv["proven"]:
+            # PROVEN firing: bidding IS learning from the wrong actions - 84/amber_red headline.
+            _proven_detail = _lv["proven"]["detail"]
+            if _purchase_silent:
+                # Two distinct problems that COMPOUND - connect them without repeating the
+                # purchase-tracking recommendation (that finding owns "reconnect the tag").
+                _proven_detail += (
+                    " This compounds the purchase-tracking finding above: genuine purchases "
+                    "are not being recorded while bidding trains on this page activity, so the "
+                    "account is being steered away from real sales on both counts.")
+            issues.append(_proven_detail)
+            conversions_inflated = True
+            if rag != "red":
+                rag = "amber_red"
+        if _lv["zero"]:
+            # CONFIRMED ZERO is established evidence (enabled + primary + clearly low-value +
+            # zero ad-attributed), NOT an unsupported conclusion - so it is emitted regardless
+            # of the purchase-silent state: a minor 35/amber tidy-up for Additional Observations
+            # that never claims bidding learned from it and never calls it broken.
+            issues.append(_lv["zero"]["detail"])
+            if rag == "green":
+                rag = "amber"
+        # Classification 3 (unconfirmed): ALWAYS surfaced as a client-facing informational note,
+        # even under purchase-silent. The tool has found relevant but incomplete evidence, and
+        # the uncertainty must never be silently omitted. The note carries NO severity, NO score
+        # impact and NO RAG impact - it never touches `rag` or `issues`, only the no-score
+        # informational channel the deck shows in Additional Observations. It says what needs
+        # checking and draws no conclusion; it does not call the action broken, inactive,
+        # low-value or bidding-influencing (none of which the evidence proves).
+        informational_notes.extend(_lv["informational"])
 
         # Conversion count type  -  MANY_PER_CLICK on lead gen actions inflates numbers
         lead_categories = {
@@ -1796,6 +1977,9 @@ def score_conversion_tracking(data):
         "rag": rag,
         "headline": _ct_headline(rag, total_conversions, len(conversion_actions)),
         "issues": issues,
+        # Client-facing notes carrying NO score impact (T4 Classification 3: unconfirmed
+        # low-value primaries). generate_narrative surfaces these in Additional Observations.
+        "informational_notes": informational_notes,
         "conversions_inflated": conversions_inflated,
         "revenue_undertracked": [n for n, _ in revenue_undertracked],
         # Purchase actions silent all year while page-view primaries hold the volume:

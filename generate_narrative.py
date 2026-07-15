@@ -1439,6 +1439,16 @@ def generate_narrative(findings: dict, openai_api_key: str, client_name: str = "
     else:
         additional_observations = []
 
+    # ── Informational notes (T4 Classification 3): findings the evidence could not confirm.
+    # They carry NO score impact (they never entered select_top_issues, so they cannot change
+    # the RAG or rank as an issue) but the client should still see them, so append them
+    # VERBATIM as observations - the exact "we could not confirm ... should be checked" wording
+    # is deliberate and must not be re-rolled through the summariser.
+    _info_notes = list((findings.get("conversion_tracking") or {}).get("informational_notes") or [])
+    if _info_notes:
+        print(f"  → {len(_info_notes)} informational note(s) (no score impact) added to observations")
+        additional_observations = list(additional_observations) + _info_notes
+
     overall_rag = overall_rag_from_issues(selected)
 
     # Holistic severity escalation: individual issues can each read "amber", but if the
