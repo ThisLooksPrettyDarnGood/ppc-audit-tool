@@ -21,14 +21,17 @@ nothing converted in the today-anchored 30-day window the engine reads.
 
 What the engine currently does with it, and which ticket flips each one:
 
-  1. Reads the empty 30-day window as broken tracking: severity 122, RED, and tells the
-     client "Tags may be broken or firing incorrectly."                             (T5)
+  1. [T5 LANDED] The empty 30-day window is no longer read as broken tracking. The
+     severity-122 RED and the "tags may be broken" wording are gone; the pause is stated
+     plainly with its exact date, the section headline reads "cannot currently be verified",
+     and with no separate proven Red the dial is Amber, not Red.                     (T5)
   2. [T4 LANDED] The low-value-primary severity inversion is fixed. On THIS paused account
      the honest classification is a confirmed-zero minor tidy-up (severity 35) - nothing
      fired, so we do not claim inflation. The proven-firing 84 headline is exercised
      against real firing evidence in test_low_value_primary.py.                     (T4)
-  3. Headlines missing image extensions (severity 60) on an account whose ads have been
-     switched off for four months.                                                  (T8a)
+  3. [T5 CHECK 2 LANDED] Image extensions are the weakest extension type - now a below-floor
+     minor observation (severity 30), never bundled into the severity-60 finding and never a
+     headline, so they cannot lead once the false Red findings are removed.       (was T8a)
   4. Praises a 9,455-strong negative keyword list on row count alone.               (T8c)
   5. Never tells the reader the account runs Smart Campaigns.                    (T6, T7)
   6. Describes the switched-off March structure in the present tense.              (T8d)
@@ -158,27 +161,40 @@ class CharacterisationOfWrongBehaviour(unittest.TestCase):
     def setUpClass(cls):
         cls.findings, cls.top, cls.ranked = analyse()
 
-    # ── T5 ────────────────────────────────────────────────────────────────────
-    def test_WRONG_paused_account_triggers_the_severity_122_red_zero_conversion_rule(self):
-        """A switched-off account is scored as a broken one, and it sets the RED dial.
+    # ── T5 (LANDED) ─────────────────────────────────────────────────────────
+    def test_T5_the_severity_122_red_broken_tracking_finding_is_gone(self):
+        """T5 has landed. A switched-off account is no longer scored as a broken one.
 
-        WRONG: the only thing we actually know is that the ads are off. T5 fixes this.
+        Zero recorded conversions in an empty window never proves broken tracking, so the
+        severity-122 Red and its "tags may be broken" wording are removed. With no separate
+        proven Red on this paused account, the dial is Amber, not Red. (There is no numerical
+        account score in this tool - severity only orders findings and selects the headline set;
+        the pause note sits at 48, below the 55 floor, and drives no Red.)
         """
-        headline = self.top[0]
-        self.assertEqual(headline["severity"], 122.0)
-        self.assertEqual(headline["rag"], "red")
-        self.assertIn("47 conversion action(s) exist but recorded 0 conversions",
-                      headline["detail"])
-        # And it is what turns the whole deck red.
-        self.assertEqual(A.overall_rag_from_issues(self.top), "red")
+        for i in self.ranked:
+            self.assertNotEqual(i["severity"], 122.0, "the severity-122 Red must be gone")
+            self.assertNotIn("Tags may be broken", i["detail"])
+            self.assertNotIn("firing incorrectly", i["detail"])
+            self.assertNotIn("recorded 0 conversions in the last 30", i["detail"])
+        # The removed 122 was the only Red on this account, so nothing Red survives.
+        self.assertEqual([i for i in self.ranked if i["rag"] == "red"], [])
+        self.assertEqual(A.overall_rag_from_issues(self.top), "amber")
 
-    def test_WRONG_the_wording_tells_the_client_their_tags_may_be_broken(self):
-        """The flagship 'never confidently wrong' violation. T5 fixes this."""
-        headline = self.top[0]["detail"]
-        self.assertIn("Tags may be broken or firing incorrectly", headline)
-        # It does not mention the pause at all - which is the whole problem.
-        self.assertNotIn("paused", headline.lower())
-        self.assertNotIn("2026-03-04", headline)
+    def test_T5_the_pause_is_stated_plainly_and_tracking_is_never_called_broken(self):
+        """The engine now states the pause and its exact date, says the window cannot be
+        assessed, and never claims (or implies) that tracking is broken or healthy."""
+        ct = self.findings["conversion_tracking"]
+        self.assertTrue(ct.get("tracking_unverifiable"))
+        self.assertEqual(ct["headline"], "Conversion tracking cannot currently be verified")
+        self.assertNotIn("broken or missing", ct["headline"])
+        blob = " ".join(ct.get("issues", []))
+        self.assertIn("paused on 4 March 2026", blob)          # exact last-active date, humanised
+        self.assertIn("cannot be assessed reliably", blob)
+        self.assertIn("cannot verify whether conversion tracking", blob)
+        self.assertNotIn("Tags may be broken", blob)
+        # The confidently-wrong "set up lead conversion actions" headline (24 ARE configured,
+        # just idle) no longer fires on the unverifiable window either.
+        self.assertNotIn("lead side of the business is invisible", blob)
 
     # ── T4 (LANDED) ─────────────────────────────────────────────────────────
     def test_T4_low_value_primary_on_a_paused_account_is_a_confirmed_zero_minor(self):
@@ -201,20 +217,24 @@ class CharacterisationOfWrongBehaviour(unittest.TestCase):
         # It never claims bidding learned from these actions during the empty window.
         self.assertNotIn("Bidding will be learning from the wrong actions", low_value["detail"])
 
-    # ── T8a ───────────────────────────────────────────────────────────────────
-    def test_WRONG_missing_image_extensions_score_60_and_reach_the_top_findings(self):
-        """A gate-free rule headlines an account whose ads have been off for 132 days.
+    # ── T5 CHECK 2 (image extensions demoted; supersedes the old T8a WRONG test) ─
+    def test_image_extensions_are_a_minor_observation_never_a_headline(self):
+        """Image extensions are the weakest extension type - a nice-to-have, never a headline.
 
-        Nothing about spend, materiality or account activity gates this rule, so on an
-        account where every money rule is silent it floats up by default. T8a fixes it.
+        Here image extensions were the ONLY missing high-value type, so once the false Red
+        findings were removed they could have floated to #1. They must not: the finding is now a
+        below-floor minor observation, is not in the narrated top set, and did not become the
+        new leader (T5 CHECK 2).
         """
-        extensions = find_issue(self.top, "missing high-value extension types")
-        self.assertIsNotNone(extensions)
-        self.assertEqual(extensions["severity"], 60.0)
-        self.assertGreaterEqual(extensions["severity"], STRONG_FLOOR)
-        self.assertIn("image extensions", extensions["detail"])
-        # It reaches the narrated findings, which is what feeds Key Opportunities.
-        self.assertIn(extensions["detail"], [i["detail"] for i in self.top])
+        # No severity-60 "missing high-value extension types" headline on this account.
+        self.assertIsNone(find_issue(self.top, "missing high-value extension types"))
+        # Image extensions survive only as a minor, below-floor observation with incremental wording.
+        image = find_issue(self.ranked, "Image extensions are a minor extra")
+        self.assertIsNotNone(image, "image extensions should remain a minor recommendation")
+        self.assertEqual(image["severity"], 30.0)
+        self.assertLess(image["severity"], STRONG_FLOOR)
+        self.assertNotIn(image["detail"], [i["detail"] for i in self.top])   # never a headline
+        self.assertNotIn("Image extensions", self.top[0]["detail"])          # did not become the leader
 
     # ── T8c ───────────────────────────────────────────────────────────────────
     def test_WRONG_negative_keywords_are_praised_on_row_count_alone(self):

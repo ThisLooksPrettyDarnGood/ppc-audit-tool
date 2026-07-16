@@ -321,10 +321,20 @@ def analyse_account(data, raw_questionnaire=""):
 # specific needles first. Severity ~ how much a human auditor would lead with it.
 _ISSUE_SIGNATURES = [
     # Critical  -  account fundamentally not working
-    ("No conversion actions found",              130, "red",       "Conversion Tracking"),
-    ("recorded 0 conversions in the last 30",    122, "red",       "Conversion Tracking"),
+    # T5: "No conversion actions are configured" is the ONLY conversion-action-count Red, and
+    # the analyser only emits it when the conversion-action query genuinely SUCCEEDED. The old
+    # severity-122 "recorded 0 conversions ... tags may be broken" Red has been REMOVED: an
+    # empty window (paused / no traffic / a validation-only zero) is never proof of broken
+    # tracking on its own. Zero conversions is non-conclusive at every traffic level.
+    ("No conversion actions are configured",     130, "red",       "Conversion Tracking"),
     ("spent with 0 conversions",                 116, "red",       "Bidding Strategy"),
     ("should be treated as urgent",              112, "red",       "Targeting & Keywords"),  # broad + weak negatives combo
+    # T5 (Conversion Tracking, amber) - an empty or zero-conversion window is a validation
+    # prompt, never a broken-tracking verdict. All amber; none Red; none forced above genuine
+    # problems (the paused/no-traffic needle sits below the 55 headline floor by design).
+    ("recorded no conversions during the review period", 62, "amber", "Conversion Tracking"),  # traffic + zero conv: validate, do not conclude
+    ("PPC performance cannot be assessed reliably",      48, "amber", "Conversion Tracking"),  # paused / no-traffic: unassessable window (below the 55 headline floor)
+    ("could not be retrieved in this audit",             30, "amber", "Conversion Tracking"),  # conversion-action query failed: insufficient evidence, not a conclusion
     # On the cusp
     # ── Low-value PRIMARY conversion classifier (ticket T4). These two needles match the
     # EXACT wordings classify_low_value_primary_conversions() emits (specific, first-match
@@ -383,7 +393,8 @@ _ISSUE_SIGNATURES = [
     ("ran between midnight and 6am",               55, "amber",     "Budget & Coverage"),  # overnight waste (lead gen)
     ("a device that is not converting",            52, "amber",     "Budget & Coverage"),  # device gap
     ("usually comes from an automated feed",       30, "amber",     "Account Structure"),  # SKU-scale structure -> Observations
-    ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions
+    ("missing high-value extension types",         60, "amber",     "Ads & Assets"),       # missing extensions (image excluded - see below)
+    ("Image extensions are a minor extra",         30, "amber",     "Ads & Assets"),       # T5 CHECK 2: nice-to-have, below the 55 headline floor, never leads
     ("Call extensions are not set up",             42, "amber",     "Ads & Assets"),       # ecom: optional, Observation tier (Dan, 13 Jun)
     ("have a LOW score (4 or below)",              54, "amber",     "Ad Rank & Quality"),  # low Quality Score
     # Targeting & keywords
@@ -1298,6 +1309,18 @@ def classify_low_value_primary_conversions(conversion_actions):
     return result
 
 
+def _query_failed(data, *needles):
+    """True when the T1 collector recorded a failure for a fetch whose name matches any needle.
+
+    Used to keep the 'never turn a data gap into a conclusion' rule: a failed or absent query is
+    missing evidence, not proof of a bare account, zero traffic or broken tracking (T5 rule 10)."""
+    for f in (data.get("_query_failures") or []):
+        name = str((f or {}).get("fetch", "")).lower()
+        if any(n.lower() in name for n in needles):
+            return True
+    return False
+
+
 def score_conversion_tracking(data):
     issues = []
     rag = "green"
@@ -1314,21 +1337,99 @@ def score_conversion_tracking(data):
     # low-value primaries hold all the volume - reported revenue/ROAS is then an artifact
     # of their default values, and the dedicated check below owns the whole story.
     _purchase_silent = False
+    # True when the CURRENT window cannot support a live conversion-tracking verdict (paused,
+    # no traffic, or a validation-only zero). Drives the section headline away from
+    # "broken/missing" towards "cannot currently be verified" (T5 rule 7). Never claims broken.
+    tracking_unverifiable = False
     conversion_actions = data.get("conversion_actions", [])
     summary = data.get("account_summary_30d", {})
     total_conversions = summary.get("conversions", 0)
     campaigns = data.get("campaigns", [])
 
+    # ── T5: a paused / zero-traffic account is NOT a broken one ──────────────────────────
+    # Zero recorded conversions never proves broken tracking on its own (rule 1). What an
+    # empty window can support depends on whether the account had any opportunity to convert,
+    # and whether a pause is INDEPENDENTLY evidenced (is_paused is derived from real spend, not
+    # from campaign names). Traffic figures come from the account summary the section already
+    # reads - no new threshold is invented (rule 4).
+    _perf = data.get("performance_summary") or {}
+    _is_paused = bool(_perf.get("is_paused"))
+    _last_active = _perf.get("last_active")
+    _cur_clicks = summary.get("clicks", 0) or 0
+    _cur_spend = summary.get("spend", 0) or 0
+    _cur_impr = summary.get("impressions", 0) or 0
+    _no_traffic = (_cur_clicks == 0 and _cur_spend == 0 and _cur_impr == 0)
+
     if len(conversion_actions) == 0:
-        issues.append("No conversion actions found  -  tracking is not set up.")
-        rag = "red"
-    else:
-        if total_conversions == 0:
+        # An empty conversion-action LIST. The Red "none configured" conclusion needs POSITIVE
+        # evidence that the query actually ran and returned zero: the field must be PRESENT in
+        # the data dict AND no matching query failure recorded. An absent field or a recorded
+        # failure is missing evidence, never proof (rules 6 & 10; CHECK 3) - the absence of a
+        # `_query_failures` entry alone is not enough if the result itself was never captured.
+        _actions_confirmed = ("conversion_actions" in data) and not _query_failed(
+            data, "conversion action", "conversion-action", "conversion_action")
+        if _actions_confirmed:
             issues.append(
-                f"{len(conversion_actions)} conversion action(s) exist but recorded 0 "
-                "conversions in the last 30 days. Tags may be broken or firing incorrectly."
+                "No conversion actions are configured in Google Ads, so the account cannot "
+                "report or optimise towards conversions."
             )
             rag = "red"
+        else:
+            tracking_unverifiable = True
+            issues.append(
+                "The list of conversion actions could not be retrieved in this audit, so whether "
+                "conversion tracking is configured cannot be confirmed. This is a data-collection "
+                "gap, not a finding either way - it is worth re-running the audit or checking access."
+            )
+            if rag == "green":
+                rag = "amber"
+    else:
+        if total_conversions == 0:
+            # Actions EXIST but the window recorded zero conversions. This is never proof of a
+            # broken tag on its own - the window may simply have had no opportunity to convert.
+            tracking_unverifiable = True
+            if _no_traffic:
+                if _is_paused and _last_active:
+                    # Paused, with a reliable last-active date (rule 2). Name the pause and the
+                    # date; do NOT quote the (inflated, part-hidden) action count as if active
+                    # (rule 9); treat pre-pause figures as historical, never current (rule 8).
+                    from datetime import datetime as _pdt
+                    try:
+                        _ldt = _pdt.strptime(_last_active, "%Y-%m-%d")
+                        _la_h = f"{_ldt.day} {_ldt.strftime('%B %Y')}"
+                    except Exception:
+                        _la_h = str(_last_active)
+                    issues.append(
+                        f"The account's campaigns were paused on {_la_h} and have had no live "
+                        "activity since, so there was no ad spend, clicks or conversions in the "
+                        "review period. Current PPC performance cannot be assessed reliably, and "
+                        "because nothing has served recently we cannot verify whether conversion "
+                        "tracking is firing right now either. This is not evidence that tracking is "
+                        "broken - only that the ads are switched off. Any figures from before the "
+                        "pause are historical, not current performance."
+                    )
+                else:
+                    # No traffic, but a pause is NOT independently proven (rule 3). Do not claim a
+                    # pause, and do not guess the cause (budget / billing / policy / eligibility).
+                    issues.append(
+                        "The account generated no meaningful ad traffic in the review period - no "
+                        "spend, clicks or impressions - so current PPC performance cannot be "
+                        "assessed reliably, and whether conversion tracking is firing right now "
+                        "cannot be verified without recent traffic. The available evidence does not "
+                        "show why the ads were not serving, and it is not evidence that tracking is "
+                        "broken."
+                    )
+            else:
+                # Traffic present, zero conversions: an AMBER validation finding, never a broken
+                # conclusion, at ANY traffic level - one or two clicks stays non-conclusive (rule 4).
+                issues.append(
+                    "The account generated ad traffic but recorded no conversions during the "
+                    "review period. This warrants checking both campaign performance and the "
+                    "conversion setup, but the available evidence does not prove that tracking is "
+                    "broken."
+                )
+            if rag == "green":
+                rag = "amber"
         else:
             clicks = summary.get("clicks", 0)
             if clicks > 0:
@@ -1870,9 +1971,16 @@ def score_conversion_tracking(data):
         # recording - quote forms, contact forms and calls are invisible to the account,
         # so bidding chases only the tracked sales and 'improve lead quality' cannot
         # even be measured. (SAIC: 'Both' on the questionnaire, only purchases record.)
+        # T5: stand down when the window itself is unverifiable (paused / no traffic / a
+        # zero-conversion window). "No lead action is recording" is uninformative when NOTHING
+        # recorded at all - the lead actions may be set up fine and simply idle because the ads
+        # are off (the paused fixture has 24 lead actions configured, several enabled+primary).
+        # Recommending "set up lead conversion actions" there would be confidently wrong (rule 1).
+        # Only fire when OTHER conversions did record, so a genuinely dark lead side stands out as
+        # independent evidence rather than an artefact of an empty window.
         _LEAD_CATS = {"LEAD", "CONTACT", "SUBMIT_LEAD_FORM", "BOOK_APPOINTMENT",
                       "REQUEST_QUOTE", "PHONE_CALL_LEAD", "IMPORTED_LEAD"}
-        if data.get("claims_lead_gen"):
+        if data.get("claims_lead_gen") and not tracking_unverifiable:
             _lead_recording = any(_is_counting(ca) for ca in active_actions
                                   if ca.get("category") in _LEAD_CATS)
             if not _lead_recording:
@@ -1975,8 +2083,12 @@ def score_conversion_tracking(data):
 
     return {
         "rag": rag,
-        "headline": _ct_headline(rag, total_conversions, len(conversion_actions)),
+        "headline": _ct_headline(rag, total_conversions, len(conversion_actions),
+                                 tracking_unverifiable),
         "issues": issues,
+        # T5: the current window cannot support a live tracking verdict (paused / no traffic /
+        # validation-only zero). Never a broken claim - drives the "cannot be verified" headline.
+        "tracking_unverifiable": tracking_unverifiable,
         # Client-facing notes carrying NO score impact (T4 Classification 3: unconfirmed
         # low-value primaries). generate_narrative surfaces these in Additional Observations.
         "informational_notes": informational_notes,
@@ -1993,9 +2105,16 @@ def score_conversion_tracking(data):
     }
 
 
-def _ct_headline(rag, conversions, action_count):
+def _ct_headline(rag, conversions, action_count, unverifiable=False):
     if rag == "red":
+        # Only reachable now via an INDEPENDENTLY-PROVEN Red (no conversion actions configured,
+        # or a proven purchase-silent). An empty / paused window no longer sets the section Red,
+        # so definitive "broken/missing" wording only appears when evidence supports it (T5 rule 7).
         return "Conversion tracking is broken or missing"
+    if unverifiable:
+        # Paused / no-traffic / validation-only zero: we cannot see tracking working, but have no
+        # proof it is broken. Never claim broken OR healthy here (T5 rule 7).
+        return "Conversion tracking cannot currently be verified"
     if rag == "amber":
         return "Conversion tracking has gaps that need attention"
     return f"Conversion tracking is set up and recording ({conversions:.0f} conversions, {action_count} actions)"
@@ -4412,8 +4531,11 @@ def score_efficiency(data):
         # sees Search-ad extensions, not PMax images. When PMax asset groups exist the account
         # clearly HAS images, so don't list image extensions as a missing high-value type.
         _has_pmax_images = bool((data.get("audience_signals") or {}).get("pmax_asset_groups"))
-        _img_types = () if _has_pmax_images else ("AD_IMAGE",)
-        missing_universal = [labels[t] for t in (_img_types + ("SITELINK", "CALLOUT", "STRUCTURED_SNIPPET"))
+        # AD_IMAGE is deliberately NOT in this high-value group. Image extensions are the weakest
+        # extension type (Rory's Hampton review) and only ever a nice-to-have, so they are emitted
+        # separately below as a minor, below-floor observation - never bundled into this severity-60
+        # finding and never allowed to headline the account (T5 CHECK 2).
+        missing_universal = [labels[t] for t in ("SITELINK", "CALLOUT", "STRUCTURED_SNIPPET")
                              if t not in present]
         call_missing = "CALL" not in present
         _call_is_core = call_missing and _acct_type in ("lead_gen", "mixed", "unknown")
@@ -4444,6 +4566,17 @@ def score_efficiency(data):
                 "customers book online and never call - so add them only if phone bookings (group visits, "
                 "school trips, accessibility enquiries) are something you actively want to encourage."
             )
+
+        # Image extensions: emitted here as a MINOR, below-floor observation (severity 30) so it can
+        # never headline or move the account's status - only a light incremental recommendation
+        # (T5 CHECK 2). PMax asset groups already carry images, so skip it when those exist.
+        if ("AD_IMAGE" not in present) and not _has_pmax_images:
+            issues.append(
+                "Image extensions are a minor extra worth adding when you have time: a few images on "
+                "your Search ads can lift click-through a little, at no extra cost per click. It is a "
+                "nice-to-have to tidy up, not a priority."
+            )
+            # Deliberately does NOT escalate the section RAG - a nice-to-have must not move status.
 
     if not issues:
         issues.append("Coverage and settings look healthy: location targeting, impression share and ad "

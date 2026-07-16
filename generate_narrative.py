@@ -499,6 +499,49 @@ REC3: <third recommendation>
     return parsed
 
 
+def _overview_lead_context(findings: dict) -> str:
+    """Deterministic directive that makes the Executive Summary LEAD with an unassessable-window
+    context (paused / no traffic) BEFORE interpreting any current-period performance - because a
+    switched-off or dark window changes how every current figure must be read (T5 CHECK 1).
+
+    Keyed off the engine's own `tracking_unverifiable` flag, so it fires in exactly the states the
+    scorer set it (paused, no-traffic-unproven, validation-only zero, unconfirmed actions) and is
+    silent otherwise. Returns "" when the window is assessable.
+    """
+    ct = (findings or {}).get("conversion_tracking") or {}
+    if not ct.get("tracking_unverifiable"):
+        return ""
+    perf = (findings or {}).get("performance_summary") or {}
+    if perf.get("is_paused") and perf.get("last_active"):
+        from datetime import datetime as _dt
+        try:
+            _d = _dt.strptime(perf["last_active"], "%Y-%m-%d")
+            _la = f"{_d.day} {_d.strftime('%B %Y')}"
+        except Exception:
+            _la = str(perf["last_active"])
+        return (
+            f"\n\nCRITICAL CONTEXT - THE ACCOUNT IS PAUSED. Its campaigns were paused on {_la} and "
+            "have had no live activity since. BEFORE interpreting any performance, your FIRST job is "
+            "to make the reader understand this: the EXEC_HEADLINE and the OPENING of "
+            "COMMERCIAL_IMPACT must state plainly that the campaigns have been paused since "
+            f"{_la}, that current PPC performance cannot be assessed reliably, and that current "
+            "conversion tracking cannot be verified without recent traffic. Do NOT call this a "
+            "'decline' or 'collapse' - the ads are switched off. Do NOT describe the account as "
+            "having 'solid foundations' or otherwise read the empty current-period figures as live "
+            "performance; any pre-pause figures are historical only and must be labelled as before "
+            "the pause. Every other finding is secondary background to this pause context."
+        )
+    return (
+        "\n\nCRITICAL CONTEXT - NO MEANINGFUL AD TRAFFIC in the review period (no spend, clicks or "
+        "impressions). BEFORE interpreting any performance, your FIRST job is to state plainly that "
+        "the account generated no meaningful ad traffic, that current PPC performance cannot be "
+        "assessed reliably, and that current conversion tracking cannot be verified without recent "
+        "traffic. Do NOT guess why the ads were not serving (budget, billing, policy or eligibility "
+        "are all unknown), do NOT claim the account was paused, and do NOT read the empty "
+        "current-period figures as live performance."
+    )
+
+
 def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list,
                                  escalation_note: str = "", overall_rag: str = "amber") -> dict:
     """Generates the Executive Summary slide content.
@@ -538,12 +581,16 @@ def _narrative_executive_summary(client: OpenAI, findings: dict, issues: list,
     strengths = findings.get("strengths") or []
     strengths_note = ("\n\nThings the account already does WELL (verified): "
                       + "; ".join(strengths) + ".") if strengths else ""
+    # T5 CHECK 1: when the current window is unassessable (paused / no traffic), the overview
+    # must LEAD with that context before interpreting any performance. Deterministic, so the
+    # directive is testable even though the rendered copy is not.
+    _lead_context = _overview_lead_context(findings)
 
     prompt = f"""
 Write the Executive Summary slide for a Google Ads audit presentation.
 
 Here are the full findings from the audit:
-{issues_detail}{strengths_note}
+{issues_detail}{strengths_note}{_lead_context}
 
 Rules:
 - The headline must be a single punchy sentence  -  maximum 10 words. Name the actual problem, not the section. E.g. "Blind bidding and wasted spend are limiting growth" not "Account tracking and structure need improvement".
